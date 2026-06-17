@@ -1,0 +1,32 @@
+# Build artifacts
+target/
+dist/
+build/
+*.o
+*.a
+*.so
+*.dylib
+edit
+
+# Cargo / Rust
+Cargo.lock
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile.cmake
+
+# Auto-save and crash recovery
+*.swp
+*.swo
+*~
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor session/log files
+.claude/settings.local.json
+.specify/memory/*.log
