@@ -34,7 +34,8 @@ edit [OPTIONS] [FILE...]
 | Key | Action |
 |---|---|
 | `Ctrl+S` | Save current file |
-| `Ctrl+Shift+S` / `F12` | Save As |
+| `Ctrl+Shift+S` | Save As |
+| `F12` | Save As Encoding dialog (select output encoding) |
 | `Ctrl+O` | Open file dialog |
 | `Ctrl+N` | New file |
 | `Ctrl+Q` | Quit (prompts if unsaved changes) |
@@ -110,7 +111,8 @@ edit [OPTIONS] [FILE...]
 - New
 - Open…
 - Save (`Ctrl+S`)
-- Save As… (`F12`)
+- Save As…
+- Save As Encoding… (`F12`) — choose output encoding for this file
 - Close
 - ----
 - Exit (`Ctrl+Q`)

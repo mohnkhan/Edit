@@ -174,5 +174,15 @@ impl Ui {
             frame.render_widget(ratatui::widgets::Clear, dialog_area);
             frame.render_widget(dialog, dialog_area);
         }
+
+        // T015 — Encoding select dialog overlay.
+        if let Some(cursor_idx) = app.pending_encoding_select {
+            use crate::ui::dialog::EncodingSelectDialog;
+            let dialog = EncodingSelectDialog {
+                cursor_idx,
+                theme: app.theme,
+            };
+            frame.render_widget(dialog, size);
+        }
     }
 }

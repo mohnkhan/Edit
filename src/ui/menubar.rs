@@ -56,6 +56,10 @@ static FILE_MENU: &[MenuItem] = &[
         action: Action::SaveAs,
     },
     MenuItem {
+        label: "Save As Encoding...",
+        action: Action::SaveAsEncoding,
+    },
+    MenuItem {
         label: "Exit",
         action: Action::Quit,
     },

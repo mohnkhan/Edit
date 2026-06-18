@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — feature 004: Save-As Encoding Selection UI
+
+### Added
+
+- Save As Encoding dialog (F12 / File › Save As Encoding...): interactive TUI listbox
+  for selecting the output encoding when saving a file (FR-001–FR-013)
+- Supported encodings: UTF-8, UTF-16 LE, UTF-16 BE, CP437, CP850, ISO-8859-1, Windows-1252
+- Dialog pre-selects the buffer's current encoding on open; wraps at list boundaries (FR-006)
+- Confirmed encoding is written atomically (tmp-rename) and status bar shows e.g. "Saved as UTF-16 LE"
+- Selected encoding persists in `buffer.encoding` for all subsequent Ctrl+S saves (FR-009)
+- I/O failure reverts `buffer.encoding` to its pre-dialog value and shows "Save failed: …" (FR-012)
+- Unnamed-buffer path: encoding dialog confirmation stores selection and chains into the
+  existing filename-input flow (US4)
+- `Action::SaveAsEncoding` variant added to the `Action` enum; `F12` bound in default keymap
+- `ENCODING_OPTIONS` constant and `EncodingSelectDialog` widget added to `src/ui/dialog.rs`
+- "Save As Encoding..." entry added to the File pull-down menu in `src/ui/menubar.rs`
+- 7 unit tests in `src/ui/dialog.rs`; 9 unit tests + 2 integration-level tests in `src/app.rs`
+- 6 integration tests in `tests/integration/encoding_select.rs` (UTF-16 LE/BE round-trips,
+  cancel-unchanged, persistence, I/O error revert, unnamed-buffer flow)
+
+---
+
 ## [Unreleased] — feature 003: Session Restore
 
 ### Added

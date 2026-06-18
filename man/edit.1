@@ -57,6 +57,12 @@ Open File menu.
 .TP
 .B Ctrl+F
 Open Find dialog.
+.TP
+.B F12
+Open Save As Encoding dialog.
+Select the output encoding (UTF-8, UTF-16 LE/BE, CP437, CP850, ISO-8859-1, Windows-1252)
+and press Enter to write the file in the chosen encoding.
+Press Escape to cancel without saving.
 .SH ENVIRONMENT
 .TP
 .B EDIT_LOCALE
@@ -74,9 +80,25 @@ Per-user configuration file.
 .TP
 .I $XDG_STATE_HOME/edit/logs/
 Log directory.
+.SH MENUS
+Press
+.B F10
+or
+.B Alt+F
+to open the menu bar.
+.PP
+.B File menu:
+New, Open, Save, Save As, Save As Encoding\&.\&.\&. (F12), Exit.
+.PP
+.B Edit menu:
+Undo, Redo, Cut, Copy, Paste, Select All.
+.PP
+.B Search menu:
+Find, Find Next, Find Previous, Replace.
 .SH ENCODING
 All file I/O is UTF-8 by default. Use \-\-encoding to force a specific encoding.
 Legacy CP437 files are transcoded on read.
+Supported encodings: utf-8, utf-16-le, utf-16-be, cp437, cp850, iso-8859-1, windows-1252.
 .SH AUTHOR
 The edit contributors.
 .SH SEE ALSO
