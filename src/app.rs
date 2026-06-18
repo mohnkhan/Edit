@@ -102,8 +102,19 @@ impl App {
                 .into_iter()
                 .map(|p| {
                     Buffer::open(p.clone(), default_encoding).unwrap_or_else(|e| {
-                        log::error!("Failed to open {:?}: {}", p, e);
-                        Buffer::new_empty()
+                        // New file (NotFound) — open an empty buffer at that path so
+                        // Ctrl+S creates it. All other errors get an untitled buffer.
+                        if matches!(&e, crate::buffer::BufferError::Io(io_err)
+                            if io_err.kind() == io::ErrorKind::NotFound)
+                        {
+                            log::info!("New file: {:?}", p);
+                            let mut buf = Buffer::new_empty();
+                            buf.path = Some(p);
+                            buf
+                        } else {
+                            log::error!("Failed to open {:?}: {}", p, e);
+                            Buffer::new_empty()
+                        }
                     })
                 })
                 .collect()
@@ -258,6 +269,24 @@ impl App {
     // ── Action dispatch ──────────────────────────────────────────────────────
 
     fn handle_action(&mut self, action: Action) -> io::Result<()> {
+        // When the save-before-quit prompt is active, only S / D / C are valid.
+        // All other actions are silently dropped so the prompt stays visible.
+        if self.pending_save_prompt {
+            match &action {
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'S') => {
+                    self.prompt_save_and_quit();
+                }
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'D') => {
+                    self.prompt_discard_and_quit();
+                }
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'C') => {
+                    self.prompt_cancel_quit();
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         match action {
             Action::Quit => self.handle_quit(),
             Action::Resize(w, h) => self.handle_resize(w, h),

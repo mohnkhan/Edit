@@ -3,7 +3,7 @@
 ## Deferred Features
 
 ### Plugin API
-- **Issue**: #TBD
+- **Issue**: #2
 - **Status**: Deferred from v0.1.0
 - **Description**: A plugin API allowing external tools to register custom syntax highlighters,
   key bindings, and menu items.
@@ -14,7 +14,7 @@
 - **Label**: `follow-up`
 
 ### External File Modification Detection
-- **Issue**: #TBD
+- **Issue**: #3
 - **Status**: Deferred from v0.1.0
 - **Description**: Detect when a file opened in the editor is modified by an external process
   (e.g. via `inotify`), and prompt the user to reload or keep their version.
@@ -26,7 +26,7 @@
 - **Label**: `follow-up`
 
 ### Soft-Wrap Mode
-- **Issue**: #TBD
+- **Issue**: #4
 - **Status**: Deferred from v0.1.0
 - **Description**: Optional soft-wrap rendering as an alternative to horizontal scroll.
 - **Why deferred**: DOS EDIT.COM does not support soft-wrap; implementing it faithfully requires
@@ -56,7 +56,7 @@
 - **Label**: `follow-up`
 
 ### Session Restore
-- **Issue**: #TBD
+- **Issue**: #6
 - **Status**: Deferred from v0.1.0
 - **Description**: On startup without file arguments, restore the previous editing session
   (open buffers, cursor positions, split layout).
