@@ -21,7 +21,7 @@ smoke:
 		echo "ERROR: 'expect' not installed — required for smoke tests"; exit 1; fi
 	@for f in tests/smoke/*.exp; do \
 		echo "Running $$f ..."; \
-		expect "$$f" || exit 1; \
+		LC_ALL=C.UTF-8 LANG=C.UTF-8 expect "$$f" || exit 1; \
 	done
 	@echo "All smoke tests passed."
 
