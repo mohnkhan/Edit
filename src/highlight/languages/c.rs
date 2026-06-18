@@ -4,8 +4,8 @@
 
 use std::sync::OnceLock;
 
-use regex::Regex;
 use ratatui::style::{Color, Style};
+use regex::Regex;
 
 use crate::highlight::{Highlighter, Span};
 use crate::ui::theme::CLASSIC;
@@ -69,9 +69,9 @@ impl Highlighter for CHighlighter {
 
     fn highlight(&self, line: &str) -> Vec<Span> {
         let keyword_style = Style::default().fg(CLASSIC.highlight_keyword);
-        let string_style  = Style::default().fg(CLASSIC.highlight_string);
+        let string_style = Style::default().fg(CLASSIC.highlight_string);
         let comment_style = Style::default().fg(CLASSIC.highlight_comment);
-        let number_style  = Style::default().fg(CLASSIC.highlight_number);
+        let number_style = Style::default().fg(CLASSIC.highlight_number);
 
         let mut spans: Vec<Span> = Vec::new();
 
@@ -137,8 +137,12 @@ mod tests {
         let spans = h.highlight("int main(void) {");
         let kw_style = Style::default().fg(CLASSIC.highlight_keyword);
         // Should contain spans for "int" and "void"
-        assert!(spans.iter().any(|s| &"int main(void) {"[s.start..s.end] == "int" && s.style == kw_style));
-        assert!(spans.iter().any(|s| &"int main(void) {"[s.start..s.end] == "void" && s.style == kw_style));
+        assert!(spans
+            .iter()
+            .any(|s| &"int main(void) {"[s.start..s.end] == "int" && s.style == kw_style));
+        assert!(spans
+            .iter()
+            .any(|s| &"int main(void) {"[s.start..s.end] == "void" && s.style == kw_style));
     }
 
     #[test]

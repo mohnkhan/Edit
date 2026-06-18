@@ -20,16 +20,11 @@ use regex::Regex;
 // ---------------------------------------------------------------------------
 
 /// Direction of the next-/prev-match traversal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SearchDirection {
+    #[default]
     Forward,
     Backward,
-}
-
-impl Default for SearchDirection {
-    fn default() -> Self {
-        SearchDirection::Forward
-    }
 }
 
 // ---------------------------------------------------------------------------

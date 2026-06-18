@@ -5,9 +5,7 @@
 
 #![allow(dead_code, unused_variables, unused_imports)]
 
-use crossterm::event::{
-    MouseButton as CtMouseButton, MouseEvent as CtMouseEvent, MouseEventKind,
-};
+use crossterm::event::{MouseButton as CtMouseButton, MouseEvent as CtMouseEvent, MouseEventKind};
 
 use crate::input::keymap::Action;
 
@@ -119,18 +117,19 @@ fn map_button(btn: CtMouseButton) -> MouseButton {
 ///   with a default set of menu label positions.
 /// - All other events return `None` (cursor repositioning handled in T111).
 pub fn handle_mouse(event: NormalizedMouseEvent, menu_row: u16) -> Option<Action> {
-    if event.row == menu_row && event.kind == NormalizedMouseKind::Press
+    if event.row == menu_row
+        && event.kind == NormalizedMouseKind::Press
         && event.button == MouseButton::Left
     {
         // Default menu label positions: (start_col, end_col_exclusive, menu_idx)
         // These mirror the BAR_LABELS in menubar.rs.
         let positions: &[(u16, u16, usize)] = &[
-            (1,  5,  0),  // File    cols 1-4
-            (7,  11, 1),  // Edit    cols 7-10
-            (13, 19, 2),  // Search  cols 13-18
-            (21, 25, 3),  // View    cols 21-24
-            (28, 35, 4),  // Options cols 28-34
-            (37, 41, 5),  // Help    cols 37-40
+            (1, 5, 0),   // File    cols 1-4
+            (7, 11, 1),  // Edit    cols 7-10
+            (13, 19, 2), // Search  cols 13-18
+            (21, 25, 3), // View    cols 21-24
+            (28, 35, 4), // Options cols 28-34
+            (37, 41, 5), // Help    cols 37-40
         ];
         return handle_mouse_menu_click(event, positions);
     }
@@ -177,11 +176,7 @@ mod tests {
 
     #[test]
     fn normalize_down_left() {
-        let ev = make_ct_event(
-            MouseEventKind::Down(CtMouseButton::Left),
-            10,
-            5,
-        );
+        let ev = make_ct_event(MouseEventKind::Down(CtMouseButton::Left), 10, 5);
         let norm = normalize_mouse(ev).expect("should normalise");
         assert_eq!(norm.col, 10);
         assert_eq!(norm.row, 5);
@@ -191,11 +186,7 @@ mod tests {
 
     #[test]
     fn normalize_up_right() {
-        let ev = make_ct_event(
-            MouseEventKind::Up(CtMouseButton::Right),
-            3,
-            7,
-        );
+        let ev = make_ct_event(MouseEventKind::Up(CtMouseButton::Right), 3, 7);
         let norm = normalize_mouse(ev).expect("should normalise");
         assert_eq!(norm.button, MouseButton::Right);
         assert_eq!(norm.kind, NormalizedMouseKind::Release);
@@ -203,11 +194,7 @@ mod tests {
 
     #[test]
     fn normalize_drag_middle() {
-        let ev = make_ct_event(
-            MouseEventKind::Drag(CtMouseButton::Middle),
-            0,
-            0,
-        );
+        let ev = make_ct_event(MouseEventKind::Drag(CtMouseButton::Middle), 0, 0);
         let norm = normalize_mouse(ev).expect("should normalise");
         assert_eq!(norm.button, MouseButton::Middle);
         assert_eq!(norm.kind, NormalizedMouseKind::Drag);

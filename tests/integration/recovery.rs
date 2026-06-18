@@ -39,7 +39,11 @@ fn make_recovery_bytes(path: &str, encoding: &str, timestamp: u64, content: &str
 /// Return a temporary file path that is unique to this test run (does not create the file).
 fn tmp_path(tag: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
-    p.push(format!("edit_recovery_integ_{}_{}", tag, std::process::id()));
+    p.push(format!(
+        "edit_recovery_integ_{}_{}",
+        tag,
+        std::process::id()
+    ));
     p
 }
 
@@ -59,7 +63,10 @@ fn recovery_paths_unique_for_different_files() {
     use edit::buffer::autosave::recovery_path_for;
     let a = recovery_path_for(Path::new("/home/user/a.txt"));
     let b = recovery_path_for(Path::new("/home/user/b.txt"));
-    assert_ne!(a, b, "different paths should produce different recovery paths");
+    assert_ne!(
+        a, b,
+        "different paths should produce different recovery paths"
+    );
 }
 
 #[test]
@@ -79,11 +86,7 @@ fn lock_path_has_lock_extension() {
     use edit::buffer::autosave::lock_path_for;
     let p = lock_path_for(Path::new("/tmp/example.rs"));
     let s = p.to_str().unwrap();
-    assert!(
-        s.ends_with(".lock"),
-        "expected .lock suffix, got: {}",
-        s
-    );
+    assert!(s.ends_with(".lock"), "expected .lock suffix, got: {}", s);
 }
 
 #[test]
@@ -151,7 +154,8 @@ fn parse_recovery_wrong_magic_returns_invalid_format() {
 #[test]
 fn parse_recovery_future_version_returns_unknown_version() {
     use edit::buffer::autosave::{parse_recovery_bytes, RecoveryError};
-    let raw = b"EDIT-RECOVERY-V99\npath: /x\nencoding: utf-8\ntimestamp: 0\ncontent_len: 0\n---\n".to_vec();
+    let raw = b"EDIT-RECOVERY-V99\npath: /x\nencoding: utf-8\ntimestamp: 0\ncontent_len: 0\n---\n"
+        .to_vec();
     let err = parse_recovery_bytes(&raw).unwrap_err();
     assert!(
         matches!(err, RecoveryError::UnknownVersion(_)),
@@ -199,7 +203,10 @@ fn lock_file_create_and_release() {
 
     // Create lock with a fake PID.
     create_lock(&lock_path, 12345).expect("create_lock should succeed");
-    assert!(lock_path.exists(), "lock file should exist after create_lock");
+    assert!(
+        lock_path.exists(),
+        "lock file should exist after create_lock"
+    );
 
     // Read back and verify PID.
     let contents = std::fs::read_to_string(&lock_path).unwrap();
@@ -226,7 +233,7 @@ fn release_lock_nonexistent_is_noop() {
 
 #[test]
 fn write_and_read_recovery_roundtrip() {
-    use edit::buffer::autosave::{read_recovery, write_recovery, AutosaveState};
+    use edit::buffer::autosave::{read_recovery, write_recovery_for_buffer};
     use edit::buffer::Buffer;
 
     // Create a real temp file on disk so Buffer::open works.
@@ -234,8 +241,8 @@ fn write_and_read_recovery_roundtrip() {
     let content = "line one\nline two\nline three\n";
     std::fs::write(&file_path, content).unwrap();
 
-    let mut buf = Buffer::open(&file_path, edit::encoding::EncodingId::Utf8)
-        .expect("open should succeed");
+    let mut buf =
+        Buffer::open(&file_path, edit::encoding::EncodingId::Utf8).expect("open should succeed");
     buf.modified = true;
     buf.autosave.enabled = true;
 
@@ -243,11 +250,14 @@ fn write_and_read_recovery_roundtrip() {
     let recovery_path = tmp_path("recovery_roundtrip.recovery");
     buf.autosave.recovery_path = recovery_path.clone();
 
-    // Write the recovery file.
-    write_recovery(&buf, &mut buf.autosave).expect("write_recovery should succeed");
+    // Use the convenience wrapper that takes &mut Buffer to avoid split-borrow issues.
+    write_recovery_for_buffer(&mut buf, 0);
 
     // Verify the file exists.
-    assert!(recovery_path.exists(), "recovery file should have been written");
+    assert!(
+        recovery_path.exists(),
+        "recovery file should have been written"
+    );
 
     // Read it back and verify round-trip.
     let data = read_recovery(&recovery_path).expect("read_recovery should succeed");
@@ -361,12 +371,8 @@ fn recovery_file_found_on_reopen_after_crash() {
     let state = AutosaveState::for_path(&abs_path, true, 5);
 
     // Write a recovery file.
-    let recovery_bytes = make_recovery_bytes(
-        abs_path.to_str().unwrap(),
-        "utf-8",
-        1_700_000_000,
-        content,
-    );
+    let recovery_bytes =
+        make_recovery_bytes(abs_path.to_str().unwrap(), "utf-8", 1_700_000_000, content);
     std::fs::create_dir_all(state.recovery_path.parent().unwrap()).ok();
     std::fs::write(&state.recovery_path, &recovery_bytes).unwrap();
 
@@ -385,8 +391,8 @@ fn recovery_file_found_on_reopen_after_crash() {
     match status {
         LockStatus::StaleRecovery => {
             // Good — read and verify recovery content.
-            let data =
-                edit::buffer::autosave::read_recovery(&state.recovery_path).expect("parse recovery");
+            let data = edit::buffer::autosave::read_recovery(&state.recovery_path)
+                .expect("parse recovery");
             assert_eq!(data.content, content);
         }
         LockStatus::OtherSessionActive(pid) => {

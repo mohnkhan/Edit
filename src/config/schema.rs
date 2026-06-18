@@ -209,7 +209,9 @@ mod tests {
         let mut original = Config::default();
         let mut cloned = original.clone();
         cloned.theme = "dark".to_owned();
-        original.keybindings.insert("ctrl+z".to_owned(), "undo".to_owned());
+        original
+            .keybindings
+            .insert("ctrl+z".to_owned(), "undo".to_owned());
         // Mutations are independent.
         assert_eq!(original.theme, "classic");
         assert!(cloned.keybindings.is_empty());

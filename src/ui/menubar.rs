@@ -39,48 +39,107 @@ pub struct MenuItem {
 
 /// File menu items.
 static FILE_MENU: &[MenuItem] = &[
-    MenuItem { label: "New",     action: Action::Noop    },
-    MenuItem { label: "Open",    action: Action::Open    },
-    MenuItem { label: "Save",    action: Action::Save    },
-    MenuItem { label: "Save As", action: Action::SaveAs  },
-    MenuItem { label: "Exit",    action: Action::Quit    },
+    MenuItem {
+        label: "New",
+        action: Action::Noop,
+    },
+    MenuItem {
+        label: "Open",
+        action: Action::Open,
+    },
+    MenuItem {
+        label: "Save",
+        action: Action::Save,
+    },
+    MenuItem {
+        label: "Save As",
+        action: Action::SaveAs,
+    },
+    MenuItem {
+        label: "Exit",
+        action: Action::Quit,
+    },
 ];
 
 /// Edit menu items.
 static EDIT_MENU: &[MenuItem] = &[
-    MenuItem { label: "Undo",       action: Action::Undo      },
-    MenuItem { label: "Redo",       action: Action::Redo      },
-    MenuItem { label: "Cut",        action: Action::Cut       },
-    MenuItem { label: "Copy",       action: Action::Copy      },
-    MenuItem { label: "Paste",      action: Action::Paste     },
-    MenuItem { label: "Select All", action: Action::SelectAll },
+    MenuItem {
+        label: "Undo",
+        action: Action::Undo,
+    },
+    MenuItem {
+        label: "Redo",
+        action: Action::Redo,
+    },
+    MenuItem {
+        label: "Cut",
+        action: Action::Cut,
+    },
+    MenuItem {
+        label: "Copy",
+        action: Action::Copy,
+    },
+    MenuItem {
+        label: "Paste",
+        action: Action::Paste,
+    },
+    MenuItem {
+        label: "Select All",
+        action: Action::SelectAll,
+    },
 ];
 
 /// Search menu items.
 static SEARCH_MENU: &[MenuItem] = &[
-    MenuItem { label: "Find",         action: Action::Find        },
-    MenuItem { label: "Find Next",    action: Action::FindNext    },
-    MenuItem { label: "Find Prev",    action: Action::FindPrev    },
-    MenuItem { label: "Find Replace", action: Action::FindReplace },
+    MenuItem {
+        label: "Find",
+        action: Action::Find,
+    },
+    MenuItem {
+        label: "Find Next",
+        action: Action::FindNext,
+    },
+    MenuItem {
+        label: "Find Prev",
+        action: Action::FindPrev,
+    },
+    MenuItem {
+        label: "Find Replace",
+        action: Action::FindReplace,
+    },
 ];
 
 /// View menu items.
 static VIEW_MENU: &[MenuItem] = &[
-    MenuItem { label: "Split View",        action: Action::SplitView        },
-    MenuItem { label: "Next Buffer",       action: Action::NextBuffer       },
-    MenuItem { label: "Prev Buffer",       action: Action::PrevBuffer       },
-    MenuItem { label: "Toggle Line Nos",   action: Action::ToggleLineNumbers },
+    MenuItem {
+        label: "Split View",
+        action: Action::SplitView,
+    },
+    MenuItem {
+        label: "Next Buffer",
+        action: Action::NextBuffer,
+    },
+    MenuItem {
+        label: "Prev Buffer",
+        action: Action::PrevBuffer,
+    },
+    MenuItem {
+        label: "Toggle Line Nos",
+        action: Action::ToggleLineNumbers,
+    },
 ];
 
 /// Options menu items.
-static OPTIONS_MENU: &[MenuItem] = &[
-    MenuItem { label: "Toggle Highlight", action: Action::ToggleHighlight },
-];
+static OPTIONS_MENU: &[MenuItem] = &[MenuItem {
+    label: "Toggle Highlight",
+    action: Action::ToggleHighlight,
+}];
 
 /// Help menu items.
-static HELP_MENU: &[MenuItem] = &[
-    MenuItem { label: "Help", action: Action::Help },
-];
+static HELP_MENU: &[MenuItem] = &[MenuItem {
+    label: "Help",
+    action: Action::Help,
+}];
 
 /// All six menus in display order. Index matches `MenuBarState::open_menu(idx)`.
 static ALL_MENUS: &[&[MenuItem]] = &[
@@ -107,12 +166,30 @@ struct BarLabel {
 ///
 /// Positions match the EDIT.COM layout (0-based within the bar).
 static BAR_LABELS: &[BarLabel] = &[
-    BarLabel { label: "File",    col: 1  },
-    BarLabel { label: "Edit",    col: 7  },
-    BarLabel { label: "Search",  col: 13 },
-    BarLabel { label: "View",    col: 21 },
-    BarLabel { label: "Options", col: 28 },
-    BarLabel { label: "Help",    col: 37 },
+    BarLabel {
+        label: "File",
+        col: 1,
+    },
+    BarLabel {
+        label: "Edit",
+        col: 7,
+    },
+    BarLabel {
+        label: "Search",
+        col: 13,
+    },
+    BarLabel {
+        label: "View",
+        col: 21,
+    },
+    BarLabel {
+        label: "Options",
+        col: 28,
+    },
+    BarLabel {
+        label: "Help",
+        col: 37,
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -181,10 +258,7 @@ impl MenuBarState {
                 };
             }
             MenuState::DropDown { top_idx, item_idx } => {
-                let item_count = ALL_MENUS
-                    .get(top_idx)
-                    .map(|m| m.len())
-                    .unwrap_or(1);
+                let item_count = ALL_MENUS.get(top_idx).map(|m| m.len()).unwrap_or(1);
                 self.state = MenuState::DropDown {
                     top_idx,
                     item_idx: (item_idx + 1) % item_count,
@@ -201,20 +275,14 @@ impl MenuBarState {
         match self.state {
             MenuState::Inactive => {}
             MenuState::TopActive(top_idx) => {
-                let item_count = ALL_MENUS
-                    .get(top_idx)
-                    .map(|m| m.len())
-                    .unwrap_or(1);
+                let item_count = ALL_MENUS.get(top_idx).map(|m| m.len()).unwrap_or(1);
                 self.state = MenuState::DropDown {
                     top_idx,
                     item_idx: item_count.saturating_sub(1),
                 };
             }
             MenuState::DropDown { top_idx, item_idx } => {
-                let item_count = ALL_MENUS
-                    .get(top_idx)
-                    .map(|m| m.len())
-                    .unwrap_or(1);
+                let item_count = ALL_MENUS.get(top_idx).map(|m| m.len()).unwrap_or(1);
                 let new_idx = if item_idx == 0 {
                     item_count.saturating_sub(1)
                 } else {
@@ -287,7 +355,7 @@ impl<'a> Widget for MenuBarWidget<'a> {
             .bg(self.theme.menubar_bg);
 
         let selected_style = Style::default()
-            .fg(self.theme.menubar_bg)  // invert fg/bg for selected top label
+            .fg(self.theme.menubar_bg) // invert fg/bg for selected top label
             .bg(self.theme.menu_selected_bg);
 
         let y = area.top();
@@ -335,10 +403,7 @@ impl<'a> Widget for MenuBarWidget<'a> {
 
             // Compute the dropdown column: align with the bar label's start col,
             // clamping so the dropdown doesn't run off the right edge.
-            let drop_col: u16 = BAR_LABELS
-                .get(top_idx)
-                .map(|bl| bl.col)
-                .unwrap_or(0);
+            let drop_col: u16 = BAR_LABELS.get(top_idx).map(|bl| bl.col).unwrap_or(0);
 
             // Dropdown width: widest item label + 2 spaces of padding.
             let content_width: u16 = menu_items
@@ -352,8 +417,7 @@ impl<'a> Widget for MenuBarWidget<'a> {
             let drop_height: u16 = menu_items.len() as u16 + 2;
 
             // Clamp dropdown horizontally so it doesn't overflow the terminal.
-            let start_col: u16 = drop_col
-                .min(area.width.saturating_sub(content_width));
+            let start_col: u16 = drop_col.min(area.width.saturating_sub(content_width));
 
             // The dropdown starts on row 1 (row 0 is the menu bar itself),
             // but only if there are rows below the bar area.

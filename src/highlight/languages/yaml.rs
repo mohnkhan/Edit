@@ -4,8 +4,8 @@
 
 use std::sync::OnceLock;
 
-use regex::Regex;
 use ratatui::style::{Color, Style};
+use regex::Regex;
 
 use crate::highlight::{Highlighter, Span};
 use crate::ui::theme::CLASSIC;
@@ -62,9 +62,7 @@ fn re_boolean_null() -> &'static Regex {
 
 fn re_number() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"\b[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?\b").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"\b[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?\b").unwrap())
 }
 
 fn re_anchor_alias() -> &'static Regex {
@@ -91,9 +89,9 @@ impl Highlighter for YamlHighlighter {
 
     fn highlight(&self, line: &str) -> Vec<Span> {
         let keyword_style = Style::default().fg(CLASSIC.highlight_keyword);
-        let string_style  = Style::default().fg(CLASSIC.highlight_string);
+        let string_style = Style::default().fg(CLASSIC.highlight_string);
         let comment_style = Style::default().fg(CLASSIC.highlight_comment);
-        let number_style  = Style::default().fg(CLASSIC.highlight_number);
+        let number_style = Style::default().fg(CLASSIC.highlight_number);
 
         let mut candidates: Vec<(usize, usize, Style)> = Vec::new();
 
@@ -185,7 +183,9 @@ mod tests {
         let line = "name: Alice";
         let spans = h.highlight(line);
         let kw_style = Style::default().fg(CLASSIC.highlight_keyword);
-        assert!(spans.iter().any(|s| &line[s.start..s.end] == "name" && s.style == kw_style));
+        assert!(spans
+            .iter()
+            .any(|s| &line[s.start..s.end] == "name" && s.style == kw_style));
     }
 
     #[test]
@@ -202,7 +202,9 @@ mod tests {
         let line = "enabled: true";
         let spans = h.highlight(line);
         let num_style = Style::default().fg(CLASSIC.highlight_number);
-        assert!(spans.iter().any(|s| &line[s.start..s.end] == "true" && s.style == num_style));
+        assert!(spans
+            .iter()
+            .any(|s| &line[s.start..s.end] == "true" && s.style == num_style));
     }
 
     #[test]

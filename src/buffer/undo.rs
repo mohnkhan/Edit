@@ -285,17 +285,26 @@ mod tests {
         let mut stack = UndoStack::new();
 
         rope.insert_str(0, "a");
-        stack.push(EditOp::Insert { at: 0, text: "a".into() });
+        stack.push(EditOp::Insert {
+            at: 0,
+            text: "a".into(),
+        });
 
         rope.insert_str(1, "b");
-        stack.push(EditOp::Insert { at: 1, text: "b".into() });
+        stack.push(EditOp::Insert {
+            at: 1,
+            text: "b".into(),
+        });
 
         stack.undo(&mut rope); // undo "b"
         assert_eq!(stack.redo_depth(), 1);
 
         // New edit should clear the redo branch.
         rope.insert_str(1, "c");
-        stack.push(EditOp::Insert { at: 1, text: "c".into() });
+        stack.push(EditOp::Insert {
+            at: 1,
+            text: "c".into(),
+        });
 
         assert_eq!(stack.redo_depth(), 0);
         assert_eq!(stack.undo_depth(), 2);
@@ -316,8 +325,14 @@ mod tests {
         // rope = "a"
 
         stack.push(EditOp::Composite(vec![
-            EditOp::Insert { at: 0, text: "ab".into() },
-            EditOp::Delete { at: 1, text: "b".into() },
+            EditOp::Insert {
+                at: 0,
+                text: "ab".into(),
+            },
+            EditOp::Delete {
+                at: 1,
+                text: "b".into(),
+            },
         ]));
 
         stack.undo(&mut rope);
@@ -334,8 +349,14 @@ mod tests {
         rope.delete_range(1..2);
 
         stack.push(EditOp::Composite(vec![
-            EditOp::Insert { at: 0, text: "ab".into() },
-            EditOp::Delete { at: 1, text: "b".into() },
+            EditOp::Insert {
+                at: 0,
+                text: "ab".into(),
+            },
+            EditOp::Delete {
+                at: 1,
+                text: "b".into(),
+            },
         ]));
 
         stack.undo(&mut rope); // rope = ""
@@ -359,7 +380,10 @@ mod tests {
         let mut rope = rope_with("");
         let mut stack = UndoStack::new();
         rope.insert_str(0, "x");
-        stack.push(EditOp::Insert { at: 0, text: "x".into() });
+        stack.push(EditOp::Insert {
+            at: 0,
+            text: "x".into(),
+        });
         // No undo done — redo branch is empty.
         assert!(stack.redo(&mut rope).is_none());
     }

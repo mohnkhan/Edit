@@ -1,7 +1,7 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.1.0
+**Version**: 0.2.0 (dev — feature 002 in progress)
 **Last updated**: 2026-06-18
 
 ## Implementation Status
@@ -10,6 +10,10 @@
 |---|---|---|
 | US1 | Basic File Editing (open, navigate, edit, save, quit) | Complete |
 | US2 | UTF-8/Unicode support, CP437/CP850/ISO-8859-1/Windows-1252 transcoding | Complete |
+| F002-US1 | UTF-16 LE/BE auto-detect (BOM sniffing) | Complete |
+| F002-US2 | UTF-16 LE/BE decode/encode with full round-trip and surrogate-pair support | Complete |
+| F002-US3 | `--encoding utf-16-le/be` CLI aliases via `encoding_from_str()` | Complete |
+| F002-US4 | Save-As encoding selection UI (interactive dialog) | Deferred (#9) |
 | F003-US1 | Session restore: write session on clean exit; TUI restore dialog on relaunch | Complete |
 | F003-US2 | Handle missing/unreadable session files gracefully; status-bar warning | Complete |
 | F003-US3 | `--no-session` CLI flag suppresses restore prompt | Complete |

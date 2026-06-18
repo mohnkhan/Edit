@@ -4,8 +4,8 @@
 
 use std::sync::OnceLock;
 
-use regex::Regex;
 use ratatui::style::{Color, Modifier, Style};
+use regex::Regex;
 
 use crate::highlight::{Highlighter, Span};
 use crate::ui::theme::CLASSIC;
@@ -70,11 +70,11 @@ impl Highlighter for MarkdownHighlighter {
 
     fn highlight(&self, line: &str) -> Vec<Span> {
         // keyword color  → headings, fenced-code delimiters, block-quotes
-        let heading_style   = Style::default().fg(CLASSIC.highlight_keyword);
+        let heading_style = Style::default().fg(CLASSIC.highlight_keyword);
         // string color   → bold text, links
-        let bold_style      = Style::default().fg(CLASSIC.highlight_string);
+        let bold_style = Style::default().fg(CLASSIC.highlight_string);
         // number color   → italic text (dim)
-        let italic_style    = Style::default().fg(CLASSIC.highlight_number);
+        let italic_style = Style::default().fg(CLASSIC.highlight_number);
         // comment color  → inline code spans
         let code_span_style = Style::default().fg(CLASSIC.highlight_comment);
 
@@ -123,7 +123,11 @@ impl Highlighter for MarkdownHighlighter {
         for (start, end, style) in candidates {
             if start >= last_end && start < end {
                 let clamped_end = end.min(line.len());
-                spans.push(Span { start, end: clamped_end, style });
+                spans.push(Span {
+                    start,
+                    end: clamped_end,
+                    style,
+                });
                 last_end = clamped_end;
             }
         }

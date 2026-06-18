@@ -14,7 +14,7 @@ edit [OPTIONS] [FILE...]
 | Flag | Description |
 |---|---|
 | `FILE...` | One or more files to open (multi-file editing, US6) |
-| `--encoding <ENC>` | Override file encoding: `utf-8`, `cp437`, `cp850`, `iso-8859-1`, `windows-1252` |
+| `--encoding <ENC>` | Override file encoding: `utf-8`, `cp437`, `cp850`, `iso-8859-1`, `windows-1252`, `utf-16-le`, `utf-16-be`, `utf-16` |
 | `--theme <NAME>` | Override theme: `classic`, `high-contrast`, `plain` |
 | `--line-numbers` | Enable line numbers in the gutter |
 | `--no-highlight` | Disable syntax highlighting |
@@ -150,6 +150,8 @@ edit [OPTIONS] [FILE...]
 | Encoding | Read | Write | Notes |
 |---|---|---|---|
 | UTF-8 | Yes | Yes | Default; BOM stripped on read |
+| UTF-16 LE | Yes | Yes | Auto-detected by BOM (`FF FE`); BOM written on encode |
+| UTF-16 BE | Yes | Yes | Auto-detected by BOM (`FE FF`); BOM written on encode |
 | CP437 | Yes | Yes | DOS code page 437; `--legacy-cp437` flag |
 | CP850 | Yes | Yes | DOS code page 850 |
 | ISO-8859-1 | Yes | Yes | Latin-1 |

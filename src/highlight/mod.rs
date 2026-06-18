@@ -56,21 +56,19 @@ pub trait Highlighter: Send + Sync {
 /// Returns `None` when the extension is unrecognised or absent.
 pub fn detect_highlighter(path: &Path) -> Option<Box<dyn Highlighter>> {
     match path.extension().and_then(|e| e.to_str()) {
-        Some("c") | Some("h") => {
-            Some(Box::new(crate::highlight::languages::c::CHighlighter))
-        }
-        Some("py") => {
-            Some(Box::new(crate::highlight::languages::python::PythonHighlighter))
-        }
-        Some("sh") | Some("bash") => {
-            Some(Box::new(crate::highlight::languages::shell::ShellHighlighter))
-        }
+        Some("c") | Some("h") => Some(Box::new(crate::highlight::languages::c::CHighlighter)),
+        Some("py") => Some(Box::new(
+            crate::highlight::languages::python::PythonHighlighter,
+        )),
+        Some("sh") | Some("bash") => Some(Box::new(
+            crate::highlight::languages::shell::ShellHighlighter,
+        )),
         Some("yaml") | Some("yml") => {
             Some(Box::new(crate::highlight::languages::yaml::YamlHighlighter))
         }
-        Some("md") => {
-            Some(Box::new(crate::highlight::languages::markdown::MarkdownHighlighter))
-        }
+        Some("md") => Some(Box::new(
+            crate::highlight::languages::markdown::MarkdownHighlighter,
+        )),
         _ => None,
     }
 }

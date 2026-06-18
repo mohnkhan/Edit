@@ -91,7 +91,7 @@ impl From<std::io::Error> for BufferError {
 /// A cursor position within the buffer.
 ///
 /// All coordinates are zero-based.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CursorPos {
     /// Zero-based line index.
     pub line: usize,
@@ -107,11 +107,7 @@ impl CursorPos {
     /// `gcol`.
     ///
     /// Returns 0 if `gcol` is 0 or if the line is empty.
-    pub fn visual_col_from_grapheme_col(
-        rope: &EditorRope,
-        line: usize,
-        gcol: usize,
-    ) -> usize {
+    pub fn visual_col_from_grapheme_col(rope: &EditorRope, line: usize, gcol: usize) -> usize {
         if gcol == 0 {
             return 0;
         }
@@ -119,20 +115,11 @@ impl CursorPos {
         line_str
             .graphemes(true)
             .take(gcol)
-            .map(|g| UnicodeWidthStr::width(g))
+            .map(UnicodeWidthStr::width)
             .sum()
     }
 }
 
-impl Default for CursorPos {
-    fn default() -> Self {
-        CursorPos {
-            line: 0,
-            grapheme_col: 0,
-            visual_col: 0,
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Selection — T022
@@ -167,8 +154,7 @@ impl Selection {
     /// Returns `true` if the selection is empty (anchor and active are at the
     /// same line and grapheme column).
     pub fn is_empty(&self) -> bool {
-        self.anchor.line == self.active.line
-            && self.anchor.grapheme_col == self.active.grapheme_col
+        self.anchor.line == self.active.line && self.anchor.grapheme_col == self.active.grapheme_col
     }
 }
 
@@ -448,7 +434,10 @@ mod tests {
     fn ordered_range_forward_selection() {
         let a = make_cursor(0, 2);
         let b = make_cursor(1, 4);
-        let sel = Selection { anchor: a, active: b };
+        let sel = Selection {
+            anchor: a,
+            active: b,
+        };
         let (lo, hi) = sel.ordered_range();
         assert_eq!((lo.line, lo.grapheme_col), (0, 2));
         assert_eq!((hi.line, hi.grapheme_col), (1, 4));
@@ -458,7 +447,10 @@ mod tests {
     fn ordered_range_backward_selection() {
         let a = make_cursor(3, 7);
         let b = make_cursor(1, 2);
-        let sel = Selection { anchor: a, active: b };
+        let sel = Selection {
+            anchor: a,
+            active: b,
+        };
         let (lo, hi) = sel.ordered_range();
         assert_eq!((lo.line, lo.grapheme_col), (1, 2));
         assert_eq!((hi.line, hi.grapheme_col), (3, 7));

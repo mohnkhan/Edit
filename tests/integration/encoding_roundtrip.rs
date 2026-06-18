@@ -32,18 +32,12 @@ fn roundtrip(bytes: &[u8], enc: EncodingId) {
 /// ISO-8859-1, and Windows-1252.  Round-tripping them through any of these
 /// encodings must produce byte-for-byte identical output.
 const ASCII_PRINTABLE: &[u8] = &[
-    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
-    0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
-    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
-    0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
-    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
-    0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
-    0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57,
-    0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
-    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67,
-    0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
-    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77,
-    0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E,
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
+    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
+    0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F,
+    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
+    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E,
 ];
 
 #[test]
@@ -157,6 +151,67 @@ fn windows1252_via_encoding_from_str() {
     assert_eq!(enc, EncodingId::Windows1252);
     let bytes: &[u8] = b"Hello";
     roundtrip(bytes, enc);
+}
+
+// ── UTF-16 LE: file-based round-trips ────────────────────────────────────────
+
+/// Open the UTF-16 LE with BOM fixture, decode to UTF-8, re-encode, and
+/// assert the output is byte-identical to the original.
+#[test]
+fn utf16le_bom_file_roundtrip() {
+    let bytes = include_bytes!("../fixtures/utf16le_bom.bin");
+    roundtrip(bytes, EncodingId::Utf16Le);
+}
+
+/// Open the UTF-16 BE with BOM fixture and verify byte-identical round-trip.
+#[test]
+fn utf16be_bom_file_roundtrip() {
+    let bytes = include_bytes!("../fixtures/utf16be_bom.bin");
+    roundtrip(bytes, EncodingId::Utf16Be);
+}
+
+/// UTF-16 LE file containing a surrogate pair (earth globe emoji U+1F30D)
+/// must round-trip without corruption.
+#[test]
+fn utf16le_surrogate_pair_file_roundtrip() {
+    let bytes = include_bytes!("../fixtures/utf16le_surrogate.bin");
+    roundtrip(bytes, EncodingId::Utf16Le);
+}
+
+/// BOM-less UTF-16 LE file decoded with forced encoding must yield correct
+/// UTF-8 text. No round-trip check here — encoding always writes a BOM.
+#[test]
+fn utf16le_nobom_decode_via_forced_encoding() {
+    let bytes = include_bytes!("../fixtures/utf16le_nobom.bin");
+    let enc = encoding_from_str("utf-16-le");
+    assert_eq!(enc, EncodingId::Utf16Le);
+    let text = edit::encoding::decode(bytes, enc).expect("decode must succeed");
+    assert_eq!(text, "BOM-less LE file");
+}
+
+/// Verify detect_encoding correctly identifies the UTF-16 LE BOM fixture.
+#[test]
+fn utf16le_bom_auto_detected() {
+    let bytes = include_bytes!("../fixtures/utf16le_bom.bin");
+    let enc = edit::encoding::detect_encoding(bytes);
+    assert_eq!(enc, EncodingId::Utf16Le);
+}
+
+/// Verify detect_encoding correctly identifies the UTF-16 BE BOM fixture.
+#[test]
+fn utf16be_bom_auto_detected() {
+    let bytes = include_bytes!("../fixtures/utf16be_bom.bin");
+    let enc = edit::encoding::detect_encoding(bytes);
+    assert_eq!(enc, EncodingId::Utf16Be);
+}
+
+/// Verify encoding_from_str aliases resolve correctly for integration use.
+#[test]
+fn utf16_aliases_via_encoding_from_str() {
+    assert_eq!(encoding_from_str("utf-16-le"), EncodingId::Utf16Le);
+    assert_eq!(encoding_from_str("utf-16-be"), EncodingId::Utf16Be);
+    assert_eq!(encoding_from_str("utf-16"), EncodingId::Utf16Le);
+    assert_eq!(encoding_from_str("UTF16BE"), EncodingId::Utf16Be);
 }
 
 // ── encoding_from_str: parsing ────────────────────────────────────────────────

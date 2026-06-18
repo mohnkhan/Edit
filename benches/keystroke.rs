@@ -35,7 +35,12 @@ fn bench_decode_utf8(c: &mut Criterion) {
 fn bench_decode_windows1252(c: &mut Criterion) {
     use edit::encoding::{decode, EncodingId};
     // Windows-1252 compatible bytes (pure ASCII portion)
-    let bytes: Vec<u8> = b"Hello, World! ".iter().cycle().copied().take(10_000).collect();
+    let bytes: Vec<u8> = b"Hello, World! "
+        .iter()
+        .cycle()
+        .copied()
+        .take(10_000)
+        .collect();
     c.bench_function("decode_windows1252", |b| {
         b.iter(|| decode(&bytes, EncodingId::Windows1252))
     });

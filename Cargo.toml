@@ -37,9 +37,24 @@ criterion = { version = "0.5", features = ["html_reports"] }
 serde_json = "1"
 
 [[test]]
+name = "encoding_roundtrip"
+path = "tests/integration/encoding_roundtrip.rs"
+
+[[test]]
+name = "file_io"
+path = "tests/integration/file_io.rs"
+
+[[test]]
+name = "recovery"
+path = "tests/integration/recovery.rs"
+
+[[test]]
+name = "stress"
+path = "tests/integration/stress.rs"
+
+[[test]]
 name = "session"
 path = "tests/integration/session.rs"
-
 
 [[bench]]
 name = "startup"

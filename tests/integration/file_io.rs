@@ -107,7 +107,7 @@ fn read_only_flag_accepted_by_cli() {
     fs::write(&path, b"original content\n").expect("could not write temp file");
 
     let status = Command::new(editor_bin())
-        .args(["--help"])          // non-interactive; just checks flag parsing
+        .args(["--help"]) // non-interactive; just checks flag parsing
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -184,7 +184,10 @@ fn encoding_roundtrip_utf8_interactive() {
     //   send "\x13\x11"   (Ctrl+S to save, Ctrl+Q to quit, no edits)
     //   assert fs::read(&path) == utf8_content.as_bytes()
     let after = fs::read_to_string(&path).unwrap_or_default();
-    assert_eq!(after, utf8_content, "UTF-8 content changed after round-trip");
+    assert_eq!(
+        after, utf8_content,
+        "UTF-8 content changed after round-trip"
+    );
 
     cleanup(&path);
 }
@@ -202,12 +205,16 @@ fn line_ending_lf_no_crlf_in_source() {
     // Explicitly write LF-only bytes.
     let lf_content = b"line one\nline two\nline three\n";
     let mut file = fs::File::create(&path).expect("could not create temp file");
-    file.write_all(lf_content).expect("could not write LF content");
+    file.write_all(lf_content)
+        .expect("could not write LF content");
     drop(file);
 
     let raw_bytes = fs::read(&path).expect("could not read temp file");
     let has_crlf = raw_bytes.windows(2).any(|w| w == b"\r\n");
-    assert!(!has_crlf, "test precondition failed: LF-only file has CRLF bytes");
+    assert!(
+        !has_crlf,
+        "test precondition failed: LF-only file has CRLF bytes"
+    );
 
     cleanup(&path);
 }
@@ -245,12 +252,16 @@ fn line_ending_crlf_in_source() {
     // Explicitly write CRLF bytes.
     let crlf_content = b"line one\r\nline two\r\nline three\r\n";
     let mut file = fs::File::create(&path).expect("could not create temp file");
-    file.write_all(crlf_content).expect("could not write CRLF content");
+    file.write_all(crlf_content)
+        .expect("could not write CRLF content");
     drop(file);
 
     let raw_bytes = fs::read(&path).expect("could not read temp file");
     let has_crlf = raw_bytes.windows(2).any(|w| w == b"\r\n");
-    assert!(has_crlf, "test precondition failed: CRLF file has no CRLF bytes");
+    assert!(
+        has_crlf,
+        "test precondition failed: CRLF file has no CRLF bytes"
+    );
 
     cleanup(&path);
 }
@@ -270,7 +281,10 @@ fn line_ending_crlf_interactive() {
     //   assert \r\n present in fs::read(&path)
     let raw = fs::read(&path).unwrap_or_default();
     let has_crlf = raw.windows(2).any(|w| w == b"\r\n");
-    assert!(has_crlf, "editor converted CRLF to LF — CRLF preservation broken");
+    assert!(
+        has_crlf,
+        "editor converted CRLF to LF — CRLF preservation broken"
+    );
 
     cleanup(&path);
 }

@@ -4,8 +4,8 @@
 
 use std::sync::OnceLock;
 
-use regex::Regex;
 use ratatui::style::{Color, Style};
+use regex::Regex;
 
 use crate::highlight::{Highlighter, Span};
 use crate::ui::theme::CLASSIC;
@@ -64,9 +64,9 @@ impl Highlighter for PythonHighlighter {
 
     fn highlight(&self, line: &str) -> Vec<Span> {
         let keyword_style = Style::default().fg(CLASSIC.highlight_keyword);
-        let string_style  = Style::default().fg(CLASSIC.highlight_string);
+        let string_style = Style::default().fg(CLASSIC.highlight_string);
         let comment_style = Style::default().fg(CLASSIC.highlight_comment);
-        let number_style  = Style::default().fg(CLASSIC.highlight_number);
+        let number_style = Style::default().fg(CLASSIC.highlight_number);
 
         let mut candidates: Vec<(usize, usize, Style)> = Vec::new();
 
@@ -120,7 +120,9 @@ mod tests {
         let line = "def foo(x):";
         let spans = h.highlight(line);
         let kw_style = Style::default().fg(CLASSIC.highlight_keyword);
-        assert!(spans.iter().any(|s| &line[s.start..s.end] == "def" && s.style == kw_style));
+        assert!(spans
+            .iter()
+            .any(|s| &line[s.start..s.end] == "def" && s.style == kw_style));
     }
 
     #[test]
@@ -145,7 +147,9 @@ mod tests {
         let line = "x = None";
         let spans = h.highlight(line);
         let kw_style = Style::default().fg(CLASSIC.highlight_keyword);
-        assert!(spans.iter().any(|s| &line[s.start..s.end] == "None" && s.style == kw_style));
+        assert!(spans
+            .iter()
+            .any(|s| &line[s.start..s.end] == "None" && s.style == kw_style));
     }
 
     #[test]
