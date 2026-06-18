@@ -1,8 +1,8 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.2.0 (dev — feature 002 in progress)
-**Last updated**: 2026-06-18
+**Version**: 0.2.0 (dev — feature 005 complete)
+**Last updated**: 2026-06-19
 
 ## Implementation Status
 
@@ -14,6 +14,10 @@
 | F002-US2 | UTF-16 LE/BE decode/encode with full round-trip and surrogate-pair support | Complete |
 | F002-US3 | `--encoding utf-16-le/be` CLI aliases via `encoding_from_str()` | Complete |
 | F002-US4 | Save-As encoding selection UI (interactive dialog) | Deferred (#9) |
+| F005-US1 | Soft-wrap visual rendering with `»` continuation marker; Alt+Z / View menu | Complete |
+| F005-US2 | Cursor, Home/End, mouse click work on logical lines in wrap mode | Complete |
+| F005-US3 | Soft-wrap setting persisted to `config.toml` via atomic write | Complete |
+| F005-US4 | `[WRAP]` status-bar indicator; "Soft Wrap (ext)" in View menu | Complete |
 | F004-US1 | Save active buffer in chosen encoding via dialog (F12 / File menu) | Complete |
 | F004-US2 | Cancel encoding dialog — file and encoding unchanged | Complete |
 | F004-US3 | Selected encoding persists for subsequent Ctrl+S saves | Complete |
@@ -84,7 +88,8 @@ Runs in order:
 
 ## Known Limitations
 
-- Soft-wrap mode not implemented (deferred; see `ROADMAP.md`)
+- Soft-wrap menu check-indicator (✓ next to "Soft Wrap (ext)" when active) not implemented; the
+  `[WRAP]` status-bar indicator serves as a workaround (deferred; see `ROADMAP.md`)
 - External file modification detection (`inotify`) not implemented (deferred; see `ROADMAP.md`)
 - Plugin API not implemented (deferred; see `ROADMAP.md`)
 - Mouse support requires a terminal emulator that reports mouse events in crossterm's supported protocol

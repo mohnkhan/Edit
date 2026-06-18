@@ -47,6 +47,7 @@ pub enum Action {
     ToggleLineNumbers,
     ToggleHighlight,
     ToggleTheme,
+    ToggleSoftWrap,
     SplitView,
     NextBuffer,
     PrevBuffer,
@@ -112,6 +113,9 @@ impl KeybindingMap {
         // Help / menu
         map.insert("F1".to_string(), Action::Help);
         map.insert("F10".to_string(), Action::Menu);
+
+        // Soft-wrap toggle (Feature 005)
+        map.insert("Alt+Z".to_string(), Action::ToggleSoftWrap);
 
         // Alt-key menu shortcuts
         map.insert("Alt+F".to_string(), Action::MenuFile);
@@ -197,6 +201,7 @@ fn action_from_str(s: &str) -> Option<Action> {
         "ToggleLineNumbers" => Some(Action::ToggleLineNumbers),
         "ToggleHighlight" => Some(Action::ToggleHighlight),
         "ToggleTheme" => Some(Action::ToggleTheme),
+        "ToggleSoftWrap" => Some(Action::ToggleSoftWrap),
         "SplitView" => Some(Action::SplitView),
         "NextBuffer" => Some(Action::NextBuffer),
         "PrevBuffer" => Some(Action::PrevBuffer),
@@ -319,5 +324,16 @@ mod tests {
     #[test]
     fn test_save_as_encoding_round_trips_action_from_str() {
         assert_eq!(action_from_str("SaveAsEncoding"), Some(Action::SaveAsEncoding));
+    }
+
+    #[test]
+    fn test_alt_z_maps_to_toggle_soft_wrap() {
+        let km = KeybindingMap::default_map();
+        assert_eq!(km.get_action("Alt+Z"), Some(&Action::ToggleSoftWrap));
+    }
+
+    #[test]
+    fn test_toggle_soft_wrap_round_trips_action_from_str() {
+        assert_eq!(action_from_str("ToggleSoftWrap"), Some(Action::ToggleSoftWrap));
     }
 }

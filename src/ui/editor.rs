@@ -32,15 +32,28 @@ pub struct EditorWidget<'a> {
     pub theme: &'static Theme,
     /// Whether to show the line-number gutter.
     pub show_line_numbers: bool,
+    /// Enable soft-wrap visual rendering (Feature 005).
+    pub soft_wrap: bool,
+    /// Pre-computed visual sub-line start byte offsets per logical line.
+    /// None when soft_wrap is false.
+    pub wrap_starts: Option<&'a [Vec<u32>]>,
 }
 
 impl<'a> EditorWidget<'a> {
     /// Construct a new [`EditorWidget`].
-    pub fn new(buffer: &'a Buffer, theme: &'static Theme, show_line_numbers: bool) -> Self {
+    pub fn new(
+        buffer: &'a Buffer,
+        theme: &'static Theme,
+        show_line_numbers: bool,
+        soft_wrap: bool,
+        wrap_starts: Option<&'a [Vec<u32>]>,
+    ) -> Self {
         Self {
             buffer,
             theme,
             show_line_numbers,
+            soft_wrap,
+            wrap_starts,
         }
     }
 
@@ -69,6 +82,153 @@ impl<'a> Widget for EditorWidget<'a> {
                 buf.get_mut(x, y).set_style(normal_style).set_char(' ');
             }
         }
+
+        /// Look up the highlight style for a byte offset, falling back to
+        /// `normal_style` when no span covers that offset.
+        #[inline]
+        fn span_style_at(spans: &[Span], byte_off: usize, normal: Style) -> Style {
+            // Spans are sorted and non-overlapping; binary search for the
+            // last span whose start <= byte_off, then check containment.
+            match spans.binary_search_by_key(&byte_off, |s| s.start) {
+                Ok(i) => {
+                    // Exact match on start.
+                    if byte_off < spans[i].end {
+                        spans[i].style
+                    } else {
+                        normal
+                    }
+                }
+                Err(0) => normal,
+                Err(i) => {
+                    let s = &spans[i - 1];
+                    if byte_off < s.end {
+                        s.style
+                    } else {
+                        normal
+                    }
+                }
+            }
+        }
+
+        // ── Soft-wrap rendering branch (Feature 005) ─────────────────────────
+        if self.soft_wrap {
+            if let Some(wrap_starts) = self.wrap_starts {
+                let gutter_cols = if self.show_line_numbers { Self::GUTTER_WIDTH } else { 0 };
+                let content_width = area.width.saturating_sub(gutter_cols) as usize;
+                let content_x_start = area.left() + gutter_cols;
+                let scroll_visual_row = self.buffer.scroll_offset.0;
+                let cursor = self.buffer.cursor;
+                let visible_rows = area.height as usize;
+                let total_lines = self.buffer.rope.line_count();
+
+                let mut global_visual_row: usize = 0;
+                let mut screen_row: usize = 0;
+
+                'wrap_outer: for (logical_line, starts) in wrap_starts.iter().enumerate() {
+                    if logical_line >= total_lines { break; }
+                    let line_str = self.buffer.rope.line_slice(logical_line);
+
+                    // Pre-compute cursor byte offset for this logical line.
+                    let cursor_byte: Option<usize> = if cursor.line == logical_line {
+                        let b: usize = line_str.graphemes(true).take(cursor.grapheme_col).map(|g| g.len()).sum();
+                        Some(b)
+                    } else {
+                        None
+                    };
+
+                    let hl_spans: Vec<Span> = self.buffer.syntax.as_ref()
+                        .map(|h| h.highlight(&line_str))
+                        .unwrap_or_default();
+
+                    for (seg_idx, &seg_start_u32) in starts.iter().enumerate() {
+                        let seg_start = seg_start_u32 as usize;
+                        let seg_end = if seg_idx + 1 < starts.len() {
+                            starts[seg_idx + 1] as usize
+                        } else {
+                            line_str.len()
+                        };
+
+                        if global_visual_row < scroll_visual_row {
+                            global_visual_row += 1;
+                            continue;
+                        }
+                        if screen_row >= visible_rows { break 'wrap_outer; }
+
+                        let screen_y = area.top() + screen_row as u16;
+                        screen_row += 1;
+
+                        // Gutter.
+                        if self.show_line_numbers {
+                            let gs = Style::default().fg(Color::DarkGray).bg(self.theme.background);
+                            let gt = if seg_idx == 0 {
+                                format!("{:3}|", logical_line + 1)
+                            } else {
+                                "   |".to_string()
+                            };
+                            for (i, ch) in gt.chars().enumerate() {
+                                let gx = area.left() + i as u16;
+                                if gx >= content_x_start { break; }
+                                buf.get_mut(gx, screen_y).set_style(gs).set_char(ch);
+                            }
+                        }
+
+                        // Continuation marker '»'.
+                        let text_offset = if seg_idx > 0 {
+                            if content_width > 0 {
+                                buf.get_mut(content_x_start, screen_y).set_style(normal_style).set_symbol("»");
+                            }
+                            1usize
+                        } else {
+                            0usize
+                        };
+
+                        // Walk graphemes in [seg_start, seg_end).
+                        let seg_str = &line_str[seg_start..seg_end];
+                        let mut screen_col = text_offset;
+                        let mut byte_in_seg: usize = 0;
+
+                        for grapheme in seg_str.graphemes(true) {
+                            let gw = UnicodeWidthStr::width(grapheme);
+                            let gbytes = grapheme.len();
+                            let abs_byte = seg_start + byte_in_seg;
+
+                            if screen_col + gw > content_width { break; }
+
+                            let is_cursor = cursor_byte == Some(abs_byte);
+                            let base_style = if is_cursor {
+                                cursor_style
+                            } else {
+                                span_style_at(&hl_spans, abs_byte, normal_style)
+                            };
+                            let style = if is_cursor {
+                                base_style
+                            } else {
+                                base_style.bg(self.theme.background)
+                            };
+
+                            let px = content_x_start + screen_col as u16;
+                            buf.get_mut(px, screen_y).set_style(style).set_symbol(grapheme);
+                            screen_col += gw;
+                            byte_in_seg += gbytes;
+                        }
+
+                        // Cursor past end of line (last segment only).
+                        if seg_idx + 1 >= starts.len() {
+                            if let Some(cb) = cursor_byte {
+                                if cb >= line_str.len() && screen_col < content_width {
+                                    let px = content_x_start + screen_col as u16;
+                                    buf.get_mut(px, screen_y).set_style(cursor_style).set_char(' ');
+                                }
+                            }
+                        }
+
+                        global_visual_row += 1;
+                    }
+                }
+                return; // soft-wrap render complete
+            }
+        }
+        // ── End soft-wrap branch ──────────────────────────────────────────────
 
         let gutter_cols = if self.show_line_numbers {
             Self::GUTTER_WIDTH
@@ -126,33 +286,6 @@ impl<'a> Widget for EditorWidget<'a> {
                 .as_ref()
                 .map(|h| h.highlight(&line_str))
                 .unwrap_or_default();
-
-            /// Look up the highlight style for a byte offset, falling back to
-            /// `normal_style` when no span covers that offset.
-            #[inline]
-            fn span_style_at(spans: &[Span], byte_off: usize, normal: Style) -> Style {
-                // Spans are sorted and non-overlapping; binary search for the
-                // last span whose start <= byte_off, then check containment.
-                match spans.binary_search_by_key(&byte_off, |s| s.start) {
-                    Ok(i) => {
-                        // Exact match on start.
-                        if byte_off < spans[i].end {
-                            spans[i].style
-                        } else {
-                            normal
-                        }
-                    }
-                    Err(0) => normal,
-                    Err(i) => {
-                        let s = &spans[i - 1];
-                        if byte_off < s.end {
-                            s.style
-                        } else {
-                            normal
-                        }
-                    }
-                }
-            }
 
             // Walk grapheme clusters, skipping those before scroll_vcol and
             // collecting those that fit in content_width.

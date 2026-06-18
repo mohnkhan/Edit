@@ -75,6 +75,10 @@ pub struct Config {
     /// Default: `"warn"`
     pub log_level: String,
 
+    /// Enable soft-wrap rendering (non-DOS extension). Default: false
+    #[serde(default)]
+    pub soft_wrap: bool,
+
     /// User-defined key bindings.  Keys are the trigger (e.g. `"ctrl+s"`,
     /// `"f2"`) and values are the command identifier (e.g. `"save"`, `"quit"`).
     ///
@@ -109,6 +113,7 @@ impl Default for Config {
             highlight: true,
             mouse: true,
             log_level: "warn".to_owned(),
+            soft_wrap: false,
             keybindings: HashMap::new(),
             no_autosave: false,
             readonly: false,
@@ -148,6 +153,7 @@ mod tests {
         assert!(cfg.highlight);
         assert!(cfg.mouse);
         assert_eq!(cfg.log_level, "warn");
+        assert!(!cfg.soft_wrap);
         assert!(cfg.keybindings.is_empty());
     }
 
@@ -165,6 +171,7 @@ mod tests {
         assert_eq!(restored.highlight, original.highlight);
         assert_eq!(restored.mouse, original.mouse);
         assert_eq!(restored.log_level, original.log_level);
+        assert_eq!(restored.soft_wrap, original.soft_wrap);
         assert_eq!(restored.keybindings, original.keybindings);
     }
 

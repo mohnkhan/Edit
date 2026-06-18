@@ -84,6 +84,12 @@ pub struct App {
     pub pending_encoding_select: Option<usize>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
     pub pending_save_as_encoding: Option<EncodingId>,
+    /// Whether soft-wrap visual rendering is active (Feature 005).
+    pub soft_wrap: bool,
+    /// Computed wrap cache; `None` when soft_wrap is false.
+    pub wrap_cache: Option<crate::ui::wrap::WrapCache>,
+    /// Generation counter incremented on every buffer mutation for cache invalidation.
+    pub wrap_text_gen: u64,
 }
 
 // ── App impl ─────────────────────────────────────────────────────────────────
@@ -176,6 +182,8 @@ impl App {
             None
         };
 
+        let soft_wrap_initial = config.soft_wrap;
+
         Self {
             config,
             keymap,
@@ -195,6 +203,9 @@ impl App {
             default_encoding,
             pending_encoding_select: None,
             pending_save_as_encoding: None,
+            soft_wrap: soft_wrap_initial,
+            wrap_cache: None,
+            wrap_text_gen: 0,
         }
     }
 
@@ -271,6 +282,24 @@ impl App {
         let mut last_tick = Instant::now();
 
         while self.running {
+            // Ensure wrap cache is current before rendering (Feature 005).
+            if self.soft_wrap {
+                let w = self.content_width();
+                if self
+                    .wrap_cache
+                    .as_ref()
+                    .map(|c| c.is_stale(w, self.wrap_text_gen))
+                    .unwrap_or(true)
+                {
+                    let rope = &self.buffers[self.active_idx].rope;
+                    self.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(
+                        rope,
+                        w,
+                        self.wrap_text_gen,
+                    ));
+                }
+            }
+
             terminal.draw(|frame| self.render(frame))?;
 
             let timeout = TICK_MS.saturating_sub(last_tick.elapsed().as_millis() as u64);
@@ -463,6 +492,9 @@ impl App {
                 };
                 self.set_theme(new_name);
             }
+
+            // Soft-wrap toggle (Feature 005)
+            Action::ToggleSoftWrap => self.handle_toggle_soft_wrap()?,
 
             _ => {
                 log::debug!("Unhandled action: {:?}", action);
@@ -677,7 +709,7 @@ impl App {
     }
 
     /// Handle an explicit Save action (Ctrl+S / F5).
-    fn handle_save_action(&mut self) {
+    pub fn handle_save_action(&mut self) {
         match self.active_buffer().save() {
             Ok(()) => {
                 self.active_buffer_mut().modified = false;
@@ -726,6 +758,24 @@ impl App {
 
         // T105 — detect too-small terminal
         self.too_small = w < MIN_WIDTH || h < MIN_HEIGHT;
+
+        // Rebuild wrap cache for new terminal width (Feature 005, T022).
+        if self.soft_wrap {
+            let content_w = self.content_width();
+            let rope = &self.buffers[self.active_idx].rope;
+            self.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(
+                rope,
+                content_w,
+                self.wrap_text_gen,
+            ));
+            if let Some(ref cache) = self.wrap_cache {
+                let total_vr = cache.total_visual_rows();
+                let buf = &mut self.buffers[self.active_idx];
+                if buf.scroll_offset.0 >= total_vr {
+                    buf.scroll_offset.0 = total_vr.saturating_sub(1);
+                }
+            }
+        }
 
         // Re-clamp scroll offset so cursor stays visible after resize.
         self.clamp_scroll();
@@ -910,14 +960,23 @@ impl App {
     /// Adjust `scroll_offset` so that `cursor` is within the visible viewport.
     fn clamp_scroll(&mut self) {
         let vh = self.viewport_height();
-        let buf = &mut self.buffers[self.active_idx];
-        let cur_line = buf.cursor.line;
 
-        // Vertical scroll
-        if cur_line < buf.scroll_offset.0 {
-            buf.scroll_offset.0 = cur_line;
-        } else if cur_line >= buf.scroll_offset.0 + vh {
-            buf.scroll_offset.0 = cur_line.saturating_sub(vh - 1);
+        if self.soft_wrap && self.wrap_cache.is_some() {
+            let cursor_vr = self.cursor_visual_row();
+            let buf = &mut self.buffers[self.active_idx];
+            if cursor_vr < buf.scroll_offset.0 {
+                buf.scroll_offset.0 = cursor_vr;
+            } else if cursor_vr >= buf.scroll_offset.0 + vh {
+                buf.scroll_offset.0 = cursor_vr.saturating_sub(vh - 1);
+            }
+        } else {
+            let cur_line = self.buffers[self.active_idx].cursor.line;
+            let buf = &mut self.buffers[self.active_idx];
+            if cur_line < buf.scroll_offset.0 {
+                buf.scroll_offset.0 = cur_line;
+            } else if cur_line >= buf.scroll_offset.0 + vh {
+                buf.scroll_offset.0 = cur_line.saturating_sub(vh - 1);
+            }
         }
     }
 
@@ -972,6 +1031,7 @@ impl App {
             });
             buf.modified = true;
         }
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
 
         // Advance cursor right by one grapheme
         self.move_cursor(Direction::Right);
@@ -1000,6 +1060,7 @@ impl App {
             buf.cursor.grapheme_col = 0;
             buf.cursor.visual_col = 0;
         }
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
 
         self.clamp_scroll();
     }
@@ -1057,6 +1118,7 @@ impl App {
             });
             buf.modified = true;
         }
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
 
         // Move cursor to the deleted position
         let new_vcol = CursorPos::visual_col_from_grapheme_col(
@@ -1114,14 +1176,17 @@ impl App {
 
         let del_char_len = deleted_text.chars().count();
 
-        let buf = &mut self.buffers[self.active_idx];
-        buf.rope
-            .delete_range(del_char_idx..del_char_idx + del_char_len);
-        buf.undo_stack.push(EditOp::Delete {
-            at: del_char_idx,
-            text: deleted_text,
-        });
-        buf.modified = true;
+        {
+            let buf = &mut self.buffers[self.active_idx];
+            buf.rope
+                .delete_range(del_char_idx..del_char_idx + del_char_len);
+            buf.undo_stack.push(EditOp::Delete {
+                at: del_char_idx,
+                text: deleted_text,
+            });
+            buf.modified = true;
+        }
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
         // Cursor position stays the same after forward-delete
     }
 
@@ -1187,6 +1252,7 @@ impl App {
             });
             buf.modified = true;
         }
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
         // Advance cursor by pasted char count
         for _ in 0..char_count {
             self.move_cursor(Direction::Right);
@@ -1210,15 +1276,18 @@ impl App {
             let full = buf.rope.to_string();
             full[s_idx..e_idx.min(full.len())].to_string()
         };
-        let buf = &mut self.buffers[self.active_idx];
-        buf.rope.delete_range(s_idx..e_idx);
-        buf.undo_stack.push(EditOp::Delete {
-            at: s_idx,
-            text: deleted,
-        });
-        buf.modified = true;
-        buf.selection = None;
-        buf.cursor = start;
+        {
+            let buf = &mut self.buffers[self.active_idx];
+            buf.rope.delete_range(s_idx..e_idx);
+            buf.undo_stack.push(EditOp::Delete {
+                at: s_idx,
+                text: deleted,
+            });
+            buf.modified = true;
+            buf.selection = None;
+            buf.cursor = start;
+        }
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
     }
 
     // ── T055 — Find next / find prev ─────────────────────────────────────────
@@ -1447,9 +1516,12 @@ impl App {
         }
 
         // Push all ops as one composite undo entry.
-        let buf = &mut self.buffers[self.active_idx];
-        buf.undo_stack.push(EditOp::Composite(ops));
-        buf.modified = true;
+        {
+            let buf = &mut self.buffers[self.active_idx];
+            buf.undo_stack.push(EditOp::Composite(ops));
+            buf.modified = true;
+        }
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
 
         // Invalidate the cached match positions — they are no longer valid.
         self.search_state.matches.clear();
@@ -1550,36 +1622,95 @@ impl App {
     pub fn handle_mouse_click(&mut self, col: u16, row: u16) {
         let (_, term_rows) = self.terminal_size;
 
-        // Guard: only handle clicks inside the editor viewport.
         if row == 0 || row >= term_rows.saturating_sub(1) {
             return;
         }
 
+        let clicked_row = row as usize - 1; // 0-based editor row
+
+        // Soft-wrap mode: map (visual_row, visual_col) → (logical_line, grapheme_col).
+        if self.soft_wrap {
+            if let Some(ref cache) = self.wrap_cache {
+                let scroll_vr = self.buffers[self.active_idx].scroll_offset.0;
+                let visual_row = scroll_vr + clicked_row;
+                if let Some((logical_line, start_byte_u32)) = cache.visual_to_logical(visual_row) {
+                    let start_byte = start_byte_u32 as usize;
+                    let line_str = self.buffers[self.active_idx].rope.line_slice(logical_line);
+                    // Compute which segment end byte is.
+                    let seg_end = {
+                        let starts = &cache.visual_starts[logical_line];
+                        let seg_idx_opt = starts.iter().position(|&b| b as usize == start_byte);
+                        seg_idx_opt
+                            .and_then(|si| starts.get(si + 1))
+                            .map(|&b| b as usize)
+                            .unwrap_or(line_str.len())
+                    };
+                    // Effective text column accounting for '»' marker on continuation rows.
+                    let is_continuation = start_byte > 0;
+                    let text_col_start: usize = if is_continuation { 1 } else { 0 };
+                    let target_vcol = col as usize;
+
+                    let mut vis_col = text_col_start;
+                    let mut found_gcol: usize = {
+                        // Default: walk logical line to find byte=start_byte → grapheme col.
+                        line_str
+                            .graphemes(true)
+                            .scan(0usize, |b, g| { let c = *b; *b += g.len(); Some((c, g)) })
+                            .take_while(|(b, _)| *b < start_byte)
+                            .count()
+                    };
+                    let mut cur_byte = start_byte;
+
+                    for grapheme in line_str[start_byte..seg_end].graphemes(true) {
+                        let gw = unicode_segmentation_width(grapheme) as usize;
+                        if vis_col + gw > target_vcol {
+                            break;
+                        }
+                        vis_col += gw;
+                        cur_byte += grapheme.len();
+                        found_gcol += 1;
+                    }
+
+                    let _ = cur_byte; // used for iteration side effects
+
+                    let new_vcol = CursorPos::visual_col_from_grapheme_col(
+                        &self.buffers[self.active_idx].rope,
+                        logical_line,
+                        found_gcol,
+                    );
+                    let buf = &mut self.buffers[self.active_idx];
+                    buf.cursor = CursorPos {
+                        line: logical_line,
+                        grapheme_col: found_gcol,
+                        visual_col: new_vcol,
+                    };
+                    self.clamp_scroll();
+                    return;
+                }
+            }
+        }
+
+        // Normal mode (non-wrap): existing logic.
         let buf = &self.buffers[self.active_idx];
         let scroll_line = buf.scroll_offset.0;
-
-        // Map terminal row → document line.
-        let target_line = scroll_line + (row as usize - 1);
+        let target_line = scroll_line + clicked_row;
         let line_count = buf.rope.line_count();
         if target_line >= line_count {
             return;
         }
 
-        // Walk grapheme clusters on the target line to find which grapheme
-        // the clicked column falls into.
         let line_str = buf.rope.line_slice(target_line);
         let mut visual_x: u16 = 0;
         let mut found_gcol: usize = 0;
 
         for (gcol, grapheme) in line_str.graphemes(true).enumerate() {
-            // Use a simple width: 1 for most chars, 2 for CJK full-width.
             let w = unicode_segmentation_width(grapheme);
             if visual_x + w > col {
                 found_gcol = gcol;
                 break;
             }
             visual_x += w;
-            found_gcol = gcol + 1; // past end → clamp at line length
+            found_gcol = gcol + 1;
         }
 
         let new_vcol = CursorPos::visual_col_from_grapheme_col(
@@ -1627,6 +1758,108 @@ impl App {
                 buf.syntax.as_ref().map(|h| h.name())
             );
         }
+    }
+
+    // ── Feature 005 — Soft-wrap helpers ──────────────────────────────────────
+
+    /// Viewport content width: terminal columns minus the gutter (if line numbers on).
+    fn content_width(&self) -> u16 {
+        let gutter: u16 = if self.config.line_numbers { 4 } else { 0 };
+        self.terminal_size.0.saturating_sub(gutter)
+    }
+
+    /// Compute the global visual row index for the cursor position (using wrap cache).
+    fn cursor_visual_row(&self) -> usize {
+        let cache = match self.wrap_cache.as_ref() {
+            Some(c) => c,
+            None => return self.buffers[self.active_idx].cursor.line,
+        };
+        let cursor = self.buffers[self.active_idx].cursor;
+        let line_str = self.buffers[self.active_idx].rope.line_slice(cursor.line);
+        let cursor_byte: usize = line_str
+            .graphemes(true)
+            .take(cursor.grapheme_col)
+            .map(|g| g.len())
+            .sum();
+        let starts = match cache.visual_starts.get(cursor.line) {
+            Some(s) => s,
+            None => return 0,
+        };
+        let seg_idx = starts
+            .partition_point(|&s| (s as usize) <= cursor_byte)
+            .saturating_sub(1);
+        let rows_before: usize = (0..cursor.line)
+            .map(|l| cache.visual_starts.get(l).map(|v| v.len()).unwrap_or(1))
+            .sum();
+        rows_before + seg_idx
+    }
+
+    /// Persist `self.config` to `$XDG_CONFIG_HOME/edit/config.toml` using
+    /// an atomic tmp-rename. On failure: log warn, set status message, do not revert.
+    fn save_config_to_disk(&mut self) {
+        let config_path = crate::config::config_path();
+        let tmp_path = config_path.with_extension("toml.tmp");
+
+        let toml_str = match toml::to_string(&self.config) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("Config serialize failed: {}", e);
+                self.status_message = Some(format!("Config save failed: {}", e));
+                return;
+            }
+        };
+
+        if let Some(parent) = config_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        if let Err(e) = std::fs::write(&tmp_path, &toml_str) {
+            log::warn!("Config write failed: {}", e);
+            self.status_message = Some(format!("Config save failed: {}", e));
+            return;
+        }
+
+        if let Err(e) = std::fs::rename(&tmp_path, &config_path) {
+            log::warn!("Config rename failed: {}", e);
+            self.status_message = Some(format!("Config save failed: {}", e));
+        }
+    }
+
+    /// Toggle soft-wrap on or off. Handles the width guard, cache rebuild/drop,
+    /// horizontal-scroll reset, and config persistence.
+    fn handle_toggle_soft_wrap(&mut self) -> io::Result<()> {
+        // Width guard (only applied when turning ON).
+        let content_w = self.content_width();
+        if !self.soft_wrap && content_w < 10 {
+            self.status_message =
+                Some("Terminal too narrow for soft wrap (min 10 columns)".to_string());
+            return Ok(());
+        }
+
+        self.soft_wrap = !self.soft_wrap;
+        self.config.soft_wrap = self.soft_wrap;
+
+        if self.soft_wrap {
+            // Build cache; reset horizontal scroll on all buffers.
+            let rope = &self.buffers[self.active_idx].rope;
+            self.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(
+                rope,
+                content_w,
+                self.wrap_text_gen,
+            ));
+            for buf in &mut self.buffers {
+                buf.scroll_offset.1 = 0;
+            }
+        } else {
+            // Drop cache; reset horizontal scroll for all buffers.
+            self.wrap_cache = None;
+            for buf in &mut self.buffers {
+                buf.scroll_offset.1 = 0;
+            }
+        }
+
+        self.save_config_to_disk();
+        Ok(())
     }
 }
 
@@ -1800,6 +2033,137 @@ mod tests {
         );
         let _ = std::fs::remove_file(&path);
         let _ = result; // allow write failure (unnamed buf has no content path)
+    }
+
+    // ── Feature 005 — Soft-wrap tests (T024, T025) ────────────────────────────
+
+    fn make_app_with_long_line() -> App {
+        let mut app = make_app();
+        // Insert a 60-grapheme line to test soft-wrap
+        let long = "A".repeat(60);
+        let char_idx = 0;
+        app.buffers[0].rope.insert_str(char_idx, &long);
+        app.buffers[0].modified = true;
+        app.wrap_text_gen = app.wrap_text_gen.wrapping_add(1);
+        app
+    }
+
+    #[test]
+    fn toggle_soft_wrap_on_builds_cache() {
+        let mut app = make_app();
+        app.terminal_size = (80, 24);
+        // Default: soft_wrap is false, no cache.
+        assert!(!app.soft_wrap);
+        assert!(app.wrap_cache.is_none());
+        // Toggle on.
+        app.handle_action(Action::ToggleSoftWrap).unwrap();
+        assert!(app.soft_wrap, "soft_wrap must be true after toggle");
+        assert!(app.wrap_cache.is_some(), "wrap_cache must be Some after enabling");
+    }
+
+    #[test]
+    fn toggle_soft_wrap_off_drops_cache_and_resets_hscroll() {
+        let mut app = make_app();
+        app.terminal_size = (80, 24);
+        // Enable then disable.
+        app.handle_action(Action::ToggleSoftWrap).unwrap();
+        app.buffers[0].scroll_offset.1 = 10; // simulate horizontal scroll while on
+        app.handle_action(Action::ToggleSoftWrap).unwrap();
+        assert!(!app.soft_wrap, "soft_wrap must be false after second toggle");
+        assert!(app.wrap_cache.is_none(), "wrap_cache must be None after disabling");
+        assert_eq!(app.buffers[0].scroll_offset.1, 0, "h-scroll must be reset on disable");
+    }
+
+    #[test]
+    fn soft_wrap_toggle_cycle_cursor_unchanged() {
+        let mut app = make_app_with_long_line();
+        app.terminal_size = (40, 24);
+        // Move cursor to col 5.
+        for _ in 0..5 { app.move_cursor(Direction::Right); }
+        let cursor_before = app.buffers[0].cursor;
+        // Enable wrap.
+        app.handle_action(Action::ToggleSoftWrap).unwrap();
+        // Disable wrap.
+        app.handle_action(Action::ToggleSoftWrap).unwrap();
+        let cursor_after = app.buffers[0].cursor;
+        assert_eq!(cursor_before.line, cursor_after.line, "line must be unchanged");
+        assert_eq!(cursor_before.grapheme_col, cursor_after.grapheme_col, "gcol must be unchanged");
+    }
+
+    #[test]
+    fn home_on_wrapped_line_goes_to_logical_col_zero() {
+        let mut app = make_app();
+        app.terminal_size = (20, 24);
+        // Insert 50 chars so line wraps multiple times at width 20.
+        let long = "ABCDEFGHIJ".repeat(5); // 50 chars
+        app.buffers[0].rope.insert_str(0, &long);
+        app.buffers[0].modified = true;
+        app.wrap_text_gen += 1;
+        // Move cursor to middle.
+        for _ in 0..25 { app.move_cursor(Direction::Right); }
+        // Enable wrap.
+        app.handle_action(Action::ToggleSoftWrap).unwrap();
+        // Home should go to grapheme_col 0 of the logical line.
+        app.move_line_start();
+        assert_eq!(app.buffers[0].cursor.grapheme_col, 0, "Home must go to col 0 of logical line");
+        assert_eq!(app.buffers[0].cursor.line, 0, "line must remain 0");
+    }
+
+    #[test]
+    fn end_on_wrapped_line_goes_to_logical_line_end() {
+        let mut app = make_app();
+        app.terminal_size = (20, 24);
+        let long = "ABCDEFGHIJ".repeat(5); // 50 chars
+        app.buffers[0].rope.insert_str(0, &long);
+        app.buffers[0].modified = true;
+        app.wrap_text_gen += 1;
+        app.handle_action(Action::ToggleSoftWrap).unwrap();
+        app.move_line_end();
+        assert_eq!(app.buffers[0].cursor.line, 0, "line must remain 0");
+        assert_eq!(app.buffers[0].cursor.grapheme_col, 50, "End must go to col 50");
+    }
+
+    #[test]
+    fn up_down_move_between_logical_lines_in_wrap_mode() {
+        let mut app = make_app();
+        app.terminal_size = (20, 24);
+        // Line 0: 50 chars (wraps), Line 1: "Second"
+        let long = "A".repeat(50);
+        app.buffers[0].rope.insert_str(0, &(long + "\nSecond"));
+        app.buffers[0].modified = true;
+        app.wrap_text_gen += 1;
+        app.handle_action(Action::ToggleSoftWrap).unwrap();
+        // Cursor on line 0, col 0.
+        assert_eq!(app.buffers[0].cursor.line, 0);
+        // Down should go to line 1 (the logical next line).
+        app.move_cursor(Direction::Down);
+        assert_eq!(app.buffers[0].cursor.line, 1, "Down must go to logical line 1");
+    }
+
+    #[test]
+    fn save_while_soft_wrap_active_no_extra_newlines() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("edit_soft_wrap_save_test.txt");
+        let content = "A".repeat(200);
+        std::fs::write(&path, &content).unwrap();
+
+        let mut app = App::new(
+            Config::default(),
+            vec![path.clone()],
+            EncodingId::Utf8,
+            None,
+            None,
+        );
+        app.terminal_size = (40, 24);
+        app.handle_action(Action::ToggleSoftWrap).unwrap();
+        assert!(app.soft_wrap, "soft_wrap must be enabled");
+
+        // Save.
+        app.handle_save_action();
+
+        let saved = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(saved, content, "saved bytes must be identical to original content");
     }
 }
 

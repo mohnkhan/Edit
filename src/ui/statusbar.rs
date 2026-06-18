@@ -31,6 +31,8 @@ pub struct StatusBar<'a> {
     pub buffer_idx: usize,
     /// Total number of open buffers.
     pub total_buffers: usize,
+    /// Whether soft-wrap mode is active (Feature 005).
+    pub soft_wrap: bool,
 }
 
 impl<'a> StatusBar<'a> {
@@ -40,12 +42,14 @@ impl<'a> StatusBar<'a> {
         theme: &'static Theme,
         buffer_idx: usize,
         total_buffers: usize,
+        soft_wrap: bool,
     ) -> Self {
         Self {
             buffer,
             theme,
             buffer_idx,
             total_buffers,
+            soft_wrap,
         }
     }
 
@@ -86,14 +90,17 @@ impl<'a> StatusBar<'a> {
         }
     }
 
-    fn flags(&self) -> &'static str {
-        if self.buffer.readonly {
-            " [Read Only]"
-        } else if self.buffer.modified {
-            " [Modified]"
-        } else {
-            ""
+    fn flags(&self) -> String {
+        let mut result = String::new();
+        if self.soft_wrap {
+            result.push_str(" [WRAP]");
         }
+        if self.buffer.readonly {
+            result.push_str(" [Read Only]");
+        } else if self.buffer.modified {
+            result.push_str(" [Modified]");
+        }
+        result
     }
 
     fn position(&self) -> String {
@@ -168,5 +175,40 @@ impl<'a> Widget for StatusBar<'a> {
                 buf.get_mut(x, y).set_style(style).set_char(*ch);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::Buffer;
+    use crate::ui::theme::theme_by_name;
+
+    fn make_status_bar(soft_wrap: bool) -> StatusBar<'static> {
+        // We need a Buffer for the lifetime but we use Box::leak to get 'static for tests.
+        let buf = Box::leak(Box::new(Buffer::new_empty()));
+        StatusBar::new(buf, theme_by_name("classic"), 0, 1, soft_wrap)
+    }
+
+    #[test]
+    fn flags_contains_wrap_when_enabled() {
+        let sb = make_status_bar(true);
+        assert!(sb.flags().contains("[WRAP]"), "expected [WRAP] in flags when soft_wrap is true");
+    }
+
+    #[test]
+    fn flags_no_wrap_when_disabled() {
+        let sb = make_status_bar(false);
+        assert!(!sb.flags().contains("[WRAP]"), "[WRAP] must be absent when soft_wrap is false");
+    }
+
+    #[test]
+    fn flags_wrap_and_modified_both_shown() {
+        let buf = Box::leak(Box::new(Buffer::new_empty()));
+        buf.modified = true;
+        let sb = StatusBar::new(buf, theme_by_name("classic"), 0, 1, true);
+        let f = sb.flags();
+        assert!(f.contains("[WRAP]"), "missing [WRAP]");
+        assert!(f.contains("[Modified]"), "missing [Modified]");
     }
 }

@@ -131,6 +131,10 @@ static VIEW_MENU: &[MenuItem] = &[
         label: "Toggle Line Nos",
         action: Action::ToggleLineNumbers,
     },
+    MenuItem {
+        label: "Soft Wrap (ext)",
+        action: Action::ToggleSoftWrap,
+    },
 ];
 
 /// Options menu items.
