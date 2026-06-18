@@ -1,0 +1,80 @@
+.TH EDIT 1 "2026-06-18" "edit 0.1.0" "User Commands"
+.SH NAME
+edit \- MS-DOS EDIT.COM reimplementation for Linux
+.SH SYNOPSIS
+.B edit
+[\fIOPTIONS\fR] [\fIFILE\fR...]
+.SH DESCRIPTION
+.B edit
+is a full\-screen text editor for Linux terminals, faithfully reimplementing
+the MS-DOS EDIT.COM interface with DOS-style blue-background UI, pull-down
+menus, and F-key bindings.
+.SH OPTIONS
+.TP
+.BR \-e ", " \-\-encoding " " \fIENC\fR
+Force file encoding. Valid values: utf-8, cp437, cp850, iso-8859-1, windows-1252.
+.TP
+.BR \-r ", " \-\-readonly
+Open all files in read-only mode.
+.TP
+.BR \-n ", " \-\-line-numbers
+Show line numbers in the gutter.
+.TP
+.BR \-\-theme " " \fINAME\fR
+Color theme: classic (default), high-contrast, plain.
+.TP
+.BR \-\-no-autosave
+Disable auto-save and crash recovery.
+.TP
+.BR \-\-no-highlight
+Disable syntax highlighting.
+.TP
+.BR \-d ", " \-\-debug
+Enable verbose diagnostic logging.
+.TP
+.BR \-\-locale " " \fILOCALE\fR
+Override locale (e.g. C.UTF-8).
+.SH KEYBINDINGS
+.TP
+.B Ctrl+S, F5
+Save current file.
+.TP
+.B Ctrl+Q
+Quit editor.
+.TP
+.B F3
+Find next match.
+.TP
+.B F10
+Open menu bar.
+.TP
+.B Alt+F
+Open File menu.
+.TP
+.B Ctrl+F
+Open Find dialog.
+.SH ENVIRONMENT
+.TP
+.B EDIT_LOCALE
+Override locale detection (same as \-\-locale).
+.TP
+.B EDIT_AUTOSAVE_INTERVAL
+Override autosave interval in seconds (1-300).
+.TP
+.B EDIT_DEBUG_RENDER
+Set to 1 to enable render debug logging.
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/edit/config.toml
+Per-user configuration file.
+.TP
+.I $XDG_STATE_HOME/edit/logs/
+Log directory.
+.SH ENCODING
+All file I/O is UTF-8 by default. Use \-\-encoding to force a specific encoding.
+Legacy CP437 files are transcoded on read.
+.SH AUTHOR
+The edit contributors.
+.SH SEE ALSO
+.BR vi (1),
+.BR nano (1)

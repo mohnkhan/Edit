@@ -1,0 +1,601 @@
+//! Tasks T031+: Modal dialog widgets.
+//!
+//! Provides overlay dialogs rendered as centered bordered boxes:
+//! - [`SavePromptDialog`]  — "Save changes?" with Save / Discard / Cancel.
+//! - [`ErrorDialog`]       — Simple error message.
+//! - [`SaveErrorDialog`]   — "Cannot save" with Retry / Cancel.
+
+#![allow(dead_code, unused_variables, unused_imports)]
+
+use ratatui::{
+    buffer::Buffer as TuiBuffer,
+    layout::Rect,
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph, Widget},
+};
+
+use crate::ui::theme::Theme;
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/// Compute a centered [`Rect`] of size `(w, h)` within `area`.
+fn centered_rect(w: u16, h: u16, area: Rect) -> Rect {
+    let x = area.left() + area.width.saturating_sub(w) / 2;
+    let y = area.top() + area.height.saturating_sub(h) / 2;
+    Rect {
+        x,
+        y,
+        width: w.min(area.width),
+        height: h.min(area.height),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SavePromptResponse
+// ---------------------------------------------------------------------------
+
+/// The user's response to a save-prompt dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SavePromptResponse {
+    /// Write the buffer to disk before closing.
+    Save,
+    /// Discard unsaved changes and close.
+    Discard,
+    /// Dismiss the dialog and return to the editor.
+    Cancel,
+}
+
+// ---------------------------------------------------------------------------
+// SavePromptDialog
+// ---------------------------------------------------------------------------
+
+/// Modal dialog: "Save changes to <filename>?"
+///
+/// Key bindings (interpreted by the caller):
+/// - `S` / `s` → [`SavePromptResponse::Save`]
+/// - `D` / `d` → [`SavePromptResponse::Discard`]
+/// - `C` / `c` / `Esc` → [`SavePromptResponse::Cancel`]
+pub struct SavePromptDialog<'a> {
+    /// The filename shown in the dialog title.
+    pub filename: &'a str,
+    /// The active color theme.
+    pub theme: &'static Theme,
+}
+
+impl<'a> SavePromptDialog<'a> {
+    /// Construct a new [`SavePromptDialog`].
+    pub fn new(filename: &'a str, theme: &'static Theme) -> Self {
+        Self { filename, theme }
+    }
+}
+
+impl<'a> Widget for SavePromptDialog<'a> {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        // Dialog dimensions: enough for the title + message + key hints.
+        let dialog_w: u16 = 52.min(area.width);
+        let dialog_h: u16 = 5.min(area.height);
+        let dialog_area = centered_rect(dialog_w, dialog_h, area);
+
+        // Clear the area behind the dialog.
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default()
+            .fg(self.theme.menubar_fg)
+            .bg(self.theme.menubar_bg);
+
+        let title = format!("Save — {}", self.filename);
+        let body = "Save changes to this file?";
+        let hint = "  [S]ave   [D]iscard   [C]ancel  ";
+
+        let text = vec![
+            Line::from(Span::raw(body)),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw(hint)),
+        ];
+
+        let paragraph = Paragraph::new(text)
+            .style(dialog_style)
+            .block(
+                Block::default()
+                    .title(title.as_str())
+                    .borders(Borders::ALL)
+                    .style(dialog_style),
+            );
+
+        paragraph.render(dialog_area, buf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ErrorDialog
+// ---------------------------------------------------------------------------
+
+/// Modal dialog that shows a plain error message.
+pub struct ErrorDialog {
+    /// The error message to display.
+    pub message: String,
+    /// The active color theme.
+    pub theme: &'static Theme,
+}
+
+impl ErrorDialog {
+    /// Construct a new [`ErrorDialog`].
+    pub fn new(message: impl Into<String>, theme: &'static Theme) -> Self {
+        Self {
+            message: message.into(),
+            theme,
+        }
+    }
+}
+
+impl Widget for ErrorDialog {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        let msg_len = self.message.len() as u16 + 4; // padding
+        let dialog_w: u16 = msg_len.max(30).min(area.width);
+        let dialog_h: u16 = 4.min(area.height);
+        let dialog_area = centered_rect(dialog_w, dialog_h, area);
+
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default()
+            .fg(Color::Red)
+            .bg(self.theme.menubar_bg);
+
+        let text = vec![
+            Line::from(Span::raw(self.message.as_str())),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw("  Press any key to continue  ")),
+        ];
+
+        let paragraph = Paragraph::new(text)
+            .style(dialog_style)
+            .block(
+                Block::default()
+                    .title("Error")
+                    .borders(Borders::ALL)
+                    .style(dialog_style),
+            );
+
+        paragraph.render(dialog_area, buf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SaveErrorResponse
+// ---------------------------------------------------------------------------
+
+/// The user's response to a save-error dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveErrorResponse {
+    /// Attempt to save again.
+    Retry,
+    /// Give up saving.
+    Cancel,
+}
+
+// ---------------------------------------------------------------------------
+// SaveErrorDialog
+// ---------------------------------------------------------------------------
+
+/// Modal dialog: "Cannot save: <error>. Retry / Cancel"
+pub struct SaveErrorDialog {
+    /// The error string returned from the save attempt.
+    pub error: String,
+    /// The active color theme.
+    pub theme: &'static Theme,
+}
+
+impl SaveErrorDialog {
+    /// Construct a new [`SaveErrorDialog`].
+    pub fn new(error: impl Into<String>, theme: &'static Theme) -> Self {
+        Self {
+            error: error.into(),
+            theme,
+        }
+    }
+}
+
+impl Widget for SaveErrorDialog {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        let err_len = self.error.len() as u16 + 4;
+        let dialog_w: u16 = err_len.max(40).min(area.width);
+        let dialog_h: u16 = 5.min(area.height);
+        let dialog_area = centered_rect(dialog_w, dialog_h, area);
+
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default()
+            .fg(Color::Red)
+            .bg(self.theme.menubar_bg);
+
+        let error_line = format!("Cannot save: {}", self.error);
+        let text = vec![
+            Line::from(Span::raw(error_line)),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw("  [R]etry   [C]ancel  ")),
+        ];
+
+        let paragraph = Paragraph::new(text)
+            .style(dialog_style)
+            .block(
+                Block::default()
+                    .title("Save Error")
+                    .borders(Borders::ALL)
+                    .style(dialog_style),
+            );
+
+        paragraph.render(dialog_area, buf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FindDialog — T054
+// ---------------------------------------------------------------------------
+
+/// Modal find dialog.
+///
+/// Displays the current search query plus toggles for regex and case-sensitive
+/// modes.  Full text-input handling is wired in the event layer; this widget
+/// is responsible only for rendering.
+///
+/// Layout:
+/// ```text
+/// ┌─ Find ───────────────────────────────────┐
+/// │  Find: [<query>]  [Regex: Y/N]  [Case: Y/N]  │
+/// └──────────────────────────────────────────┘
+/// ```
+pub struct FindDialog {
+    /// The current search query being typed.
+    pub query: String,
+    /// Whether regex mode is enabled.
+    pub regex_mode: bool,
+    /// Whether the search is case-sensitive.
+    pub case_sensitive: bool,
+}
+
+impl FindDialog {
+    /// Construct a new [`FindDialog`].
+    pub fn new(query: impl Into<String>, regex_mode: bool, case_sensitive: bool) -> Self {
+        Self {
+            query: query.into(),
+            regex_mode,
+            case_sensitive,
+        }
+    }
+}
+
+impl Widget for FindDialog {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        // Enough width for the full content line.
+        let dialog_w: u16 = 56.min(area.width);
+        let dialog_h: u16 = 4.min(area.height);
+        let dialog_area = centered_rect(dialog_w, dialog_h, area);
+
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default()
+            .fg(Color::White)
+            .bg(Color::DarkGray);
+
+        let regex_flag = if self.regex_mode { "Y" } else { "N" };
+        let case_flag = if self.case_sensitive { "Y" } else { "N" };
+
+        let content = format!(
+            "Find: [{}]  [Regex: {}]  [Case: {}]",
+            self.query, regex_flag, case_flag
+        );
+
+        let text = vec![
+            Line::from(Span::raw(content)),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw("  Enter: find next   Esc: cancel  ")),
+        ];
+
+        let paragraph = Paragraph::new(text)
+            .style(dialog_style)
+            .block(
+                Block::default()
+                    .title("Find")
+                    .borders(Borders::ALL)
+                    .style(dialog_style),
+            );
+
+        paragraph.render(dialog_area, buf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ReplaceDialog — T056
+// ---------------------------------------------------------------------------
+
+/// Modal find-and-replace dialog.
+///
+/// Displays both query and replacement input fields.
+///
+/// Layout:
+/// ```text
+/// ┌─ Find & Replace ──────────────────────────────┐
+/// │  Find:    [<query>]                            │
+/// │  Replace: [<replacement>]  [Regex: Y/N]  [Case: Y/N] │
+/// │                                                │
+/// │    [A]ll   Enter: replace next   Esc: cancel   │
+/// └────────────────────────────────────────────────┘
+/// ```
+pub struct ReplaceDialog {
+    /// The current search query.
+    pub query: String,
+    /// The replacement string.
+    pub replacement: String,
+    /// Whether regex mode is enabled.
+    pub regex_mode: bool,
+    /// Whether the search is case-sensitive.
+    pub case_sensitive: bool,
+}
+
+impl ReplaceDialog {
+    /// Construct a new [`ReplaceDialog`].
+    pub fn new(
+        query: impl Into<String>,
+        replacement: impl Into<String>,
+        regex_mode: bool,
+        case_sensitive: bool,
+    ) -> Self {
+        Self {
+            query: query.into(),
+            replacement: replacement.into(),
+            regex_mode,
+            case_sensitive,
+        }
+    }
+}
+
+impl Widget for ReplaceDialog {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        let dialog_w: u16 = 60.min(area.width);
+        let dialog_h: u16 = 7.min(area.height);
+        let dialog_area = centered_rect(dialog_w, dialog_h, area);
+
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default()
+            .fg(Color::White)
+            .bg(Color::DarkGray);
+
+        let regex_flag = if self.regex_mode { "Y" } else { "N" };
+        let case_flag = if self.case_sensitive { "Y" } else { "N" };
+
+        let find_line = format!("Find:    [{}]", self.query);
+        let replace_line = format!(
+            "Replace: [{}]  [Regex: {}]  [Case: {}]",
+            self.replacement, regex_flag, case_flag
+        );
+
+        let text = vec![
+            Line::from(Span::raw(find_line)),
+            Line::from(Span::raw(replace_line)),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw("  [A]ll   Enter: replace next   Esc: cancel  ")),
+        ];
+
+        let paragraph = Paragraph::new(text)
+            .style(dialog_style)
+            .block(
+                Block::default()
+                    .title("Find & Replace")
+                    .borders(Borders::ALL)
+                    .style(dialog_style),
+            );
+
+        paragraph.render(dialog_area, buf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OpenFileDialog — T069
+// ---------------------------------------------------------------------------
+
+/// Modal dialog for opening a new file.
+///
+/// Displays a text input field where the user types a path.
+///
+/// Layout:
+/// ```text
+/// ┌─ Open File ──────────────────────────────────────┐
+/// │  Open file: [<input>]                             │
+/// │                                                   │
+/// │    Enter: open   Esc: cancel                      │
+/// └───────────────────────────────────────────────────┘
+/// ```
+pub struct OpenFileDialog {
+    /// The path the user is typing.
+    pub input: String,
+    /// The active color theme.
+    pub theme: &'static Theme,
+}
+
+impl OpenFileDialog {
+    /// Construct a new [`OpenFileDialog`] with an empty input field.
+    pub fn new(theme: &'static Theme) -> Self {
+        Self {
+            input: String::new(),
+            theme,
+        }
+    }
+}
+
+impl Widget for OpenFileDialog {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        let dialog_w: u16 = 60.min(area.width);
+        let dialog_h: u16 = 5.min(area.height);
+        let dialog_area = centered_rect(dialog_w, dialog_h, area);
+
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default()
+            .fg(Color::White)
+            .bg(Color::DarkGray);
+
+        let content = format!("Open file: [{}]", self.input);
+
+        let text = vec![
+            Line::from(Span::raw(content)),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw("  Enter: open   Esc: cancel  ")),
+        ];
+
+        let paragraph = Paragraph::new(text)
+            .style(dialog_style)
+            .block(
+                Block::default()
+                    .title("Open File")
+                    .borders(Borders::ALL)
+                    .style(dialog_style),
+            );
+
+        paragraph.render(dialog_area, buf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RecoveryDialog — T064 / US5
+// ---------------------------------------------------------------------------
+
+/// Modal dialog shown when a stale recovery file is detected for the buffer's path.
+///
+/// Key bindings (interpreted by the caller):
+/// - `Y` / `y` / `Enter` → accept recovery (load the auto-saved content)
+/// - `N` / `n` / `Esc`   → discard recovery (open the file from disk)
+pub struct RecoveryDialog {
+    /// Unix epoch seconds from the recovery file's `timestamp` field.
+    pub timestamp: u64,
+    /// The path of the file that the recovery belongs to.
+    pub path: String,
+    /// The active color theme.
+    pub theme: &'static Theme,
+}
+
+impl RecoveryDialog {
+    /// Construct a new [`RecoveryDialog`].
+    pub fn new(
+        timestamp: u64,
+        path: impl Into<String>,
+        theme: &'static Theme,
+    ) -> Self {
+        Self {
+            timestamp,
+            path: path.into(),
+            theme,
+        }
+    }
+}
+
+impl Widget for RecoveryDialog {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        let dialog_w: u16 = 62.min(area.width);
+        let dialog_h: u16 = 6.min(area.height);
+        let dialog_area = centered_rect(dialog_w, dialog_h, area);
+
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default()
+            .fg(Color::Yellow)
+            .bg(self.theme.menubar_bg);
+
+        let ts_str = format!("unix:{}", self.timestamp);
+        let msg1 = format!("Recovery file found from {}.", ts_str);
+        let path_display = if self.path.len() > 50 {
+            format!("...{}", &self.path[self.path.len() - 47..])
+        } else {
+            self.path.clone()
+        };
+        let msg2 = format!("File: {}", path_display);
+        let hint = "  [Y]es — restore   [N]o — open from disk  ";
+
+        let text = vec![
+            Line::from(Span::raw(msg1)),
+            Line::from(Span::raw(msg2)),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw(hint)),
+        ];
+
+        let paragraph = Paragraph::new(text)
+            .style(dialog_style)
+            .block(
+                Block::default()
+                    .title("Recover unsaved changes?")
+                    .borders(Borders::ALL)
+                    .style(dialog_style),
+            );
+
+        paragraph.render(dialog_area, buf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LocaleWarningDialog
+// ---------------------------------------------------------------------------
+
+/// Modal dialog: warns the user that the current locale is not UTF-8.
+///
+/// Displayed at startup when the resolved locale does not contain "UTF-8",
+/// since the editor requires a UTF-8 locale for correct Unicode display.
+///
+/// Key binding (interpreted by the caller):
+/// - any key → dismiss the dialog and continue
+pub struct LocaleWarningDialog {
+    /// The detected locale string (e.g. "en_US.ISO-8859-1").
+    pub detected_locale: String,
+    /// The active color theme.
+    pub theme: &'static Theme,
+}
+
+impl LocaleWarningDialog {
+    /// Construct a new [`LocaleWarningDialog`].
+    pub fn new(detected_locale: impl Into<String>, theme: &'static Theme) -> Self {
+        Self {
+            detected_locale: detected_locale.into(),
+            theme,
+        }
+    }
+}
+
+impl Widget for LocaleWarningDialog {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        // The message line is the widest part; compute the required width.
+        let msg = format!(
+            "Warning: locale {} is not UTF-8.",
+            self.detected_locale
+        );
+        let msg_len = msg.len() as u16 + 4; // 2-char padding each side
+        let dialog_w: u16 = msg_len.max(50).min(area.width);
+        let dialog_h: u16 = 6.min(area.height);
+        let dialog_area = centered_rect(dialog_w, dialog_h, area);
+
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default()
+            .fg(Color::Yellow)
+            .bg(self.theme.menubar_bg);
+
+        let text = vec![
+            Line::from(Span::raw(msg)),
+            Line::from(Span::raw("Unicode display may be incorrect.")),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw("  Press any key to continue  ")),
+        ];
+
+        let paragraph = Paragraph::new(text)
+            .style(dialog_style)
+            .block(
+                Block::default()
+                    .title("Locale Warning")
+                    .borders(Borders::ALL)
+                    .style(dialog_style),
+            );
+
+        paragraph.render(dialog_area, buf);
+    }
+}

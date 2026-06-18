@@ -1,0 +1,98 @@
+#!/usr/bin/env expect
+# Smoke test T108: open a Unicode fixture file, navigate with arrow keys,
+# verify the editor starts and responds without crashing.
+#
+# Usage:
+#   expect tests/smoke/unicode_display.exp
+#
+# The test:
+#   1. Spawns ./target/debug/edit tests/fixtures/unicode_sample.txt
+#   2. Waits for initial render
+#   3. Sends Down / Right / Up / Left arrow keys to exercise navigation
+#   4. Presses Ctrl+Q to quit
+#   5. Asserts exit code 0 (no crash)
+#
+# Exit codes:
+#   0  — all assertions passed
+#   1  — any failure (timeout, unexpected output, non-zero exit)
+
+set timeout 10
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+proc fail {msg} {
+    puts stderr "FAIL: $msg"
+    exit 1
+}
+
+# ── Launch the editor ─────────────────────────────────────────────────────────
+
+set fixture "tests/fixtures/unicode_sample.txt"
+
+if {![file exists $fixture]} {
+    fail "fixture file not found: $fixture"
+}
+
+spawn ./target/debug/edit $fixture
+
+# Wait for the editor to initialise and render at least one frame.
+# Any output from the TUI means it started without crashing immediately.
+expect {
+    timeout { fail "editor did not start within $timeout seconds" }
+    -re ".+" {
+        # Initial render received; proceed.
+    }
+}
+
+# Small pause to let the first frame settle.
+after 200
+
+# ── Navigate: Down arrow ──────────────────────────────────────────────────────
+
+send "\[B"
+
+after 100
+
+# ── Navigate: Down arrow again ───────────────────────────────────────────────
+
+send "\[B"
+
+after 100
+
+# ── Navigate: Right arrow ────────────────────────────────────────────────────
+
+send "\[C"
+
+after 100
+
+# ── Navigate: Up arrow ───────────────────────────────────────────────────────
+
+send "\[A"
+
+after 100
+
+# ── Navigate: Left arrow ─────────────────────────────────────────────────────
+
+send "\[D"
+
+after 100
+
+# ── Quit: Ctrl+Q ─────────────────────────────────────────────────────────────
+
+send "\x11"
+
+# Wait for the process to exit cleanly.
+expect {
+    eof     { }
+    timeout { fail "editor did not exit within $timeout seconds after Ctrl+Q" }
+}
+
+# Collect the exit status.
+catch {wait} result
+set exit_code [lindex $result 3]
+if {$exit_code != 0} {
+    fail "editor exited with non-zero status: $exit_code (possible crash on Unicode input)"
+}
+
+puts "PASS: editor opened Unicode fixture and navigated without crash"
+exit 0

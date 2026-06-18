@@ -1,0 +1,98 @@
+#!/usr/bin/env expect
+# Smoke test T099: launch the editor, type text, save, quit, verify file contents.
+#
+# Usage:
+#   expect tests/smoke/basic_edit.exp
+#
+# The test:
+#   1. Spawns ./target/debug/edit /tmp/test_basic_edit.txt
+#   2. Types "Hello, World!"
+#   3. Presses Ctrl+S to save
+#   4. Presses Ctrl+Q to quit
+#   5. Reads back /tmp/test_basic_edit.txt and asserts it contains "Hello, World!"
+#
+# Exit codes:
+#   0  — all assertions passed
+#   1  — any failure (timeout, unexpected output, content mismatch)
+
+set timeout 10
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+proc fail {msg} {
+    puts stderr "FAIL: $msg"
+    exit 1
+}
+
+# ── Remove any leftover file from a previous run ──────────────────────────────
+
+set test_file "/tmp/test_basic_edit.txt"
+
+if {[file exists $test_file]} {
+    file delete $test_file
+}
+
+# ── Launch the editor ─────────────────────────────────────────────────────────
+
+spawn ./target/debug/edit $test_file
+
+# Wait for the editor to initialise and render at least one frame.
+# We don't match specific UI text because the placeholder rendering may vary;
+# instead we just let the process settle briefly.
+expect {
+    timeout { fail "editor did not start within $timeout seconds" }
+    -re ".+" {
+        # Any output means the TUI has started; proceed.
+    }
+}
+
+# ── Type the test string ──────────────────────────────────────────────────────
+
+send "Hello, World!"
+
+# Small pause so the keystrokes are processed before the save command.
+after 200
+
+# ── Save: Ctrl+S ─────────────────────────────────────────────────────────────
+
+send "\x13"
+
+# Allow time for the file write to complete.
+after 300
+
+# ── Quit: Ctrl+Q ─────────────────────────────────────────────────────────────
+
+send "\x11"
+
+# Wait for the process to exit.
+expect {
+    eof     { }
+    timeout { fail "editor did not exit within $timeout seconds after Ctrl+Q" }
+}
+
+# Collect the exit status.
+catch {wait} result
+set exit_code [lindex $result 3]
+if {$exit_code != 0} {
+    fail "editor exited with non-zero status: $exit_code"
+}
+
+# ── Verify file contents ──────────────────────────────────────────────────────
+
+if {![file exists $test_file]} {
+    fail "output file $test_file was not created"
+}
+
+set fh [open $test_file r]
+set contents [read $fh]
+close $fh
+
+# Strip trailing newline for comparison.
+set trimmed [string trimright $contents "\n\r"]
+
+if {[string first "Hello, World!" $trimmed] == -1} {
+    fail "file contents do not contain \"Hello, World!\"; got: $trimmed"
+}
+
+puts "PASS: $test_file contains \"Hello, World!\""
+exit 0

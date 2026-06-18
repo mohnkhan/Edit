@@ -1,0 +1,74 @@
+[package]
+name = "edit"
+version = "0.1.0"
+edition = "2021"
+description = "Linux-compatible reimplementation of MS-DOS EDIT.COM"
+license = "MIT"
+
+[lib]
+name = "edit"
+path = "src/lib.rs"
+
+[[bin]]
+name = "edit"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.26"
+crossterm = { version = "0.27", features = ["event-stream"] }
+unicode-width = "0.1"
+unicode-segmentation = "1.11"
+encoding_rs = "0.8"
+oem_cp = "2"
+ropey = "0.6"
+chardetng = "0.1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+log = "0.4"
+env_logger = "0.11"
+signal-hook = "0.3"
+arboard = "3"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+serde_json = "1"
+
+[[bench]]
+name = "startup"
+harness = false
+
+[[bench]]
+name = "large_file"
+harness = false
+
+[[bench]]
+name = "keystroke"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+
+[profile.release-static]
+inherits = "release"
+opt-level = 3
+lto = true
+strip = true
+
+[package.metadata.deb]
+name = "edit"
+maintainer = "The edit contributors"
+copyright = "2026, The edit contributors"
+license-file = ["LICENSE", "0"]
+extended-description = "Full-screen text editor for Linux terminals, faithfully reimplementing MS-DOS EDIT.COM."
+depends = "$auto"
+section = "editors"
+priority = "optional"
+assets = [
+  ["target/release/edit", "usr/bin/edit", "755"],
+  ["man/edit.1", "usr/share/man/man1/edit.1", "644"],
+]
