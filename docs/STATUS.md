@@ -10,6 +10,10 @@
 |---|---|---|
 | US1 | Basic File Editing (open, navigate, edit, save, quit) | Complete |
 | US2 | UTF-8/Unicode support, CP437/CP850/ISO-8859-1/Windows-1252 transcoding | Complete |
+| F003-US1 | Session restore: write session on clean exit; TUI restore dialog on relaunch | Complete |
+| F003-US2 | Handle missing/unreadable session files gracefully; status-bar warning | Complete |
+| F003-US3 | `--no-session` CLI flag suppresses restore prompt | Complete |
+| F003-US4 | Explicit file arguments bypass session restore | Complete |
 | US3 | DOS-style pull-down menu bar, keyboard and mouse navigation | Complete |
 | US4 | Find and Replace with regex support and match highlighting | Complete |
 | US5 | Auto-save and crash recovery (EDIT-RECOVERY-V1 format) | Complete |

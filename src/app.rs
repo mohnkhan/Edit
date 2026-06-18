@@ -76,17 +76,25 @@ pub struct App {
     pub search_state: SearchState,
     /// Transient message shown in the status bar (e.g. "Match 2/5").
     pub status_message: Option<String>,
+    /// Session data pending user confirmation; `Some` = restore dialog is visible.
+    pub pending_session_restore: Option<crate::session::SessionData>,
+    /// Default encoding resolved from config/CLI at startup.
+    pub default_encoding: EncodingId,
 }
 
 // ── App impl ─────────────────────────────────────────────────────────────────
 
 impl App {
-    /// Create an [`App`] from a loaded [`Config`], a list of file paths, and
-    /// the encoding to use when opening files.
-    ///
-    /// `default_encoding` is derived from the `--encoding` CLI flag (or the
-    /// `default_encoding` config field) via [`crate::encoding::encoding_from_str`].
-    pub fn new(config: Config, files: Vec<PathBuf>, default_encoding: EncodingId) -> Self {
+    /// Create an [`App`] from a loaded [`Config`], a list of file paths, the
+    /// encoding to use when opening files, an optional session to restore, and
+    /// an optional corrupt-session warning to display on startup.
+    pub fn new(
+        config: Config,
+        files: Vec<PathBuf>,
+        default_encoding: EncodingId,
+        session: Option<crate::session::SessionData>,
+        session_warning: Option<String>,
+    ) -> Self {
         let keymap = {
             let mut km = KeybindingMap::default_map();
             km.apply_user_overrides(&config.keybindings);
@@ -159,6 +167,14 @@ impl App {
             }
         }
 
+        // If a corrupt-session warning was produced but no valid session data
+        // arrived, surface the warning in the status bar immediately.
+        let initial_status = if session_warning.is_some() && session.is_none() {
+            session_warning
+        } else {
+            None
+        };
+
         Self {
             config,
             keymap,
@@ -173,7 +189,9 @@ impl App {
             pending_save_prompt: false,
             too_small: false,
             search_state: SearchState::default(),
-            status_message: None,
+            status_message: initial_status,
+            pending_session_restore: session,
+            default_encoding,
         }
     }
 
@@ -274,6 +292,30 @@ impl App {
     // ── Action dispatch ──────────────────────────────────────────────────────
 
     fn handle_action(&mut self, action: Action) -> io::Result<()> {
+        // When the session restore dialog is active, only Y/y/Enter (confirm)
+        // and N/n/Escape/Quit (decline) are forwarded; everything else is
+        // dropped silently so the dialog stays visible.
+        if self.pending_session_restore.is_some() {
+            match &action {
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'Y') => {
+                    self.do_restore_session();
+                    self.pending_session_restore = None;
+                }
+                Action::InsertNewline => {
+                    self.do_restore_session();
+                    self.pending_session_restore = None;
+                }
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
+                    self.pending_session_restore = None;
+                }
+                Action::Quit | Action::MenuClose => {
+                    self.pending_session_restore = None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // When the save-before-quit prompt is active, only S / D / C are valid.
         // All other actions are silently dropped so the prompt stays visible.
         if self.pending_save_prompt {
@@ -385,6 +427,11 @@ impl App {
             // just gate the quit so the render loop can show the prompt.
             log::debug!("Buffer modified — showing save prompt before quit");
         } else {
+            if let Some(data) = self.build_session_data() {
+                if let Err(e) = crate::session::save_session(&data) {
+                    log::warn!("session save failed: {}", e);
+                }
+            }
             self.running = false;
         }
     }
@@ -394,6 +441,11 @@ impl App {
         match self.active_buffer().save() {
             Ok(()) => {
                 self.pending_save_prompt = false;
+                if let Some(data) = self.build_session_data() {
+                    if let Err(e) = crate::session::save_session(&data) {
+                        log::warn!("session save failed: {}", e);
+                    }
+                }
                 self.running = false;
             }
             Err(e) => {
@@ -406,12 +458,169 @@ impl App {
     /// Called when the user chooses [D]iscard in the save-before-quit prompt.
     pub fn prompt_discard_and_quit(&mut self) {
         self.pending_save_prompt = false;
+        if let Some(data) = self.build_session_data() {
+            if let Err(e) = crate::session::save_session(&data) {
+                log::warn!("session save failed: {}", e);
+            }
+        }
         self.running = false;
     }
 
     /// Called when the user chooses [C]ancel in the save-before-quit prompt.
     pub fn prompt_cancel_quit(&mut self) {
         self.pending_save_prompt = false;
+    }
+
+    // ── Session save/restore ─────────────────────────────────────────────────
+
+    /// Snapshot the current editor state into a [`SessionData`] for saving.
+    ///
+    /// Returns `None` when there are no saveable buffers (i.e. every open
+    /// buffer is an untitled new-file stub with no path on disk).
+    pub fn build_session_data(&self) -> Option<crate::session::SessionData> {
+        use crate::session::{BufferEntry, SessionData, SplitLayoutKind};
+
+        let buffers: Vec<BufferEntry> = self
+            .buffers
+            .iter()
+            .filter_map(|buf| {
+                let path = buf.path.as_ref()?;
+                if !path.exists() {
+                    return None;
+                }
+                Some(BufferEntry {
+                    path: path.to_string_lossy().into_owned(),
+                    cursor_line: (buf.cursor.line + 1) as u32,
+                    cursor_col: (buf.cursor.grapheme_col + 1) as u32,
+                })
+            })
+            .collect();
+
+        if buffers.is_empty() {
+            return None;
+        }
+
+        let split_layout = match self.split_mode {
+            crate::ui::SplitMode::Single => SplitLayoutKind::None,
+            crate::ui::SplitMode::Vertical => SplitLayoutKind::Vertical,
+        };
+
+        // active_pane: 0 for single or left pane, 1 for right pane in a split.
+        let active_pane = match self.split_mode {
+            crate::ui::SplitMode::Single => 0,
+            crate::ui::SplitMode::Vertical => {
+                if self.active_idx > 0 { 1 } else { 0 }
+            }
+        };
+
+        Some(SessionData {
+            version: 1,
+            active_buffer: self.active_idx,
+            split_layout,
+            active_pane,
+            buffers,
+        })
+    }
+
+    /// Restore a previously saved session: open each recorded buffer, seek
+    /// cursors, and apply the saved split layout.
+    ///
+    /// Called after the user confirms the session restore dialog. T020–T022
+    /// (path validation, missing-file handling) are layered on top here.
+    pub fn do_restore_session(&mut self) {
+        use crate::security::sanitize::{validate_path, PathError};
+        use crate::session::SplitLayoutKind;
+
+        let session = match self.pending_session_restore.take() {
+            Some(s) => s,
+            None => return,
+        };
+
+        let mut new_buffers: Vec<Buffer> = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
+
+        for entry in &session.buffers {
+            let raw_path = std::path::Path::new(&entry.path);
+
+            // T020: path traversal check.
+            let open_path = match validate_path(raw_path) {
+                Ok(canonical) => canonical,
+                Err(PathError::Traversal) => {
+                    log::warn!("session: path traversal rejected: {:?}", raw_path);
+                    warnings.push(format!("session: path rejected: {}", raw_path.display()));
+                    continue;
+                }
+                Err(PathError::Io(_)) => {
+                    // Non-existent or unreadable — fall through to Buffer::open
+                    // which will produce an appropriate error (T021).
+                    raw_path.to_path_buf()
+                }
+            };
+
+            // T021: attempt to open the buffer.
+            match Buffer::open(open_path.clone(), self.default_encoding) {
+                Ok(mut buf) => {
+                    // Seek cursor to saved position (convert 1-based → 0-based).
+                    let target_line = (entry.cursor_line as usize).saturating_sub(1);
+                    let target_gcol = (entry.cursor_col as usize).saturating_sub(1);
+                    let line_count = buf.rope.line_count();
+                    let clamped_line = target_line.min(line_count.saturating_sub(1));
+                    let max_gcol = buf.rope.grapheme_count_on_line(clamped_line);
+                    let clamped_gcol = target_gcol.min(max_gcol);
+                    let vcol = crate::buffer::CursorPos::visual_col_from_grapheme_col(
+                        &buf.rope, clamped_line, clamped_gcol,
+                    );
+                    buf.cursor = crate::buffer::CursorPos {
+                        line: clamped_line,
+                        grapheme_col: clamped_gcol,
+                        visual_col: vcol,
+                    };
+                    // Apply syntax highlighting if configured.
+                    if self.config.highlight {
+                        if let Some(ref path) = buf.path.clone() {
+                            buf.syntax = crate::highlight::detect_highlighter(path);
+                        }
+                    }
+                    new_buffers.push(buf);
+                }
+                Err(_) => {
+                    let display = open_path.display().to_string();
+                    log::warn!("session: {} not found or unreadable", display);
+                    warnings.push(format!("session: {} not found", display));
+                }
+            }
+        }
+
+        // T022: handle all-failed case.
+        if new_buffers.is_empty() {
+            // Keep the existing blank buffer; show an error message.
+            self.status_message = Some("session: no files could be restored".to_string());
+            return;
+        }
+
+        // Replace buffers with restored set.
+        self.buffers = new_buffers;
+
+        // Restore split layout.
+        self.split_mode = match session.split_layout {
+            SplitLayoutKind::None => crate::ui::SplitMode::Single,
+            SplitLayoutKind::Vertical | SplitLayoutKind::Horizontal => {
+                crate::ui::SplitMode::Vertical
+            }
+        };
+
+        // Clamp active_idx to avoid out-of-bounds (I1).
+        self.active_idx = session
+            .active_buffer
+            .min(self.buffers.len().saturating_sub(1));
+
+        // Show first warning in the status bar; log the rest.
+        if let Some(first) = warnings.first() {
+            self.status_message = Some(first.clone());
+        }
+        for w in warnings.iter().skip(1) {
+            log::warn!("{}", w);
+        }
     }
 
     /// Handle an explicit Save action (Ctrl+S / F5).

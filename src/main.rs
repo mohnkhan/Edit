@@ -13,6 +13,7 @@ mod highlight;
 mod input;
 mod search;
 mod security;
+mod session;
 mod ui;
 
 use std::path::PathBuf;
@@ -88,8 +89,19 @@ fn main() {
     let default_encoding = encoding::encoding_from_str(&config.default_encoding);
     log::debug!("Default encoding: {:?}", default_encoding);
 
+    // ── Session restore: only when no explicit file arguments and --no-session not set
+    let (session, session_warning) = if files.is_empty() && !config.no_session {
+        match session::load_session() {
+            Ok(Some(data)) => (Some(data), None),
+            Err(msg) => (None, Some(msg)),
+            Ok(None) => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+
     // ── Launch editor ────────────────────────────────────────────────────────
-    let app = app::App::new(config, files, default_encoding);
+    let app = app::App::new(config, files, default_encoding, session, session_warning);
     if let Err(e) = app.run() {
         eprintln!("edit: fatal error: {}", e);
         process::exit(1);
@@ -159,6 +171,12 @@ fn build_cli() -> Command {
                 .long("debug")
                 .action(ArgAction::SetTrue)
                 .help("Enable verbose diagnostic logging"),
+        )
+        .arg(
+            Arg::new("no-session")
+                .long("no-session")
+                .action(ArgAction::SetTrue)
+                .help("Skip session restore prompt on startup"),
         )
 }
 

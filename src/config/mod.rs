@@ -81,6 +81,9 @@ pub fn merge_cli_flags(config: &mut Config, matches: &ArgMatches) {
     if let Some(locale) = matches.get_one::<String>("locale") {
         config.locale_override = Some(locale.clone());
     }
+    if matches.get_flag("no-session") {
+        config.no_session = true;
+    }
 }
 
 /// Validate config fields after loading; clamp out-of-range values and log errors.

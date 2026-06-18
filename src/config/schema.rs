@@ -93,6 +93,10 @@ pub struct Config {
     /// Set by `--locale` CLI flag or `EDIT_LOCALE` env var; not written to config.
     #[serde(skip)]
     pub locale_override: Option<String>,
+
+    /// Set by `--no-session` CLI flag; suppresses the session restore prompt.
+    #[serde(skip)]
+    pub no_session: bool,
 }
 
 impl Default for Config {
@@ -109,6 +113,7 @@ impl Default for Config {
             no_autosave: false,
             readonly: false,
             locale_override: None,
+            no_session: false,
         }
     }
 }
