@@ -10,6 +10,7 @@ pub enum Action {
     // File operations
     Save,
     SaveAs,
+    SaveAsEncoding,
     Open,
     Close,
     Quit,
@@ -91,6 +92,7 @@ impl KeybindingMap {
         // File
         map.insert("Ctrl+S".to_string(), Action::Save);
         map.insert("F5".to_string(), Action::Save);
+        map.insert("F12".to_string(), Action::SaveAsEncoding);
         map.insert("Ctrl+Q".to_string(), Action::Quit);
 
         // Edit
@@ -169,6 +171,7 @@ fn action_from_str(s: &str) -> Option<Action> {
     match s {
         "Save" => Some(Action::Save),
         "SaveAs" => Some(Action::SaveAs),
+        "SaveAsEncoding" => Some(Action::SaveAsEncoding),
         "Open" => Some(Action::Open),
         "Close" => Some(Action::Close),
         "Quit" => Some(Action::Quit),
@@ -305,5 +308,16 @@ mod tests {
     #[test]
     fn action_from_str_returns_none_for_unknown() {
         assert_eq!(action_from_str("DoSomethingCrazy"), None);
+    }
+
+    #[test]
+    fn test_f12_maps_to_save_as_encoding() {
+        let km = KeybindingMap::default_map();
+        assert_eq!(km.get_action("F12"), Some(&Action::SaveAsEncoding));
+    }
+
+    #[test]
+    fn test_save_as_encoding_round_trips_action_from_str() {
+        assert_eq!(action_from_str("SaveAsEncoding"), Some(Action::SaveAsEncoding));
     }
 }

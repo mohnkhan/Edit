@@ -56,6 +56,10 @@ path = "tests/integration/stress.rs"
 name = "session"
 path = "tests/integration/session.rs"
 
+[[test]]
+name = "encoding_select"
+path = "tests/integration/encoding_select.rs"
+
 [[bench]]
 name = "startup"
 harness = false

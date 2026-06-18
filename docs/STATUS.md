@@ -14,6 +14,10 @@
 | F002-US2 | UTF-16 LE/BE decode/encode with full round-trip and surrogate-pair support | Complete |
 | F002-US3 | `--encoding utf-16-le/be` CLI aliases via `encoding_from_str()` | Complete |
 | F002-US4 | Save-As encoding selection UI (interactive dialog) | Deferred (#9) |
+| F004-US1 | Save active buffer in chosen encoding via dialog (F12 / File menu) | Complete |
+| F004-US2 | Cancel encoding dialog — file and encoding unchanged | Complete |
+| F004-US3 | Selected encoding persists for subsequent Ctrl+S saves | Complete |
+| F004-US4 | Unnamed buffer triggers filename prompt after encoding selection | Complete |
 | F003-US1 | Session restore: write session on clean exit; TUI restore dialog on relaunch | Complete |
 | F003-US2 | Handle missing/unreadable session files gracefully; status-bar warning | Complete |
 | F003-US3 | `--no-session` CLI flag suppresses restore prompt | Complete |

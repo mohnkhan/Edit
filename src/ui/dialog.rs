@@ -10,12 +10,113 @@
 use ratatui::{
     buffer::Buffer as TuiBuffer,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 
+use crate::encoding::EncodingId;
 use crate::ui::theme::Theme;
+
+// ---------------------------------------------------------------------------
+// ENCODING_OPTIONS — T006
+// ---------------------------------------------------------------------------
+
+/// Ordered list of all supported output encodings shown in the Save As Encoding dialog.
+/// Tuple: (EncodingId, display label).
+pub const ENCODING_OPTIONS: &[(EncodingId, &str)] = &[
+    (EncodingId::Utf8, "UTF-8"),
+    (EncodingId::Utf16Le, "UTF-16 LE"),
+    (EncodingId::Utf16Be, "UTF-16 BE"),
+    (EncodingId::Cp437, "CP437"),
+    (EncodingId::Cp850, "CP850"),
+    (EncodingId::Iso8859_1, "ISO-8859-1"),
+    (EncodingId::Windows1252, "Windows-1252"),
+];
+
+// ---------------------------------------------------------------------------
+// EncodingSelectDialog — T007
+// ---------------------------------------------------------------------------
+
+/// Modal listbox dialog for selecting the output encoding when saving a file.
+///
+/// Layout (40 cols × 11 rows):
+/// ```text
+/// ┌─ Save As Encoding ──────────────────┐
+/// │  UTF-8                              │  <- highlighted with REVERSED
+/// │  UTF-16 LE                          │
+/// │  UTF-16 BE                          │
+/// │  CP437                              │
+/// │  CP850                              │
+/// │  ISO-8859-1                         │
+/// │  Windows-1252                       │
+/// │                                     │
+/// │  [↑↓] Select  [Enter] Save  [Esc] Cancel │
+/// └─────────────────────────────────────┘
+/// ```
+pub struct EncodingSelectDialog {
+    /// Index into [`ENCODING_OPTIONS`] of the currently highlighted row.
+    pub cursor_idx: usize,
+    /// Active color theme.
+    pub theme: &'static Theme,
+}
+
+impl Widget for EncodingSelectDialog {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        let dialog_area = centered_rect(40, 11, area);
+
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default()
+            .fg(self.theme.menubar_fg)
+            .bg(self.theme.menubar_bg);
+        let selected_style = dialog_style.add_modifier(Modifier::REVERSED);
+
+        // Maximum label chars before truncation (when terminal is smaller than 40 cols).
+        let max_label_chars = dialog_area.width.saturating_sub(8) as usize;
+
+        let mut lines: Vec<Line> = Vec::with_capacity(ENCODING_OPTIONS.len() + 2);
+
+        for (i, (_, label)) in ENCODING_OPTIONS.iter().enumerate() {
+            let style = if i == self.cursor_idx {
+                selected_style
+            } else {
+                dialog_style
+            };
+
+            let display = if dialog_area.width < 40 && max_label_chars > 0 {
+                let char_count = label.chars().count();
+                if char_count > max_label_chars && max_label_chars >= 1 {
+                    let truncated: String = label.chars().take(max_label_chars - 1).collect();
+                    format!("{}…", truncated)
+                } else {
+                    label.to_string()
+                }
+            } else {
+                label.to_string()
+            };
+
+            lines.push(Line::from(Span::styled(format!("  {}", display), style)));
+        }
+
+        // Blank separator row.
+        lines.push(Line::from(Span::raw("")));
+        // Hint row.
+        lines.push(Line::from(Span::styled(
+            "  [↑↓] Select  [Enter] Save  [Esc] Cancel",
+            dialog_style,
+        )));
+
+        let paragraph = Paragraph::new(lines).style(dialog_style).block(
+            Block::default()
+                .title("Save As Encoding")
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
+
+        paragraph.render(dialog_area, buf);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -30,6 +131,68 @@ fn centered_rect(w: u16, h: u16, area: Rect) -> Rect {
         y,
         width: w.min(area.width),
         height: h.min(area.height),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests — T008
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::theme::theme_by_name;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn test_encoding_options_has_seven_entries() {
+        assert_eq!(ENCODING_OPTIONS.len(), 7);
+    }
+
+    #[test]
+    fn test_encoding_options_first_is_utf8() {
+        assert_eq!(ENCODING_OPTIONS[0].0, EncodingId::Utf8);
+    }
+
+    #[test]
+    fn test_encoding_options_all_labels_nonempty() {
+        for (_, label) in ENCODING_OPTIONS {
+            assert!(!label.is_empty(), "label must not be empty");
+        }
+    }
+
+    #[test]
+    fn test_encoding_select_dialog_renders_without_panic() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let dialog = EncodingSelectDialog {
+                    cursor_idx: 0,
+                    theme: theme_by_name("classic"),
+                };
+                frame.render_widget(dialog, frame.size());
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_encoding_select_dialog_small_terminal_no_panic() {
+        let backend = TestBackend::new(25, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let dialog = EncodingSelectDialog {
+                    cursor_idx: 2,
+                    theme: theme_by_name("classic"),
+                };
+                frame.render_widget(dialog, frame.size());
+            })
+            .unwrap();
+        // Verify the rendered buffer fits within 25×8
+        let buf = terminal.backend().buffer().clone();
+        assert_eq!(buf.area.width, 25);
+        assert_eq!(buf.area.height, 8);
     }
 }
 

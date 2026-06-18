@@ -80,6 +80,10 @@ pub struct App {
     pub pending_session_restore: Option<crate::session::SessionData>,
     /// Default encoding resolved from config/CLI at startup.
     pub default_encoding: EncodingId,
+    /// Index into ENCODING_OPTIONS of the highlighted row; `Some` = dialog is open.
+    pub pending_encoding_select: Option<usize>,
+    /// Encoding selected in the dialog, held across the filename prompt (US4).
+    pub pending_save_as_encoding: Option<EncodingId>,
 }
 
 // ── App impl ─────────────────────────────────────────────────────────────────
@@ -189,6 +193,8 @@ impl App {
             status_message: initial_status,
             pending_session_restore: session,
             default_encoding,
+            pending_encoding_select: None,
+            pending_save_as_encoding: None,
         }
     }
 
@@ -230,6 +236,25 @@ impl App {
     /// Return a mutable reference to the currently active buffer.
     pub fn active_buffer_mut(&mut self) -> &mut Buffer {
         &mut self.buffers[self.active_idx]
+    }
+
+    // ── T011 — Encoding dialog helpers ───────────────────────────────────────
+
+    /// Return the index in [`ENCODING_OPTIONS`] that matches `enc`, or 0 if not found.
+    fn encoding_to_idx(enc: EncodingId) -> usize {
+        crate::ui::dialog::ENCODING_OPTIONS
+            .iter()
+            .position(|(e, _)| *e == enc)
+            .unwrap_or(0)
+    }
+
+    /// Return the display label for `enc` from [`ENCODING_OPTIONS`], or `"unknown"`.
+    fn label_for_encoding(enc: EncodingId) -> &'static str {
+        crate::ui::dialog::ENCODING_OPTIONS
+            .iter()
+            .find(|(e, _)| *e == enc)
+            .map(|(_, label)| *label)
+            .unwrap_or("unknown")
     }
 
     /// Viewport height in lines (terminal rows minus menubar and statusbar).
@@ -286,7 +311,7 @@ impl App {
 
     // ── Action dispatch ──────────────────────────────────────────────────────
 
-    fn handle_action(&mut self, action: Action) -> io::Result<()> {
+    pub fn handle_action(&mut self, action: Action) -> io::Result<()> {
         // When the session restore dialog is active, only Y/y/Enter (confirm)
         // and N/n/Escape/Quit (decline) are forwarded; everything else is
         // dropped silently so the dialog stays visible.
@@ -329,6 +354,31 @@ impl App {
             return Ok(());
         }
 
+        // T012 — Encoding-dialog intercept: when the dialog is open, only
+        // Up/Down (navigate), Enter (confirm), and Esc/MenuClose (cancel) are
+        // processed; all other actions are silently consumed.
+        if let Some(idx) = self.pending_encoding_select {
+            let n = crate::ui::dialog::ENCODING_OPTIONS.len();
+            match &action {
+                Action::MoveUp => {
+                    self.pending_encoding_select = Some((idx + n - 1) % n);
+                }
+                Action::MoveDown => {
+                    self.pending_encoding_select = Some((idx + 1) % n);
+                }
+                Action::InsertNewline => {
+                    let enc = crate::ui::dialog::ENCODING_OPTIONS[idx].0;
+                    self.pending_encoding_select = None;
+                    self.do_save_as_encoding(enc);
+                }
+                Action::MenuClose => {
+                    self.pending_encoding_select = None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         match action {
             Action::Quit => self.handle_quit(),
             Action::Resize(w, h) => self.handle_resize(w, h),
@@ -356,6 +406,14 @@ impl App {
 
             // Save prompt responses (T033)
             Action::Save => self.handle_save_action(),
+
+            // T013 — Save As Encoding dialog trigger
+            Action::SaveAsEncoding => {
+                if !self.buffers.is_empty() {
+                    let idx = Self::encoding_to_idx(self.buffers[self.active_idx].encoding);
+                    self.pending_encoding_select = Some(idx);
+                }
+            }
 
             // Search and replace (T055 / T057)
             Action::Find => {
@@ -628,6 +686,38 @@ impl App {
             Err(e) => {
                 log::error!("Save failed: {}", e);
             }
+        }
+    }
+
+    // ── T014 — do_save_as_encoding ────────────────────────────────────────────
+
+    /// Write the active buffer to disk in `enc`.
+    ///
+    /// Case A (named buffer): sets `buf.encoding = enc`, calls `buf.save()`;
+    /// on success updates the status bar; on failure reverts `buf.encoding`.
+    ///
+    /// Case B (unnamed buffer): handled in T020.
+    pub fn do_save_as_encoding(&mut self, enc: EncodingId) {
+        if self.buffers[self.active_idx].path.is_some() {
+            // Case A: named buffer — encode + atomic write.
+            let old_enc = self.buffers[self.active_idx].encoding;
+            self.buffers[self.active_idx].encoding = enc;
+            match self.buffers[self.active_idx].save() {
+                Ok(()) => {
+                    self.buffers[self.active_idx].modified = false;
+                    let label = Self::label_for_encoding(enc);
+                    self.status_message = Some(format!("Saved as {}", label));
+                }
+                Err(e) => {
+                    self.buffers[self.active_idx].encoding = old_enc;
+                    self.status_message = Some(format!("Save failed: {}", e));
+                }
+            }
+        } else {
+            // Case B — unnamed buffer: store the chosen encoding so that the
+            // next handle_save_as call (once the user provides a filename) will
+            // write the file in the selected encoding.
+            self.pending_save_as_encoding = Some(enc);
         }
     }
 
@@ -1375,11 +1465,24 @@ impl App {
     // ── T103 — SaveAs action ─────────────────────────────────────────────────
 
     /// Save the active buffer to a new path and update buffer.path.
+    ///
+    /// If `pending_save_as_encoding` is set (meaning the user selected an
+    /// encoding via the encoding dialog before typing a filename), that
+    /// encoding is applied to the buffer before writing and then cleared.
     pub fn handle_save_as(
         &mut self,
         new_path: std::path::PathBuf,
     ) -> Result<(), crate::buffer::BufferError> {
+        if let Some(enc) = self.pending_save_as_encoding.take() {
+            self.buffers[self.active_idx].encoding = enc;
+        }
         self.active_buffer_mut().save_as(new_path)
+    }
+
+    /// Discard a pending encoding selection (called when the user cancels
+    /// the filename-input dialog that follows encoding selection).
+    pub fn cancel_pending_save_as_encoding(&mut self) {
+        self.pending_save_as_encoding = None;
     }
 
     // ── T066 — Next / previous buffer ────────────────────────────────────────
@@ -1524,6 +1627,179 @@ impl App {
                 buf.syntax.as_ref().map(|h| h.name())
             );
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests — T016 / T017 / T018 / T019 / T022
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::encoding::EncodingId;
+
+    fn make_app() -> App {
+        App::new(
+            Config::default(),
+            vec![],
+            EncodingId::Utf8,
+            None,
+            None,
+        )
+    }
+
+    fn make_app_with_encoding(enc: EncodingId) -> App {
+        let mut app = make_app();
+        app.buffers[0].encoding = enc;
+        app
+    }
+
+    // ── T016 tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_save_as_encoding_action_opens_dialog() {
+        let mut app = make_app(); // UTF-8 buffer (index 0 in ENCODING_OPTIONS)
+        app.handle_action(Action::SaveAsEncoding).unwrap();
+        assert_eq!(app.pending_encoding_select, Some(0));
+    }
+
+    #[test]
+    fn test_dialog_preselects_current_encoding() {
+        let mut app = make_app_with_encoding(EncodingId::Utf16Le); // index 1
+        app.handle_action(Action::SaveAsEncoding).unwrap();
+        assert_eq!(app.pending_encoding_select, Some(1));
+    }
+
+    #[test]
+    fn test_dialog_move_down_increments_idx() {
+        let mut app = make_app();
+        app.pending_encoding_select = Some(1);
+        app.handle_action(Action::MoveDown).unwrap();
+        assert_eq!(app.pending_encoding_select, Some(2));
+    }
+
+    #[test]
+    fn test_dialog_move_down_wraps_at_end() {
+        let mut app = make_app();
+        app.pending_encoding_select = Some(6); // last item
+        app.handle_action(Action::MoveDown).unwrap();
+        assert_eq!(app.pending_encoding_select, Some(0));
+    }
+
+    #[test]
+    fn test_dialog_move_up_wraps_at_start() {
+        let mut app = make_app();
+        app.pending_encoding_select = Some(0);
+        app.handle_action(Action::MoveUp).unwrap();
+        assert_eq!(app.pending_encoding_select, Some(6));
+    }
+
+    #[test]
+    fn test_dialog_escape_closes() {
+        let mut app = make_app();
+        app.pending_encoding_select = Some(3);
+        app.handle_action(Action::MenuClose).unwrap();
+        assert_eq!(app.pending_encoding_select, None);
+    }
+
+    #[test]
+    fn test_dialog_other_action_consumed() {
+        let mut app = make_app();
+        app.pending_encoding_select = Some(2);
+        let gcol_before = app.buffers[0].cursor.grapheme_col;
+        app.handle_action(Action::MoveLeft).unwrap();
+        // Dialog state must be preserved (action consumed, not passed to editor).
+        assert_eq!(app.pending_encoding_select, Some(2));
+        // Cursor must not have moved.
+        assert_eq!(app.buffers[0].cursor.grapheme_col, gcol_before);
+    }
+
+    // ── T017 — Cancel contract ──────────────────────────────────────────────
+
+    #[test]
+    fn test_cancel_does_not_write_and_leaves_encoding_unchanged() {
+        let mut app = make_app();
+        // Start with UTF-8 encoding.
+        assert_eq!(app.buffers[0].encoding, EncodingId::Utf8);
+        app.pending_encoding_select = Some(3); // e.g. CP437 selected
+        // Cancel via MenuClose.
+        app.handle_action(Action::MenuClose).unwrap();
+        // Dialog closed.
+        assert_eq!(app.pending_encoding_select, None);
+        // Encoding unchanged.
+        assert_eq!(app.buffers[0].encoding, EncodingId::Utf8);
+        // No status message about encoding change.
+        assert!(
+            app.status_message.as_deref().map_or(true, |m| !m.starts_with("Saved as")),
+            "cancel must not produce a 'Saved as' message"
+        );
+    }
+
+    // ── T018 — Encoding persistence ─────────────────────────────────────────
+
+    #[test]
+    fn test_encoding_persists_on_regular_save() {
+        let path = std::env::temp_dir().join("edit_test_persist.txt");
+        std::fs::write(&path, b"Hello").unwrap();
+
+        let mut app = App::new(Config::default(), vec![path.clone()], EncodingId::Utf8, None, None);
+        // Save as UTF-16 LE via do_save_as_encoding (Case A).
+        app.do_save_as_encoding(EncodingId::Utf16Le);
+        // Subsequent regular save must use the new encoding.
+        app.buffers[0].save().unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(bytes[0..2], [0xFF, 0xFE], "file must start with UTF-16 LE BOM");
+    }
+
+    // ── T019 — Dialog reopens with updated preselect ─────────────────────────
+
+    #[test]
+    fn test_dialog_reopens_with_updated_preselect() {
+        let path = std::env::temp_dir().join("edit_test_preselect.txt");
+        std::fs::write(&path, b"Hello").unwrap();
+
+        let mut app = App::new(Config::default(), vec![path.clone()], EncodingId::Utf8, None, None);
+        app.do_save_as_encoding(EncodingId::Utf16Be);
+        let _ = std::fs::remove_file(&path);
+        // Re-open dialog — must pre-select UTF-16 BE (index 2).
+        app.handle_action(Action::SaveAsEncoding).unwrap();
+        assert_eq!(app.pending_encoding_select, Some(2));
+    }
+
+    // ── T022 — Pending encoding cleared on filename-prompt cancel ────────────
+
+    #[test]
+    fn test_unnamed_buf_encoding_cleared_on_filename_cancel() {
+        let mut app = make_app(); // unnamed buffer
+        app.pending_save_as_encoding = Some(EncodingId::Utf16Le);
+        app.cancel_pending_save_as_encoding();
+        assert_eq!(app.pending_save_as_encoding, None);
+    }
+
+    #[test]
+    fn test_unnamed_buf_encoding_applied_after_filename_confirm() {
+        let path = std::env::temp_dir().join("edit_test_t022_confirm.txt");
+        let mut app = make_app(); // unnamed buffer
+
+        // Simulate: user selected UTF-16 LE via encoding dialog for unnamed buf.
+        app.pending_save_as_encoding = Some(EncodingId::Utf16Le);
+
+        // Simulate: user typed a filename and confirmed → handle_save_as called.
+        let result = app.handle_save_as(path.clone());
+        // The write may fail (no actual FS write in make_app), but the
+        // encoding assignment happens before the write. We care that
+        // pending_save_as_encoding was consumed and the buffer encoding set.
+        assert_eq!(app.pending_save_as_encoding, None, "pending must be cleared");
+        assert_eq!(
+            app.active_buffer().encoding,
+            EncodingId::Utf16Le,
+            "buffer encoding must be updated even if write fails"
+        );
+        let _ = std::fs::remove_file(&path);
+        let _ = result; // allow write failure (unnamed buf has no content path)
     }
 }
 

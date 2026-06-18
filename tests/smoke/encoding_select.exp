@@ -1,0 +1,108 @@
+#!/usr/bin/env expect
+# Smoke test T034: F12 opens the Save As Encoding dialog; selecting UTF-16 BE
+# and pressing Enter writes a file with the correct BOM.
+#
+# Usage:
+#   expect tests/smoke/encoding_select.exp
+#
+# Requirements:
+#   - expect(1) and tmux(1) must be installed
+#   - The editor binary must be built: cargo build
+#   - hexdump(1) must be available
+#
+# Exit codes:
+#   0  — all assertions passed
+#   1  — any failure (timeout, unexpected output, byte-content mismatch)
+
+set timeout 15
+set test_file "/tmp/test_encoding_select.txt"
+set editor    "./target/debug/edit"
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+proc fail {msg} {
+    puts stderr "FAIL: $msg"
+    exit 1
+}
+
+# ── Setup ──────────────────────────────────────────────────────────────────────
+
+if {[file exists $test_file]} {
+    file delete $test_file
+}
+
+# Write a known UTF-8 seed so the buffer is non-empty and has a path.
+set fh [open $test_file w]
+puts -nonewline $fh "Hello, World!"
+close $fh
+
+# ── Launch the editor ─────────────────────────────────────────────────────────
+
+spawn $editor $test_file
+
+# Wait for the TUI to render at least one frame.
+expect {
+    timeout { fail "editor did not start within $timeout seconds" }
+    -re ".+" { }
+}
+
+# Brief settle — give ncurses time to paint the full initial frame.
+after 300
+
+# ── Open the Save As Encoding dialog (F12) ────────────────────────────────────
+
+send "\x1B\[24~"
+# F12 sends ESC [ 2 4 ~ in most terminals.
+
+expect {
+    timeout { fail "Save As Encoding dialog did not appear after F12" }
+    "Save As Encoding" { }
+}
+
+# ── Navigate two steps down → UTF-16 BE (index 2) ────────────────────────────
+
+# First ↓ — UTF-16 LE
+send "\x1B\[B"
+after 100
+
+# Second ↓ — UTF-16 BE
+send "\x1B\[B"
+after 100
+
+# ── Confirm selection ─────────────────────────────────────────────────────────
+
+send "\r"
+
+# Wait for the status bar to confirm the save.
+expect {
+    timeout { fail "status bar did not show encoding confirmation" }
+    "Saved as UTF-16 BE" { }
+    "UTF-16 BE" { }
+}
+
+# ── Quit the editor ───────────────────────────────────────────────────────────
+
+send "\x11"
+# Ctrl+Q
+
+expect {
+    timeout { fail "editor did not exit after Ctrl+Q" }
+    eof { }
+}
+
+# ── Verify the file has a UTF-16 BE BOM (0xFE 0xFF) ──────────────────────────
+
+if {![file exists $test_file]} {
+    fail "test file $test_file does not exist after save"
+}
+
+set hex [exec hexdump -C -n 2 $test_file]
+if {![string match "*fe ff*" $hex] && ![string match "*FE FF*" $hex]} {
+    fail "UTF-16 BE BOM not found; hexdump: $hex"
+}
+
+# ── Cleanup and report ────────────────────────────────────────────────────────
+
+file delete -force $test_file
+puts "PASS: encoding_select smoke test completed successfully"
+exit 0
