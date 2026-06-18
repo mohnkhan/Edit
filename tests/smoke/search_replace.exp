@@ -75,21 +75,30 @@ send "\x1bOR"
 
 after 150
 
-# ── Quit without saving ───────────────────────────────────────────────────────
+# ── Quit — handle both clean exit and save-before-quit prompt ────────────────
 
+# ESC first to dismiss any open dialog.
+send "\x1b"
+after 200
+
+# Ctrl+Q to request quit.
 send "\x11"
+after 500
+
+# If the buffer was modified (e.g. chars typed into editor before find dialog
+# was available), the editor shows a "save changes?" prompt.  Send 'D' to
+# discard and exit.  If the editor already exited cleanly the send is a no-op.
+send "D"
 
 # Wait for process to exit.
 expect {
     eof     { }
-    timeout { fail "editor did not exit within $timeout seconds after Ctrl+Q" }
+    timeout { fail "editor did not exit within $timeout seconds after Ctrl+Q / Discard" }
 }
 
 catch {wait} result
 set exit_code [lindex $result 3]
 
-# Acceptable exit codes: 0 (clean quit) or non-zero only when the binary is
-# not yet built.  We accept 0 exclusively for a smoke test.
 if {$exit_code != 0} {
     fail "editor exited with non-zero status $exit_code — possible crash"
 }

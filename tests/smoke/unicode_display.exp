@@ -48,38 +48,41 @@ expect {
 after 200
 
 # ── Navigate: Down arrow ──────────────────────────────────────────────────────
+# Arrow keys require the full ANSI escape sequence: ESC + [ + letter.
 
-send "\[B"
+send "\x1b\[B"
 
 after 100
 
 # ── Navigate: Down arrow again ───────────────────────────────────────────────
 
-send "\[B"
+send "\x1b\[B"
 
 after 100
 
 # ── Navigate: Right arrow ────────────────────────────────────────────────────
 
-send "\[C"
+send "\x1b\[C"
 
 after 100
 
 # ── Navigate: Up arrow ───────────────────────────────────────────────────────
 
-send "\[A"
+send "\x1b\[A"
 
 after 100
 
 # ── Navigate: Left arrow ─────────────────────────────────────────────────────
 
-send "\[D"
+send "\x1b\[D"
 
 after 100
 
-# ── Quit: Ctrl+Q ─────────────────────────────────────────────────────────────
+# ── Quit: Ctrl+Q; discard if save prompt appears ─────────────────────────────
 
 send "\x11"
+after 400
+send "D"
 
 # Wait for the process to exit cleanly.
 expect {
