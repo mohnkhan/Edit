@@ -110,6 +110,8 @@ impl<'a> StatusBar<'a> {
             EncodingId::Cp850 => "CP850",
             EncodingId::Iso8859_1 => "ISO-8859-1",
             EncodingId::Windows1252 => "WIN-1252",
+            EncodingId::Utf16Le => "UTF-16 LE",
+            EncodingId::Utf16Be => "UTF-16 BE",
         }
     }
 }

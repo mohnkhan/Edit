@@ -60,7 +60,7 @@ impl<'a> Widget for EditorWidget<'a> {
             .fg(self.theme.foreground)
             .bg(self.theme.background);
         let cursor_style = Style::default()
-            .fg(self.theme.background)  // invert: use background as fg …
+            .fg(self.theme.background) // invert: use background as fg …
             .bg(self.theme.foreground); // … and foreground as bg
 
         // Fill the entire area with the background color first.
@@ -136,12 +136,20 @@ impl<'a> Widget for EditorWidget<'a> {
                 match spans.binary_search_by_key(&byte_off, |s| s.start) {
                     Ok(i) => {
                         // Exact match on start.
-                        if byte_off < spans[i].end { spans[i].style } else { normal }
+                        if byte_off < spans[i].end {
+                            spans[i].style
+                        } else {
+                            normal
+                        }
                     }
                     Err(0) => normal,
                     Err(i) => {
                         let s = &spans[i - 1];
-                        if byte_off < s.end { s.style } else { normal }
+                        if byte_off < s.end {
+                            s.style
+                        } else {
+                            normal
+                        }
                     }
                 }
             }
@@ -150,7 +158,7 @@ impl<'a> Widget for EditorWidget<'a> {
             // collecting those that fit in content_width.
             let mut visual_col: usize = 0;
             let mut screen_col: usize = 0; // position within the content area
-            let mut byte_off: usize = 0;   // byte offset within line_str
+            let mut byte_off: usize = 0; // byte offset within line_str
 
             for grapheme in line_str.graphemes(true) {
                 let gw = UnicodeWidthStr::width(grapheme);
@@ -189,8 +197,7 @@ impl<'a> Widget for EditorWidget<'a> {
                 }
 
                 // Determine whether this grapheme is under the cursor.
-                let is_cursor = file_line == cursor.line
-                    && visual_col == cursor.visual_col;
+                let is_cursor = file_line == cursor.line && visual_col == cursor.visual_col;
 
                 // Pick the base style: cursor overrides syntax highlight.
                 let base_style = if is_cursor {
@@ -221,12 +228,10 @@ impl<'a> Widget for EditorWidget<'a> {
 
             // If the cursor is at the end of the line (past all graphemes) and
             // this is the cursor line, highlight that position.
-            let cursor_past_eol = file_line == cursor.line
-                && cursor.visual_col >= visual_col;
+            let cursor_past_eol = file_line == cursor.line && cursor.visual_col >= visual_col;
 
             if cursor_past_eol {
-                let cursor_screen_col =
-                    cursor.visual_col.saturating_sub(scroll_vcol);
+                let cursor_screen_col = cursor.visual_col.saturating_sub(scroll_vcol);
                 if cursor_screen_col < content_width {
                     let px = content_x_start + cursor_screen_col as u16;
                     buf.get_mut(px, screen_y)

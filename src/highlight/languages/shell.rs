@@ -4,8 +4,8 @@
 
 use std::sync::OnceLock;
 
-use regex::Regex;
 use ratatui::style::{Color, Style};
+use regex::Regex;
 
 use crate::highlight::{Highlighter, Span};
 use crate::ui::theme::CLASSIC;
@@ -64,7 +64,7 @@ impl Highlighter for ShellHighlighter {
 
     fn highlight(&self, line: &str) -> Vec<Span> {
         let keyword_style = Style::default().fg(CLASSIC.highlight_keyword);
-        let string_style  = Style::default().fg(CLASSIC.highlight_string);
+        let string_style = Style::default().fg(CLASSIC.highlight_string);
         let comment_style = Style::default().fg(CLASSIC.highlight_comment);
         // Reuse number color for variables (as specified in the task).
         let variable_style = Style::default().fg(CLASSIC.highlight_number);
@@ -120,7 +120,9 @@ mod tests {
         let line = "if [ -f file ]; then";
         let spans = h.highlight(line);
         let kw_style = Style::default().fg(CLASSIC.highlight_keyword);
-        assert!(spans.iter().any(|s| &line[s.start..s.end] == "if" && s.style == kw_style));
+        assert!(spans
+            .iter()
+            .any(|s| &line[s.start..s.end] == "if" && s.style == kw_style));
     }
 
     #[test]
@@ -129,7 +131,9 @@ mod tests {
         let line = "echo $HOME";
         let spans = h.highlight(line);
         let var_style = Style::default().fg(CLASSIC.highlight_number);
-        assert!(spans.iter().any(|s| &line[s.start..s.end] == "$HOME" && s.style == var_style));
+        assert!(spans
+            .iter()
+            .any(|s| &line[s.start..s.end] == "$HOME" && s.style == var_style));
     }
 
     #[test]

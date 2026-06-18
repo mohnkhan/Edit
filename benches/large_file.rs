@@ -4,13 +4,9 @@ fn bench_rope_from_str(c: &mut Criterion) {
     let mut group = c.benchmark_group("rope_construction");
     for size in [1_000usize, 10_000, 100_000] {
         let content = "a".repeat(size);
-        group.bench_with_input(
-            BenchmarkId::new("from_str", size),
-            &content,
-            |b, s| {
-                b.iter(|| edit::buffer::rope::EditorRope::from_str(s));
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("from_str", size), &content, |b, s| {
+            b.iter(|| edit::buffer::rope::EditorRope::from_str(s));
+        });
     }
     group.finish();
 }

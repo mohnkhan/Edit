@@ -22,8 +22,7 @@ use std::path::PathBuf;
 fn log_dir() -> PathBuf {
     // `dirs::state_dir()` already implements the XDG_STATE_HOME / fallback
     // logic, returning `None` only when neither the env var nor $HOME is set.
-    let base: PathBuf = dirs::state_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    let base: PathBuf = dirs::state_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
 
     base.join("edit").join("logs")
 }
@@ -149,7 +148,10 @@ fn log_startup_info(log_path: &std::path::Path) {
             std::env::var("NCURSES_TRACE").unwrap_or_else(|_| "(not set)".to_owned())
         );
         log::debug!("TERM={}", std::env::var("TERM").unwrap_or_default());
-        log::debug!("COLORTERM={}", std::env::var("COLORTERM").unwrap_or_default());
+        log::debug!(
+            "COLORTERM={}",
+            std::env::var("COLORTERM").unwrap_or_default()
+        );
     }
 }
 

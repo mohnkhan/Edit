@@ -30,7 +30,7 @@ use crate::encoding::EncodingId;
 /// `std::hash`, which has an unstable hasher seed).
 fn fnv1a_64(data: &[u8]) -> u64 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0001_00000_01b3;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut h = OFFSET;
     for &b in data {
         h ^= b as u64;
@@ -339,11 +339,7 @@ pub fn write_recovery_for_buffer(buf: &mut Buffer, _interval_secs: u32) {
     }
 
     buf.autosave.last_save_at = Instant::now();
-    log::debug!(
-        "Auto-saved recovery for {:?} ({} bytes)",
-        path,
-        content_len
-    );
+    log::debug!("Auto-saved recovery for {:?} ({} bytes)", path, content_len);
 }
 
 // ---------------------------------------------------------------------------
@@ -416,10 +412,7 @@ pub fn parse_recovery_bytes(raw: &[u8]) -> Result<RecoveryData, RecoveryError> {
     let mut lines = text.splitn(usize::MAX, '\n');
 
     // --- Version magic -------------------------------------------------------
-    let version_line = lines
-        .next()
-        .unwrap_or("")
-        .trim_end_matches('\r');
+    let version_line = lines.next().unwrap_or("").trim_end_matches('\r');
     if version_line != "EDIT-RECOVERY-V1" {
         if version_line.starts_with("EDIT-RECOVERY-V") {
             return Err(RecoveryError::UnknownVersion(version_line.to_string()));
@@ -474,10 +467,10 @@ pub fn parse_recovery_bytes(raw: &[u8]) -> Result<RecoveryData, RecoveryError> {
         ));
     }
 
-    let original_path = original_path
-        .ok_or_else(|| RecoveryError::InvalidFormat("missing 'path' field".into()))?;
-    let encoding = encoding
-        .ok_or_else(|| RecoveryError::InvalidFormat("missing 'encoding' field".into()))?;
+    let original_path =
+        original_path.ok_or_else(|| RecoveryError::InvalidFormat("missing 'path' field".into()))?;
+    let encoding =
+        encoding.ok_or_else(|| RecoveryError::InvalidFormat("missing 'encoding' field".into()))?;
     let timestamp = timestamp
         .ok_or_else(|| RecoveryError::InvalidFormat("missing 'timestamp' field".into()))?;
     let content_len = content_len
@@ -520,6 +513,8 @@ fn encoding_name(enc: EncodingId) -> &'static str {
         EncodingId::Cp850 => "cp850",
         EncodingId::Iso8859_1 => "iso-8859-1",
         EncodingId::Windows1252 => "windows-1252",
+        EncodingId::Utf16Le => "utf-16-le",
+        EncodingId::Utf16Be => "utf-16-be",
     }
 }
 
@@ -631,7 +626,9 @@ mod tests {
 
     #[test]
     fn parse_recovery_missing_separator() {
-        let raw = b"EDIT-RECOVERY-V1\npath: /tmp/x\nencoding: utf-8\ntimestamp: 0\ncontent_len: 0\n".to_vec();
+        let raw =
+            b"EDIT-RECOVERY-V1\npath: /tmp/x\nencoding: utf-8\ntimestamp: 0\ncontent_len: 0\n"
+                .to_vec();
         let err = parse_recovery_bytes(&raw).unwrap_err();
         // Could be InvalidFormat (separator not found) or MissingField; either is acceptable.
         // Just verify it's an error.
