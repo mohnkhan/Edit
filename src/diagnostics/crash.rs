@@ -121,56 +121,30 @@ pub fn install_panic_hook() {
     }));
 }
 
-/// Installs a SIGSEGV signal handler that writes a crash report then exits.
+/// Installs a SIGTERM/SIGABRT handler that writes a crash report then exits.
 ///
-/// Uses `signal_hook::low_level::register` (async-signal-safe path) to
-/// register the handler. On SIGSEGV the process:
-/// 1. Attempts to write a crash report to the XDG state directory.
-/// 2. Exits with code **139** (the conventional SIGSEGV exit status on Linux).
-///
-/// # Safety
-///
-/// Signal handlers execute in a restricted async-signal-safe context.
-/// The crash-file write is best-effort; it may be incomplete if the
-/// process address space is severely corrupted.
-///
-/// # Errors / panics
-///
-/// Logs a warning (via `eprintln!`) if registration fails; does not panic.
+/// SIGSEGV is a synchronous fault signal forbidden by `signal-hook`; the panic
+/// hook already covers Rust-level memory safety violations. This handler covers
+/// external termination (SIGTERM) and abort (SIGABRT) so crash reports are
+/// written when the OS or another process kills the editor.
 pub fn install_signal_handler() {
-    // SAFETY: We register a handler that performs only async-signal-safe
-    // operations (write(2) via a raw fd) where possible, then calls _exit(2).
-    // The `signal_hook::low_level::register` contract requires the closure to
-    // be `Fn() + Sync + Send + 'static`.
-    let result = unsafe {
-        signal_hook::low_level::register(signal_hook::consts::SIGSEGV, move || {
-            // Best-effort: open the crash dir and write a terse report.
-            // We deliberately avoid any heap allocation that might recurse
-            // into a corrupted allocator; the helpers above do allocate, but
-            // they are our best available option short of assembly.
-            let dir = crash_dir();
-            // Try to create the directory; ignore errors in the signal handler.
-            let _ = fs::create_dir_all(&dir);
-            let path = dir.join(format!("crash-{}-sigsegv.log", unix_ts()));
-            if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
-                write_report(&mut f, "SIGSEGV", "Segmentation fault (signal 11)");
-                // Flush best-effort.
-                let _ = f.flush();
-            }
-            // Write a brief notice to stderr (fd 2) using a raw syscall path
-            // via eprintln! — this allocates but is the clearest approach.
-            eprintln!("[edit] SIGSEGV — crash report: {}", path.display());
-
-            // Exit with code 139 (128 + SIGSEGV signal number 11).
-            // SAFETY: _exit is async-signal-safe.
-            // Use std::process::exit (async-signal-safe on Linux for code 139).
-            std::process::exit(139);
-        })
-    };
-
-    match result {
-        Ok(_) => log::debug!("SIGSEGV crash handler installed"),
-        Err(e) => eprintln!("[edit] WARNING: could not install SIGSEGV handler: {e}"),
+    for &sig in &[signal_hook::consts::SIGTERM, signal_hook::consts::SIGABRT] {
+        let result = unsafe {
+            signal_hook::low_level::register(sig, move || {
+                let dir = crash_dir();
+                let _ = fs::create_dir_all(&dir);
+                let path = dir.join(format!("crash-{}-signal{}.log", unix_ts(), sig));
+                if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+                    write_report(&mut f, "SIGNAL", &format!("Received signal {sig}"));
+                    let _ = f.flush();
+                }
+                std::process::exit(128 + sig);
+            })
+        };
+        match result {
+            Ok(_) => log::debug!("Signal {} crash handler installed", sig),
+            Err(e) => eprintln!("[edit] WARNING: could not install signal {sig} handler: {e}"),
+        }
     }
 }
 
