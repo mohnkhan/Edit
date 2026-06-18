@@ -25,12 +25,12 @@ Verify tests FAIL before implementing.
 All fixture tasks are independent of each other and of the source changes — do them first so
 integration tests can reference real binary files.
 
-- [ ] T001 Create git branch `002-utf16-transcoding` from `origin/master` and push tracking branch
-- [ ] T002 [P] Generate `tests/fixtures/utf16le_bom.bin` — UTF-16 LE with BOM containing ASCII + non-ASCII ("Hello, UTF-16 LE! こんにちは") via `python3 -c "open('tests/fixtures/utf16le_bom.bin','wb').write('Hello, UTF-16 LE! こんにちは'.encode('utf-16'))"`
-- [ ] T003 [P] Generate `tests/fixtures/utf16be_bom.bin` — UTF-16 BE with BOM via `python3 -c "import codecs; open('tests/fixtures/utf16be_bom.bin','wb').write(codecs.BOM_UTF16_BE + 'Hello, UTF-16 BE! こんにちは'.encode('utf-16-be'))"`
-- [ ] T004 [P] Generate `tests/fixtures/utf16le_nobom.bin` — UTF-16 LE without BOM via `python3 -c "open('tests/fixtures/utf16le_nobom.bin','wb').write('BOM-less LE file'.encode('utf-16-le'))"`
-- [ ] T005 [P] Generate `tests/fixtures/utf16le_surrogate.bin` — UTF-16 LE with BOM + supplementary chars (emoji 🌍 U+1F30D, which encodes as surrogate pair) via `python3 -c "open('tests/fixtures/utf16le_surrogate.bin','wb').write('Emoji: 🌍 U+1F30D'.encode('utf-16'))"`
-- [ ] T006 [P] Verify all four fixtures: `hexdump -C tests/fixtures/utf16le_bom.bin | head -2` must show `ff fe` prefix; `tests/fixtures/utf16be_bom.bin` must show `fe ff` prefix; `tests/fixtures/utf16le_nobom.bin` must NOT start with `ff fe`; `tests/fixtures/utf16le_surrogate.bin` must contain `d8`/`dc` surrogate bytes
+- [X] T001 Create git branch `002-utf16-transcoding` from `origin/master` and push tracking branch
+- [X] T002 [P] Generate `tests/fixtures/utf16le_bom.bin` — UTF-16 LE with BOM containing ASCII + non-ASCII ("Hello, UTF-16 LE! こんにちは") via `python3 -c "open('tests/fixtures/utf16le_bom.bin','wb').write('Hello, UTF-16 LE! こんにちは'.encode('utf-16'))"`
+- [X] T003 [P] Generate `tests/fixtures/utf16be_bom.bin` — UTF-16 BE with BOM via `python3 -c "import codecs; open('tests/fixtures/utf16be_bom.bin','wb').write(codecs.BOM_UTF16_BE + 'Hello, UTF-16 BE! こんにちは'.encode('utf-16-be'))"`
+- [X] T004 [P] Generate `tests/fixtures/utf16le_nobom.bin` — UTF-16 LE without BOM via `python3 -c "open('tests/fixtures/utf16le_nobom.bin','wb').write('BOM-less LE file'.encode('utf-16-le'))"`
+- [X] T005 [P] Generate `tests/fixtures/utf16le_surrogate.bin` — UTF-16 LE with BOM + supplementary chars (emoji 🌍 U+1F30D, which encodes as surrogate pair) via `python3 -c "open('tests/fixtures/utf16le_surrogate.bin','wb').write('Emoji: 🌍 U+1F30D'.encode('utf-16'))"`
+- [X] T006 [P] Verify all four fixtures: `hexdump -C tests/fixtures/utf16le_bom.bin | head -2` must show `ff fe` prefix; `tests/fixtures/utf16be_bom.bin` must show `fe ff` prefix; `tests/fixtures/utf16le_nobom.bin` must NOT start with `ff fe`; `tests/fixtures/utf16le_surrogate.bin` must contain `d8`/`dc` surrogate bytes
 
 ---
 
@@ -42,11 +42,11 @@ registry, and add stub match arms so the project compiles before any story imple
 **⚠️ CRITICAL**: Every later phase depends on this phase completing successfully.
 `cargo build` must succeed (with stub arms) before Phase 3 work starts.
 
-- [ ] T007 Add `Utf16Le` and `Utf16Be` variants to `EncodingId` enum in `src/encoding/detect.rs` (after `Windows1252` variant; no logic change yet — enum extension only)
-- [ ] T008 [P] Add two new `EncodingProfile` entries to `ENCODING_REGISTRY` in `src/encoding/detect.rs`: `{ id: EncodingId::Utf16Le, name: "UTF-16 LE", bom: Some(&[0xFF, 0xFE]) }` and `{ id: EncodingId::Utf16Be, name: "UTF-16 BE", bom: Some(&[0xFE, 0xFF]) }` (depends on T007)
-- [ ] T009 [P] Add stub `EncodingId::Utf16Le | EncodingId::Utf16Be => unimplemented!()` arms to all exhaustive `match encoding` blocks in `src/encoding/transcode.rs` to make the file compile (depends on T007)
-- [ ] T010 [P] Add stub `"utf-16-le" | "utf16-le" | "utf16le" | "utf-16-be" | "utf16-be" | "utf16be" | "utf-16" => todo!()` branch to `encoding_from_str()` in `src/encoding/mod.rs` (depends on T007)
-- [ ] T011 Run `cargo build` and confirm zero errors (stubs may warn about `unimplemented!`/`todo!` — that is expected); fix any compile errors before proceeding (depends on T007–T010)
+- [X] T007 Add `Utf16Le` and `Utf16Be` variants to `EncodingId` enum in `src/encoding/detect.rs` (after `Windows1252` variant; no logic change yet — enum extension only)
+- [X] T008 [P] Add two new `EncodingProfile` entries to `ENCODING_REGISTRY` in `src/encoding/detect.rs`: `{ id: EncodingId::Utf16Le, name: "UTF-16 LE", bom: Some(&[0xFF, 0xFE]) }` and `{ id: EncodingId::Utf16Be, name: "UTF-16 BE", bom: Some(&[0xFE, 0xFF]) }` (depends on T007)
+- [X] T009 [P] Add stub `EncodingId::Utf16Le | EncodingId::Utf16Be => unimplemented!()` arms to all exhaustive `match encoding` blocks in `src/encoding/transcode.rs` to make the file compile (depends on T007)
+- [X] T010 [P] Add stub `"utf-16-le" | "utf16-le" | "utf16le" | "utf-16-be" | "utf16-be" | "utf16be" | "utf-16" => todo!()` branch to `encoding_from_str()` in `src/encoding/mod.rs` (depends on T007)
+- [X] T011 Run `cargo build` and confirm zero errors (stubs may warn about `unimplemented!`/`todo!` — that is expected); fix any compile errors before proceeding (depends on T007–T010)
 
 **Checkpoint**: `cargo build` passes → user story implementation can begin
 
@@ -63,18 +63,18 @@ UTF-16 tests pass; existing tests unchanged.
 
 ### Tests for User Story 1 (TDD — write FIRST, verify FAIL before implementing)
 
-- [ ] T012 [P] [US1] Write unit tests for `detect_encoding()` BOM handling in `src/encoding/detect.rs` `#[cfg(test)]` block — cover: UTF-16 LE BOM (`\xFF\xFE`) → `EncodingId::Utf16Le`; UTF-16 BE BOM (`\xFE\xFF`) → `EncodingId::Utf16Be`; UTF-8 still → `EncodingId::Utf8`; empty bytes → `EncodingId::Utf8` (4 new test cases)
-- [ ] T013 [P] [US1] Write unit tests for `decode(bytes, Utf16Le)` and `decode(bytes, Utf16Be)` in `src/encoding/transcode.rs` `#[cfg(test)]` block — cover: UTF-16 LE bytes with BOM → correct UTF-8 string with BOM stripped; UTF-16 BE bytes with BOM → correct UTF-8 string with BOM stripped; empty `&[]` → `Ok("")`; odd-byte-length input → `Err(TranscodeError::InvalidUtf8)`; surrogate pair input (from `tests/fixtures/utf16le_surrogate.bin`) → correct UTF-8 (6 new test cases)
-- [ ] T014 [US1] Run `cargo test -- encoding` and confirm T012/T013 tests FAIL with `unimplemented!` or similar (depends on T012, T013; must FAIL to validate TDD setup)
+- [X] T012 [P] [US1] Write unit tests for `detect_encoding()` BOM handling in `src/encoding/detect.rs` `#[cfg(test)]` block — cover: UTF-16 LE BOM (`\xFF\xFE`) → `EncodingId::Utf16Le`; UTF-16 BE BOM (`\xFE\xFF`) → `EncodingId::Utf16Be`; UTF-8 still → `EncodingId::Utf8`; empty bytes → `EncodingId::Utf8` (4 new test cases)
+- [X] T013 [P] [US1] Write unit tests for `decode(bytes, Utf16Le)` and `decode(bytes, Utf16Be)` in `src/encoding/transcode.rs` `#[cfg(test)]` block — cover: UTF-16 LE bytes with BOM → correct UTF-8 string with BOM stripped; UTF-16 BE bytes with BOM → correct UTF-8 string with BOM stripped; empty `&[]` → `Ok("")`; odd-byte-length input → `Err(TranscodeError::InvalidUtf8)`; surrogate pair input (from `tests/fixtures/utf16le_surrogate.bin`) → correct UTF-8 (6 new test cases)
+- [X] T014 [US1] Run `cargo test -- encoding` and confirm T012/T013 tests FAIL with `unimplemented!` or similar (depends on T012, T013; must FAIL to validate TDD setup)
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Fix `detect_encoding()` in `src/encoding/detect.rs` — replace lines that currently return `EncodingId::Utf8` for UTF-16 BOMs with: `if bytes.starts_with(UTF16_LE_BOM) { return EncodingId::Utf16Le; }` and `if bytes.starts_with(UTF16_BE_BOM) { return EncodingId::Utf16Be; }` (depends on T014)
-- [ ] T016 [US1] Replace stub arm for `Utf16Le` in `decode()` in `src/encoding/transcode.rs` with: `EncodingId::Utf16Le => { let (cow, _, _) = encoding_rs::UTF_16_LE.decode(bytes); Ok(cow.into_owned()) }` — `encoding_rs::UTF_16_LE.decode()` strips the BOM automatically (depends on T014)
-- [ ] T017 [US1] Replace stub arm for `Utf16Be` in `decode()` in `src/encoding/transcode.rs` with: `EncodingId::Utf16Be => { let (cow, _, _) = encoding_rs::UTF_16_BE.decode(bytes); Ok(cow.into_owned()) }` (depends on T014)
-- [ ] T018 [US1] Add odd-byte-length guard before the `encoding_rs` call in both UTF-16 decode arms in `src/encoding/transcode.rs`: `if bytes.len() % 2 != 0 { return Err(TranscodeError::InvalidUtf8); }` (depends on T016, T017)
-- [ ] T019 [US1] Verify status bar display by running `cargo test` and checking that opening a UTF-16 LE buffer shows `"UTF-16 LE"` — this should work automatically via `ENCODING_REGISTRY` names set in T008; if a test is missing, add one that checks `EncodingProfile.name` for `Utf16Le` and `Utf16Be` in `src/encoding/detect.rs` tests
-- [ ] T020 [US1] Run `cargo test -- encoding` and confirm all T012/T013 tests now PASS (depends on T015–T018)
+- [X] T015 [US1] Fix `detect_encoding()` in `src/encoding/detect.rs` — replace lines that currently return `EncodingId::Utf8` for UTF-16 BOMs with: `if bytes.starts_with(UTF16_LE_BOM) { return EncodingId::Utf16Le; }` and `if bytes.starts_with(UTF16_BE_BOM) { return EncodingId::Utf16Be; }` (depends on T014)
+- [X] T016 [US1] Replace stub arm for `Utf16Le` in `decode()` in `src/encoding/transcode.rs` with: `EncodingId::Utf16Le => { let (cow, _, _) = encoding_rs::UTF_16_LE.decode(bytes); Ok(cow.into_owned()) }` — `encoding_rs::UTF_16_LE.decode()` strips the BOM automatically (depends on T014)
+- [X] T017 [US1] Replace stub arm for `Utf16Be` in `decode()` in `src/encoding/transcode.rs` with: `EncodingId::Utf16Be => { let (cow, _, _) = encoding_rs::UTF_16_BE.decode(bytes); Ok(cow.into_owned()) }` (depends on T014)
+- [X] T018 [US1] Add odd-byte-length guard before the `encoding_rs` call in both UTF-16 decode arms in `src/encoding/transcode.rs`: `if bytes.len() % 2 != 0 { return Err(TranscodeError::InvalidUtf8); }` (depends on T016, T017)
+- [X] T019 [US1] Verify status bar display by running `cargo test` and checking that opening a UTF-16 LE buffer shows `"UTF-16 LE"` — this should work automatically via `ENCODING_REGISTRY` names set in T008; if a test is missing, add one that checks `EncodingProfile.name` for `Utf16Le` and `Utf16Be` in `src/encoding/detect.rs` tests
+- [X] T020 [US1] Run `cargo test -- encoding` and confirm all T012/T013 tests now PASS (depends on T015–T018)
 
 **Checkpoint**: US1 fully functional — open UTF-16 LE/BE files, correct display, status bar correct
 
@@ -90,16 +90,16 @@ identical bytes verified by byte-level comparison.
 
 ### Tests for User Story 2 (TDD — write FIRST, verify FAIL before implementing)
 
-- [ ] T021 [P] [US2] Write unit tests for `encode(s, Utf16Le)` in `src/encoding/transcode.rs` `#[cfg(test)]` block — cover: basic ASCII string produces `[0xFF, 0xFE]` + UTF-16 LE bytes; empty string `""` → `Ok(vec![0xFF, 0xFE])` (BOM only); string with non-BMP char produces correct surrogate-pair bytes (3 new test cases)
-- [ ] T022 [P] [US2] Write unit tests for `encode(s, Utf16Be)` in `src/encoding/transcode.rs` `#[cfg(test)]` block — cover: basic ASCII string produces `[0xFE, 0xFF]` + UTF-16 BE bytes; empty string → `Ok(vec![0xFE, 0xFF])` (2 new test cases)
-- [ ] T023 [US2] Write failing integration round-trip tests in `tests/integration/encoding_roundtrip.rs` — cover: open `tests/fixtures/utf16le_bom.bin`, encode result, compare byte-by-byte to original (pure round-trip); open `tests/fixtures/utf16be_bom.bin`, round-trip; open `tests/fixtures/utf16le_surrogate.bin`, round-trip (3 new integration test cases)
-- [ ] T024 [US2] Run `cargo test -- encoding::transcode` and confirm T021/T022 tests FAIL; run `cargo test --test encoding_roundtrip` and confirm T023 tests FAIL (depends on T021–T023)
+- [X] T021 [P] [US2] Write unit tests for `encode(s, Utf16Le)` in `src/encoding/transcode.rs` `#[cfg(test)]` block — cover: basic ASCII string produces `[0xFF, 0xFE]` + UTF-16 LE bytes; empty string `""` → `Ok(vec![0xFF, 0xFE])` (BOM only); string with non-BMP char produces correct surrogate-pair bytes (3 new test cases)
+- [X] T022 [P] [US2] Write unit tests for `encode(s, Utf16Be)` in `src/encoding/transcode.rs` `#[cfg(test)]` block — cover: basic ASCII string produces `[0xFE, 0xFF]` + UTF-16 BE bytes; empty string → `Ok(vec![0xFE, 0xFF])` (2 new test cases)
+- [X] T023 [US2] Write failing integration round-trip tests in `tests/integration/encoding_roundtrip.rs` — cover: open `tests/fixtures/utf16le_bom.bin`, encode result, compare byte-by-byte to original (pure round-trip); open `tests/fixtures/utf16be_bom.bin`, round-trip; open `tests/fixtures/utf16le_surrogate.bin`, round-trip (3 new integration test cases)
+- [X] T024 [US2] Run `cargo test -- encoding::transcode` and confirm T021/T022 tests FAIL; run `cargo test --test encoding_roundtrip` and confirm T023 tests FAIL (depends on T021–T023)
 
 ### Implementation for User Story 2
 
-- [ ] T025 [US2] Replace stub arm for `Utf16Le` in `encode()` in `src/encoding/transcode.rs` with: `EncodingId::Utf16Le => { let (cow, _, _) = encoding_rs::UTF_16_LE.encode(s); let mut out = vec![0xFF, 0xFE]; out.extend_from_slice(&cow); Ok(out) }` (depends on T024)
-- [ ] T026 [US2] Replace stub arm for `Utf16Be` in `encode()` in `src/encoding/transcode.rs` with: `EncodingId::Utf16Be => { let (cow, _, _) = encoding_rs::UTF_16_BE.encode(s); let mut out = vec![0xFE, 0xFF]; out.extend_from_slice(&cow); Ok(out) }` (depends on T024)
-- [ ] T027 [US2] Run `cargo test -- encoding::transcode encoding_roundtrip` and confirm all T021–T023 tests now PASS and no pre-existing tests regress (depends on T025, T026)
+- [X] T025 [US2] Replace stub arm for `Utf16Le` in `encode()` in `src/encoding/transcode.rs` with: `EncodingId::Utf16Le => { let (cow, _, _) = encoding_rs::UTF_16_LE.encode(s); let mut out = vec![0xFF, 0xFE]; out.extend_from_slice(&cow); Ok(out) }` (depends on T024)
+- [X] T026 [US2] Replace stub arm for `Utf16Be` in `encode()` in `src/encoding/transcode.rs` with: `EncodingId::Utf16Be => { let (cow, _, _) = encoding_rs::UTF_16_BE.encode(s); let mut out = vec![0xFE, 0xFF]; out.extend_from_slice(&cow); Ok(out) }` (depends on T024)
+- [X] T027 [US2] Run `cargo test -- encoding::transcode encoding_roundtrip` and confirm all T021–T023 tests now PASS and no pre-existing tests regress (depends on T025, T026)
 
 **Checkpoint**: US1 + US2 both functional — open UTF-16 files, edit, save, byte-identical round-trip verified
 
@@ -114,13 +114,13 @@ and `--encoding utf-16-be` CLI flags are correctly parsed and applied on file op
 
 ### Tests for User Story 3 (TDD — write FIRST, verify FAIL before implementing)
 
-- [ ] T028 [US3] Write unit tests for `encoding_from_str()` UTF-16 aliases in `src/encoding/mod.rs` `#[cfg(test)]` block — cover: `"utf-16-le"` → `Utf16Le`; `"utf16-le"` → `Utf16Le`; `"utf16le"` → `Utf16Le`; `"UTF-16-LE"` (uppercase) → `Utf16Le`; `"utf-16-be"` → `Utf16Be`; `"utf16be"` → `Utf16Be`; `"utf-16"` (no endian) → `Utf16Le` (LE default); invalid alias `"utf-16-xx"` → error/None (8 new test cases)
-- [ ] T029 [US3] Run `cargo test -- encoding::mod` and confirm T028 tests FAIL (depends on T028)
+- [X] T028 [US3] Write unit tests for `encoding_from_str()` UTF-16 aliases in `src/encoding/mod.rs` `#[cfg(test)]` block — cover: `"utf-16-le"` → `Utf16Le`; `"utf16-le"` → `Utf16Le`; `"utf16le"` → `Utf16Le`; `"UTF-16-LE"` (uppercase) → `Utf16Le`; `"utf-16-be"` → `Utf16Be`; `"utf16be"` → `Utf16Be`; `"utf-16"` (no endian) → `Utf16Le` (LE default); invalid alias `"utf-16-xx"` → error/None (8 new test cases)
+- [X] T029 [US3] Run `cargo test -- encoding::mod` and confirm T028 tests FAIL (depends on T028)
 
 ### Implementation for User Story 3
 
-- [ ] T030 [US3] Replace stub branch in `encoding_from_str()` in `src/encoding/mod.rs` with full alias table (case-insensitive match): `"utf-16-le" | "utf16-le" | "utf16le" | "utf-16 le" | "utf16_le" => Some(EncodingId::Utf16Le)`, `"utf-16-be" | "utf16-be" | "utf16be" | "utf-16 be" | "utf16_be" => Some(EncodingId::Utf16Be)`, `"utf-16" => Some(EncodingId::Utf16Le)` (depends on T029)
-- [ ] T031 [US3] Run `cargo test -- encoding::mod` and confirm all T028 tests now PASS (depends on T030)
+- [X] T030 [US3] Replace stub branch in `encoding_from_str()` in `src/encoding/mod.rs` with full alias table (case-insensitive match): `"utf-16-le" | "utf16-le" | "utf16le" | "utf-16 le" | "utf16_le" => Some(EncodingId::Utf16Le)`, `"utf-16-be" | "utf16-be" | "utf16be" | "utf-16 be" | "utf16_be" => Some(EncodingId::Utf16Be)`, `"utf-16" => Some(EncodingId::Utf16Le)` (depends on T029)
+- [X] T031 [US3] Run `cargo test -- encoding::mod` and confirm all T028 tests now PASS (depends on T030)
 
 **Checkpoint**: US1 + US2 + US3 all functional — all three P1/P2 user stories complete
 
@@ -134,8 +134,8 @@ the underlying mechanism; only the UI layer is missing.
 
 **Required before PR merges**:
 
-- [ ] T032 [US4] Create GitHub issue for US4 save-as encoding-selection UI: title "US4: Save-As encoding selection (UTF-16)", body includes: problem (save-as dialog has no encoding picker), why deferred (UI changes out of scope for 002), suggested approach (add encoding dropdown to save-as dialog in src/ui/dialogs/saveas.rs), effort (M), label `follow-up`; note parent issue #5
-- [ ] T033 [US4] Add ROADMAP.md row for US4: `| US4 | Save-As encoding selection | GH#<new issue> | P3 | not started |` referencing the issue created in T032
+- [X] T032 [US4] Create GitHub issue for US4 save-as encoding-selection UI: title "US4: Save-As encoding selection (UTF-16)", body includes: problem (save-as dialog has no encoding picker), why deferred (UI changes out of scope for 002), suggested approach (add encoding dropdown to save-as dialog in src/ui/dialogs/saveas.rs), effort (M), label `follow-up`; note parent issue #5
+- [X] T033 [US4] Add ROADMAP.md row for US4: `| US4 | Save-As encoding selection | GH#<new issue> | P3 | not started |` referencing the issue created in T032
 
 ---
 
@@ -143,15 +143,15 @@ the underlying mechanism; only the UI layer is missing.
 
 **Purpose**: Documentation, linting, full test suite validation, and PR creation.
 
-- [ ] T034 [P] Update `CHANGELOG.md` — add feature 002 entry under `[Unreleased]`: "Add UTF-16 LE/BE transcoding support: BOM detection, decode, encode, round-trip, CLI --encoding flag aliases"
-- [ ] T035 [P] Update `docs/STATUS.md` — mark UTF-16 transcoding as Implemented with link to specs/002-utf16-transcoding/
-- [ ] T036 [P] Update `docs/CAPABILITIES.md` — add UTF-16 LE and UTF-16 BE to supported encodings table and document `--encoding utf-16-le` / `--encoding utf-16-be` CLI flags
-- [ ] T037 Run `cargo fmt` on all changed files: `src/encoding/detect.rs`, `src/encoding/transcode.rs`, `src/encoding/mod.rs`; confirm `cargo fmt --check` exits 0
-- [ ] T038 Run `cargo clippy -- -D warnings` and fix any warnings in changed files (depends on T037)
-- [ ] T039 Run full `cargo test` suite — verify SC-003 (all 196+ pre-existing tests pass) and SC-004 (≥ 15 new UTF-16 tests visible); capture total test count for PR description (depends on T037, T038)
-- [ ] T040 Run `make smoke` — confirm all smoke tests still pass; no regressions (depends on T039)
-- [ ] T041 Run quickstart.md validation scenarios: generate fixtures with `python3`, open with `./target/debug/edit`, verify status bar shows `UTF-16 LE`, verify hexdump round-trip (depends on T039)
-- [ ] T042 Open PR for `002-utf16-transcoding` targeting `master` — title: "002: Add UTF-16 LE/BE transcoding support"; include self-certification for Constitution §VII (security: no new path traversal surface, no terminal escape injection from decoded content)
+- [X] T034 [P] Update `CHANGELOG.md` — add feature 002 entry under `[Unreleased]`: "Add UTF-16 LE/BE transcoding support: BOM detection, decode, encode, round-trip, CLI --encoding flag aliases"
+- [X] T035 [P] Update `docs/STATUS.md` — mark UTF-16 transcoding as Implemented with link to specs/002-utf16-transcoding/
+- [X] T036 [P] Update `docs/CAPABILITIES.md` — add UTF-16 LE and UTF-16 BE to supported encodings table and document `--encoding utf-16-le` / `--encoding utf-16-be` CLI flags
+- [X] T037 Run `cargo fmt` on all changed files: `src/encoding/detect.rs`, `src/encoding/transcode.rs`, `src/encoding/mod.rs`; confirm `cargo fmt --check` exits 0
+- [X] T038 Run `cargo clippy -- -D warnings` and fix any warnings in changed files (depends on T037)
+- [X] T039 Run full `cargo test` suite — verify SC-003 (all 196+ pre-existing tests pass) and SC-004 (≥ 15 new UTF-16 tests visible); capture total test count for PR description (depends on T037, T038)
+- [X] T040 Run `make smoke` — confirm all smoke tests still pass; no regressions (depends on T039)
+- [X] T041 Run quickstart.md validation scenarios: generate fixtures with `python3`, open with `./target/debug/edit`, verify status bar shows `UTF-16 LE`, verify hexdump round-trip (depends on T039)
+- [X] T042 Open PR for `002-utf16-transcoding` targeting `master` — title: "002: Add UTF-16 LE/BE transcoding support"; include self-certification for Constitution §VII (security: no new path traversal surface, no terminal escape injection from decoded content)
 
 ---
 
