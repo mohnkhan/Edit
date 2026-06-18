@@ -96,14 +96,12 @@ impl<'a> Widget for SavePromptDialog<'a> {
             Line::from(Span::raw(hint)),
         ];
 
-        let paragraph = Paragraph::new(text)
-            .style(dialog_style)
-            .block(
-                Block::default()
-                    .title(title.as_str())
-                    .borders(Borders::ALL)
-                    .style(dialog_style),
-            );
+        let paragraph = Paragraph::new(text).style(dialog_style).block(
+            Block::default()
+                .title(title.as_str())
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
 
         paragraph.render(dialog_area, buf);
     }
@@ -140,9 +138,7 @@ impl Widget for ErrorDialog {
 
         Clear.render(dialog_area, buf);
 
-        let dialog_style = Style::default()
-            .fg(Color::Red)
-            .bg(self.theme.menubar_bg);
+        let dialog_style = Style::default().fg(Color::Red).bg(self.theme.menubar_bg);
 
         let text = vec![
             Line::from(Span::raw(self.message.as_str())),
@@ -150,14 +146,12 @@ impl Widget for ErrorDialog {
             Line::from(Span::raw("  Press any key to continue  ")),
         ];
 
-        let paragraph = Paragraph::new(text)
-            .style(dialog_style)
-            .block(
-                Block::default()
-                    .title("Error")
-                    .borders(Borders::ALL)
-                    .style(dialog_style),
-            );
+        let paragraph = Paragraph::new(text).style(dialog_style).block(
+            Block::default()
+                .title("Error")
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
 
         paragraph.render(dialog_area, buf);
     }
@@ -207,9 +201,7 @@ impl Widget for SaveErrorDialog {
 
         Clear.render(dialog_area, buf);
 
-        let dialog_style = Style::default()
-            .fg(Color::Red)
-            .bg(self.theme.menubar_bg);
+        let dialog_style = Style::default().fg(Color::Red).bg(self.theme.menubar_bg);
 
         let error_line = format!("Cannot save: {}", self.error);
         let text = vec![
@@ -218,14 +210,12 @@ impl Widget for SaveErrorDialog {
             Line::from(Span::raw("  [R]etry   [C]ancel  ")),
         ];
 
-        let paragraph = Paragraph::new(text)
-            .style(dialog_style)
-            .block(
-                Block::default()
-                    .title("Save Error")
-                    .borders(Borders::ALL)
-                    .style(dialog_style),
-            );
+        let paragraph = Paragraph::new(text).style(dialog_style).block(
+            Block::default()
+                .title("Save Error")
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
 
         paragraph.render(dialog_area, buf);
     }
@@ -276,9 +266,7 @@ impl Widget for FindDialog {
 
         Clear.render(dialog_area, buf);
 
-        let dialog_style = Style::default()
-            .fg(Color::White)
-            .bg(Color::DarkGray);
+        let dialog_style = Style::default().fg(Color::White).bg(Color::DarkGray);
 
         let regex_flag = if self.regex_mode { "Y" } else { "N" };
         let case_flag = if self.case_sensitive { "Y" } else { "N" };
@@ -294,14 +282,12 @@ impl Widget for FindDialog {
             Line::from(Span::raw("  Enter: find next   Esc: cancel  ")),
         ];
 
-        let paragraph = Paragraph::new(text)
-            .style(dialog_style)
-            .block(
-                Block::default()
-                    .title("Find")
-                    .borders(Borders::ALL)
-                    .style(dialog_style),
-            );
+        let paragraph = Paragraph::new(text).style(dialog_style).block(
+            Block::default()
+                .title("Find")
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
 
         paragraph.render(dialog_area, buf);
     }
@@ -360,9 +346,7 @@ impl Widget for ReplaceDialog {
 
         Clear.render(dialog_area, buf);
 
-        let dialog_style = Style::default()
-            .fg(Color::White)
-            .bg(Color::DarkGray);
+        let dialog_style = Style::default().fg(Color::White).bg(Color::DarkGray);
 
         let regex_flag = if self.regex_mode { "Y" } else { "N" };
         let case_flag = if self.case_sensitive { "Y" } else { "N" };
@@ -380,14 +364,12 @@ impl Widget for ReplaceDialog {
             Line::from(Span::raw("  [A]ll   Enter: replace next   Esc: cancel  ")),
         ];
 
-        let paragraph = Paragraph::new(text)
-            .style(dialog_style)
-            .block(
-                Block::default()
-                    .title("Find & Replace")
-                    .borders(Borders::ALL)
-                    .style(dialog_style),
-            );
+        let paragraph = Paragraph::new(text).style(dialog_style).block(
+            Block::default()
+                .title("Find & Replace")
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
 
         paragraph.render(dialog_area, buf);
     }
@@ -434,9 +416,7 @@ impl Widget for OpenFileDialog {
 
         Clear.render(dialog_area, buf);
 
-        let dialog_style = Style::default()
-            .fg(Color::White)
-            .bg(Color::DarkGray);
+        let dialog_style = Style::default().fg(Color::White).bg(Color::DarkGray);
 
         let content = format!("Open file: [{}]", self.input);
 
@@ -446,14 +426,12 @@ impl Widget for OpenFileDialog {
             Line::from(Span::raw("  Enter: open   Esc: cancel  ")),
         ];
 
-        let paragraph = Paragraph::new(text)
-            .style(dialog_style)
-            .block(
-                Block::default()
-                    .title("Open File")
-                    .borders(Borders::ALL)
-                    .style(dialog_style),
-            );
+        let paragraph = Paragraph::new(text).style(dialog_style).block(
+            Block::default()
+                .title("Open File")
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
 
         paragraph.render(dialog_area, buf);
     }
@@ -479,11 +457,7 @@ pub struct RecoveryDialog {
 
 impl RecoveryDialog {
     /// Construct a new [`RecoveryDialog`].
-    pub fn new(
-        timestamp: u64,
-        path: impl Into<String>,
-        theme: &'static Theme,
-    ) -> Self {
+    pub fn new(timestamp: u64, path: impl Into<String>, theme: &'static Theme) -> Self {
         Self {
             timestamp,
             path: path.into(),
@@ -500,9 +474,7 @@ impl Widget for RecoveryDialog {
 
         Clear.render(dialog_area, buf);
 
-        let dialog_style = Style::default()
-            .fg(Color::Yellow)
-            .bg(self.theme.menubar_bg);
+        let dialog_style = Style::default().fg(Color::Yellow).bg(self.theme.menubar_bg);
 
         let ts_str = format!("unix:{}", self.timestamp);
         let msg1 = format!("Recovery file found from {}.", ts_str);
@@ -521,14 +493,12 @@ impl Widget for RecoveryDialog {
             Line::from(Span::raw(hint)),
         ];
 
-        let paragraph = Paragraph::new(text)
-            .style(dialog_style)
-            .block(
-                Block::default()
-                    .title("Recover unsaved changes?")
-                    .borders(Borders::ALL)
-                    .style(dialog_style),
-            );
+        let paragraph = Paragraph::new(text).style(dialog_style).block(
+            Block::default()
+                .title("Recover unsaved changes?")
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
 
         paragraph.render(dialog_area, buf);
     }
@@ -565,10 +535,7 @@ impl LocaleWarningDialog {
 impl Widget for LocaleWarningDialog {
     fn render(self, area: Rect, buf: &mut TuiBuffer) {
         // The message line is the widest part; compute the required width.
-        let msg = format!(
-            "Warning: locale {} is not UTF-8.",
-            self.detected_locale
-        );
+        let msg = format!("Warning: locale {} is not UTF-8.", self.detected_locale);
         let msg_len = msg.len() as u16 + 4; // 2-char padding each side
         let dialog_w: u16 = msg_len.max(50).min(area.width);
         let dialog_h: u16 = 6.min(area.height);
@@ -576,9 +543,7 @@ impl Widget for LocaleWarningDialog {
 
         Clear.render(dialog_area, buf);
 
-        let dialog_style = Style::default()
-            .fg(Color::Yellow)
-            .bg(self.theme.menubar_bg);
+        let dialog_style = Style::default().fg(Color::Yellow).bg(self.theme.menubar_bg);
 
         let text = vec![
             Line::from(Span::raw(msg)),
@@ -587,14 +552,12 @@ impl Widget for LocaleWarningDialog {
             Line::from(Span::raw("  Press any key to continue  ")),
         ];
 
-        let paragraph = Paragraph::new(text)
-            .style(dialog_style)
-            .block(
-                Block::default()
-                    .title("Locale Warning")
-                    .borders(Borders::ALL)
-                    .style(dialog_style),
-            );
+        let paragraph = Paragraph::new(text).style(dialog_style).block(
+            Block::default()
+                .title("Locale Warning")
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
 
         paragraph.render(dialog_area, buf);
     }

@@ -44,12 +44,8 @@ fn dispatch_key(key: KeyEvent, keymap: &KeybindingMap) -> Option<Action> {
 
     // Fall back to character insertion for printable characters
     match key.code {
-        KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
-            Some(Action::InsertChar(c))
-        }
-        KeyCode::Char(c) if key.modifiers == KeyModifiers::SHIFT => {
-            Some(Action::InsertChar(c))
-        }
+        KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => Some(Action::InsertChar(c)),
+        KeyCode::Char(c) if key.modifiers == KeyModifiers::SHIFT => Some(Action::InsertChar(c)),
         KeyCode::Enter => Some(Action::InsertNewline),
         KeyCode::Backspace => Some(Action::Backspace),
         KeyCode::Delete => Some(Action::Delete),

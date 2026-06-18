@@ -37,14 +37,22 @@
 - **Label**: `follow-up`
 
 ### UTF-16 Transcoding
-- **Issue**: #TBD
-- **Status**: Deferred from v0.1.0
-- **Description**: Full read/write support for UTF-16 LE/BE files. Detection already flags UTF-16
-  BOMs, but the transcoding layer currently returns the raw bytes rather than converting them.
-- **Why deferred**: Uncommon on Linux; UTF-8 covers the vast majority of use cases.
-- **Suggested approach**: Add `EncodingId::Utf16Le` and `EncodingId::Utf16Be` variants; wire up
-  `encoding_rs`'s UTF-16 decoders in `src/encoding/transcode.rs`.
-- **Effort**: Small (2–3 days)
+- **Issue**: #5 (closed — implemented in feature 002)
+- **Status**: Shipped in v0.2.0 (branch `002-utf16-transcoding`)
+- **Description**: Auto-detect + forced-decode/encode of UTF-16 LE/BE files, full round-trip,
+  BOM handling, surrogate-pair support, `--encoding` CLI aliases.
+
+### Save-As Encoding Selection UI (UTF-16 follow-up)
+- **Issue**: #9
+- **Status**: Deferred from feature 002
+- **Description**: Interactive Save As... dialog that lets the user pick the output encoding
+  (e.g. UTF-16 LE, UTF-8, CP437) from within the editor, rather than relying on CLI flags.
+- **Why deferred**: The ratatui encoding-picker dialog does not yet exist; building it in-scope
+  would have inflated the feature 002 PR beyond its stated goal. The transcoding plumbing is
+  already present — only the interactive UI layer is missing.
+- **Suggested approach**: Modal listbox dialog wired to a new `Action::SaveAsEncoding`; bind to
+  File > Save As Encoding... and/or F12. See `specs/002-utf16-transcoding/plan.md` §US4.
+- **Effort**: Small–Medium (~3 days)
 - **Label**: `follow-up`
 
 ### Session Restore

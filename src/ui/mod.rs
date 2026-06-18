@@ -17,11 +17,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::ui::{
-    editor::EditorWidget,
-    menubar::MenuBarWidget,
-    statusbar::StatusBar,
-};
+use crate::ui::{editor::EditorWidget, menubar::MenuBarWidget, statusbar::StatusBar};
 
 // ---------------------------------------------------------------------------
 // SplitMode — T067
@@ -62,9 +58,9 @@ impl Ui {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),  // menu bar
-                Constraint::Min(1),     // editor
-                Constraint::Length(1),  // status bar
+                Constraint::Length(1), // menu bar
+                Constraint::Min(1),    // editor
+                Constraint::Length(1), // status bar
             ])
             .split(size);
 
@@ -87,7 +83,8 @@ impl Ui {
             }
             SplitMode::Vertical => {
                 let half_width = editor_area.width / 2;
-                let left_area = Rect::new(editor_area.x, editor_area.y, half_width, editor_area.height);
+                let left_area =
+                    Rect::new(editor_area.x, editor_area.y, half_width, editor_area.height);
                 let right_area = Rect::new(
                     editor_area.x + half_width,
                     editor_area.y,
@@ -111,12 +108,7 @@ impl Ui {
         }
 
         // ── Status bar ────────────────────────────────────────────────────────
-        let status_bar = StatusBar::new(
-            buf,
-            app.theme,
-            app.active_idx,
-            app.buffers.len(),
-        );
+        let status_bar = StatusBar::new(buf, app.theme, app.active_idx, app.buffers.len());
         frame.render_widget(status_bar, statusbar_area);
 
         // ── Dialogs (overlaid) ────────────────────────────────────────────────

@@ -160,9 +160,7 @@ pub fn theme_by_name(name: &str) -> &'static Theme {
 /// returns `false`; otherwise returns `true`.  This matches the approach used
 /// by most Unix utilities and avoids a hard dependency on terminfo.
 pub fn terminal_supports_color() -> bool {
-    std::env::var("TERM")
-        .map(|t| t != "dumb")
-        .unwrap_or(true)
+    std::env::var("TERM").map(|t| t != "dumb").unwrap_or(true)
 }
 
 // ---------------------------------------------------------------------------

@@ -137,10 +137,7 @@ pub fn validate_path(p: &Path) -> Result<PathBuf, PathError> {
     // ── 1. Reject any `..` component ─────────────────────────────────────
     for component in p.components() {
         if component == std::path::Component::ParentDir {
-            log::warn!(
-                "validate_path: traversal attempt rejected for path {:?}",
-                p
-            );
+            log::warn!("validate_path: traversal attempt rejected for path {:?}", p);
             return Err(PathError::Traversal);
         }
     }

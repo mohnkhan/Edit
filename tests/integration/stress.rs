@@ -59,8 +59,7 @@ fn stress_encoding_roundtrip() {
     // Legacy encodings: only ASCII-safe content round-trips cleanly.
     for enc in legacy_encodings {
         for _ in 0..1_000 {
-            let bytes = encode(ascii_sample, enc)
-                .unwrap_or_else(|_| b"fallback".to_vec());
+            let bytes = encode(ascii_sample, enc).unwrap_or_else(|_| b"fallback".to_vec());
             let _ = decode(&bytes, enc);
         }
     }
@@ -87,5 +86,9 @@ fn stress_rope_line_operations() {
         rope.line_count(),
         elapsed.as_millis()
     );
-    assert!(elapsed.as_secs() < 30, "line iteration too slow: {:?}", elapsed);
+    assert!(
+        elapsed.as_secs() < 30,
+        "line iteration too slow: {:?}",
+        elapsed
+    );
 }

@@ -29,6 +29,7 @@ impl EditorRope {
     }
 
     /// Create a rope pre-populated with `s`.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         EditorRope(ropey::Rope::from_str(s))
     }
@@ -64,7 +65,7 @@ impl EditorRope {
         let line = self.0.line(line_idx);
         let s: String = line.chars().collect();
         // Strip trailing newline characters.
-        s.trim_end_matches(|c| c == '\n' || c == '\r').to_owned()
+        s.trim_end_matches(['\n', '\r']).to_owned()
     }
 
     // -----------------------------------------------------------------------
@@ -75,9 +76,7 @@ impl EditorRope {
     /// The trailing newline (if any) is excluded.
     pub fn graphemes_on_line(&self, line_idx: usize) -> Vec<String> {
         let line = self.line_slice(line_idx);
-        line.graphemes(true)
-            .map(|g| g.to_owned())
-            .collect()
+        line.graphemes(true).map(|g| g.to_owned()).collect()
     }
 
     /// Number of grapheme clusters on `line_idx` (excluding trailing newline).

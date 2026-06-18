@@ -40,10 +40,7 @@ fn main() {
 
     // ── Logging ─────────────────────────────────────────────────────────────
     init_logging(config.resolved_log_level());
-    log::info!(
-        "edit {} starting up",
-        env!("CARGO_PKG_VERSION")
-    );
+    log::info!("edit {} starting up", env!("CARGO_PKG_VERSION"));
 
     if config.log_level == "debug" {
         log::debug!("Config: {:?}", config);
@@ -51,10 +48,7 @@ fn main() {
             "XDG_CONFIG_HOME: {:?}",
             std::env::var("XDG_CONFIG_HOME").ok()
         );
-        log::debug!(
-            "XDG_STATE_HOME: {:?}",
-            std::env::var("XDG_STATE_HOME").ok()
-        );
+        log::debug!("XDG_STATE_HOME: {:?}", std::env::var("XDG_STATE_HOME").ok());
         log::debug!(
             "XDG_RUNTIME_DIR: {:?}",
             std::env::var("XDG_RUNTIME_DIR").ok()
@@ -177,8 +171,7 @@ fn enforce_utf8_locale(matches: &clap::ArgMatches) {
         .or_else(|| std::env::var("LANG").ok())
         .unwrap_or_else(|| "C.UTF-8".to_string());
 
-    let is_utf8 = locale.to_uppercase().contains("UTF-8")
-        || locale.to_uppercase().contains("UTF8");
+    let is_utf8 = locale.to_uppercase().contains("UTF-8") || locale.to_uppercase().contains("UTF8");
 
     if !is_utf8 {
         eprintln!(

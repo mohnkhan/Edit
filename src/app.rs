@@ -17,8 +17,8 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    buffer::{Buffer, CursorPos},
     buffer::undo::EditOp,
+    buffer::{Buffer, CursorPos},
     config::Config,
     encoding::EncodingId,
     input::{dispatch_event, Action, KeybindingMap},
@@ -127,17 +127,14 @@ impl App {
                     match check_stale_lock(&buf.autosave) {
                         LockStatus::StaleRecovery => {
                             buf.pending_recovery = true;
-                            log::info!(
-                                "Stale recovery file found for {:?}",
-                                buf.path.as_ref().unwrap()
-                            );
+                            if let Some(p) = &buf.path {
+                                log::info!("Stale recovery file found for {:?}", p);
+                            }
                         }
                         LockStatus::OtherSessionActive(other_pid) => {
-                            log::warn!(
-                                "Buffer {:?} is already open by pid {}",
-                                buf.path.as_ref().unwrap(),
-                                other_pid
-                            );
+                            if let Some(p) = &buf.path {
+                                log::warn!("Buffer {:?} is already open by pid {}", p, other_pid);
+                            }
                         }
                         LockStatus::Clean => {}
                     }
@@ -222,9 +219,7 @@ impl App {
         while self.running {
             terminal.draw(|frame| self.render(frame))?;
 
-            let timeout = TICK_MS
-                .checked_sub(last_tick.elapsed().as_millis() as u64)
-                .unwrap_or(0);
+            let timeout = TICK_MS.saturating_sub(last_tick.elapsed().as_millis() as u64);
 
             if event::poll(Duration::from_millis(timeout))? {
                 let ev = event::read()?;
@@ -305,14 +300,14 @@ impl App {
             }
 
             // Menu navigation (T048)
-            Action::MenuFile    => self.menu_bar.open_menu(0),
-            Action::MenuEdit    => self.menu_bar.open_menu(1),
-            Action::MenuSearch  => self.menu_bar.open_menu(2),
-            Action::MenuView    => self.menu_bar.open_menu(3),
+            Action::MenuFile => self.menu_bar.open_menu(0),
+            Action::MenuEdit => self.menu_bar.open_menu(1),
+            Action::MenuSearch => self.menu_bar.open_menu(2),
+            Action::MenuView => self.menu_bar.open_menu(3),
             Action::MenuOptions => self.menu_bar.open_menu(4),
-            Action::MenuHelp    => self.menu_bar.open_menu(5),
-            Action::MenuClose   => self.menu_bar.close_menu(),
-            Action::Menu        => self.menu_bar.open_menu(0),
+            Action::MenuHelp => self.menu_bar.open_menu(5),
+            Action::MenuClose => self.menu_bar.close_menu(),
+            Action::Menu => self.menu_bar.open_menu(0),
             Action::MenuOpen(idx) => self.menu_bar.open_menu(idx),
 
             // Multi-buffer navigation (T066)
@@ -402,11 +397,7 @@ impl App {
         self.terminal_size = (w, h);
 
         // T105 — detect too-small terminal
-        if w < MIN_WIDTH || h < MIN_HEIGHT {
-            self.too_small = true;
-        } else {
-            self.too_small = false;
-        }
+        self.too_small = w < MIN_WIDTH || h < MIN_HEIGHT;
 
         // Re-clamp scroll offset so cursor stays visible after resize.
         self.clamp_scroll();
@@ -491,8 +482,11 @@ impl App {
             }
         };
 
-        let new_vcol =
-            CursorPos::visual_col_from_grapheme_col(&self.buffers[self.active_idx].rope, new_line, new_gcol);
+        let new_vcol = CursorPos::visual_col_from_grapheme_col(
+            &self.buffers[self.active_idx].rope,
+            new_line,
+            new_gcol,
+        );
 
         let buf = &mut self.buffers[self.active_idx];
         buf.cursor = CursorPos {
@@ -704,7 +698,9 @@ impl App {
         } else {
             // At the start of a line — deleting the newline of the previous line
             let prev_line = cur.line - 1;
-            let prev_len = self.buffers[self.active_idx].rope.grapheme_count_on_line(prev_line);
+            let prev_len = self.buffers[self.active_idx]
+                .rope
+                .grapheme_count_on_line(prev_line);
             (prev_line, prev_len)
         };
 
@@ -725,7 +721,8 @@ impl App {
 
         {
             let buf = &mut self.buffers[self.active_idx];
-            buf.rope.delete_range(del_char_idx..del_char_idx + del_char_len);
+            buf.rope
+                .delete_range(del_char_idx..del_char_idx + del_char_len);
             buf.undo_stack.push(EditOp::Delete {
                 at: del_char_idx,
                 text: deleted_text,
@@ -734,8 +731,11 @@ impl App {
         }
 
         // Move cursor to the deleted position
-        let new_vcol =
-            CursorPos::visual_col_from_grapheme_col(&self.buffers[self.active_idx].rope, del_line, del_gcol);
+        let new_vcol = CursorPos::visual_col_from_grapheme_col(
+            &self.buffers[self.active_idx].rope,
+            del_line,
+            del_gcol,
+        );
         let buf = &mut self.buffers[self.active_idx];
         buf.cursor = CursorPos {
             line: del_line,
@@ -755,7 +755,9 @@ impl App {
 
         let cur = self.buffers[self.active_idx].cursor;
         let line_count = self.buffers[self.active_idx].rope.line_count();
-        let gcol_count = self.buffers[self.active_idx].rope.grapheme_count_on_line(cur.line);
+        let gcol_count = self.buffers[self.active_idx]
+            .rope
+            .grapheme_count_on_line(cur.line);
 
         // Determine whether we're at the last possible position
         let is_last_line = cur.line + 1 >= line_count;
@@ -785,7 +787,8 @@ impl App {
         let del_char_len = deleted_text.chars().count();
 
         let buf = &mut self.buffers[self.active_idx];
-        buf.rope.delete_range(del_char_idx..del_char_idx + del_char_len);
+        buf.rope
+            .delete_range(del_char_idx..del_char_idx + del_char_len);
         buf.undo_stack.push(EditOp::Delete {
             at: del_char_idx,
             text: deleted_text,
@@ -864,7 +867,7 @@ impl App {
 
     /// Delete the current selection from the buffer.
     fn delete_selection(&mut self) {
-        let sel = match self.buffers[self.active_idx].selection.clone() {
+        let sel = match self.buffers[self.active_idx].selection {
             Some(s) => s,
             None => return,
         };
@@ -1081,11 +1084,13 @@ impl App {
                 let buf = &self.buffers[self.active_idx];
                 let full = buf.rope.to_string();
                 // Convert char indices to byte indices for slicing.
-                let byte_start = full.char_indices()
+                let byte_start = full
+                    .char_indices()
                     .nth(m.start)
                     .map(|(b, _)| b)
                     .unwrap_or(full.len());
-                let byte_end = full.char_indices()
+                let byte_end = full
+                    .char_indices()
                     .nth(m.end)
                     .map(|(b, _)| b)
                     .unwrap_or(full.len());
@@ -1122,14 +1127,20 @@ impl App {
         self.search_state.matches.clear();
         self.search_state.active_match = None;
 
-        self.status_message = Some(format!("Replaced {} occurrence{}", count,
-            if count == 1 { "" } else { "s" }));
+        self.status_message = Some(format!(
+            "Replaced {} occurrence{}",
+            count,
+            if count == 1 { "" } else { "s" }
+        ));
     }
 
     // ── T103 — SaveAs action ─────────────────────────────────────────────────
 
     /// Save the active buffer to a new path and update buffer.path.
-    pub fn handle_save_as(&mut self, new_path: std::path::PathBuf) -> Result<(), crate::buffer::BufferError> {
+    pub fn handle_save_as(
+        &mut self,
+        new_path: std::path::PathBuf,
+    ) -> Result<(), crate::buffer::BufferError> {
         self.active_buffer_mut().save_as(new_path)
     }
 
@@ -1297,7 +1308,8 @@ fn unicode_segmentation_width(grapheme: &str) -> u16 {
         || (0xFF01..=0xFF60).contains(&cp)  // Fullwidth Latin
         || (0xFFE0..=0xFFE6).contains(&cp)  // Fullwidth Signs
         || (0x1F300..=0x1F9FF).contains(&cp) // Emoji
-        || (0x20000..=0x2A6DF).contains(&cp) // CJK Extension B
+        || (0x20000..=0x2A6DF).contains(&cp)
+    // CJK Extension B
     {
         2
     } else {

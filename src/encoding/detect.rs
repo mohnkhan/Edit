@@ -17,6 +17,8 @@ pub enum EncodingId {
     Cp850,
     Iso8859_1,
     Windows1252,
+    Utf16Le,
+    Utf16Be,
 }
 
 // ---------------------------------------------------------------------------
@@ -41,6 +43,16 @@ pub static ENCODING_REGISTRY: &[EncodingProfile] = &[
         name: "UTF-8",
         id: EncodingId::Utf8,
         bom: Some(&[0xEF, 0xBB, 0xBF]),
+    },
+    EncodingProfile {
+        name: "UTF-16 LE",
+        id: EncodingId::Utf16Le,
+        bom: Some(&[0xFF, 0xFE]),
+    },
+    EncodingProfile {
+        name: "UTF-16 BE",
+        id: EncodingId::Utf16Be,
+        bom: Some(&[0xFE, 0xFF]),
     },
     EncodingProfile {
         name: "CP437",
@@ -93,10 +105,13 @@ pub fn detect_encoding(bytes: &[u8]) -> EncodingId {
         return EncodingId::Utf8;
     }
 
-    // UTF-16 BOMs — we flag these as Utf8 so the transcoding layer knows to
-    // convert them (it will call the appropriate UTF-16 decoder).
-    if bytes.starts_with(UTF16_LE_BOM) || bytes.starts_with(UTF16_BE_BOM) {
-        return EncodingId::Utf8;
+    // UTF-16 BOMs — return the correct variant so the transcoding layer
+    // can call the appropriate UTF-16 decoder.
+    if bytes.starts_with(UTF16_LE_BOM) {
+        return EncodingId::Utf16Le;
+    }
+    if bytes.starts_with(UTF16_BE_BOM) {
+        return EncodingId::Utf16Be;
     }
 
     // --- Strict UTF-8 validation --------------------------------------------
@@ -152,15 +167,26 @@ mod tests {
     }
 
     #[test]
-    fn utf16_le_bom_detected_as_utf8() {
+    fn utf16_le_bom_detected() {
         let bytes = b"\xFF\xFEH\x00i\x00";
-        assert_eq!(detect_encoding(bytes), EncodingId::Utf8);
+        assert_eq!(detect_encoding(bytes), EncodingId::Utf16Le);
     }
 
     #[test]
-    fn utf16_be_bom_detected_as_utf8() {
+    fn utf16_be_bom_detected() {
         let bytes = b"\xFE\xFF\x00H\x00i";
-        assert_eq!(detect_encoding(bytes), EncodingId::Utf8);
+        assert_eq!(detect_encoding(bytes), EncodingId::Utf16Be);
+    }
+
+    #[test]
+    fn utf8_unchanged_after_utf16_addition() {
+        assert_eq!(detect_encoding(b"Hello, world!"), EncodingId::Utf8);
+        assert_eq!(detect_encoding("café".as_bytes()), EncodingId::Utf8);
+    }
+
+    #[test]
+    fn empty_bytes_return_utf8() {
+        assert_eq!(detect_encoding(b""), EncodingId::Utf8);
     }
 
     #[test]
@@ -175,8 +201,8 @@ mod tests {
     }
 
     #[test]
-    fn registry_has_five_entries() {
-        assert_eq!(ENCODING_REGISTRY.len(), 5);
+    fn registry_has_seven_entries() {
+        assert_eq!(ENCODING_REGISTRY.len(), 7);
     }
 
     #[test]
@@ -189,8 +215,32 @@ mod tests {
     }
 
     #[test]
+    fn registry_utf16le_has_bom() {
+        let profile = ENCODING_REGISTRY
+            .iter()
+            .find(|p| p.id == EncodingId::Utf16Le)
+            .expect("UTF-16 LE profile must exist");
+        assert_eq!(profile.bom, Some(&[0xFF_u8, 0xFE][..]));
+        assert_eq!(profile.name, "UTF-16 LE");
+    }
+
+    #[test]
+    fn registry_utf16be_has_bom() {
+        let profile = ENCODING_REGISTRY
+            .iter()
+            .find(|p| p.id == EncodingId::Utf16Be)
+            .expect("UTF-16 BE profile must exist");
+        assert_eq!(profile.bom, Some(&[0xFE_u8, 0xFF][..]));
+        assert_eq!(profile.name, "UTF-16 BE");
+    }
+
+    #[test]
     fn non_bom_profiles_have_no_bom() {
-        for profile in ENCODING_REGISTRY.iter().filter(|p| p.id != EncodingId::Utf8) {
+        let bom_ids = [EncodingId::Utf8, EncodingId::Utf16Le, EncodingId::Utf16Be];
+        for profile in ENCODING_REGISTRY
+            .iter()
+            .filter(|p| !bom_ids.contains(&p.id))
+        {
             assert!(profile.bom.is_none(), "{} should have no BOM", profile.name);
         }
     }
