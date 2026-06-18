@@ -1,0 +1,69 @@
+#!/usr/bin/env expect
+# Smoke test T110: open editor (no file), send Alt+F to open File menu,
+# then Escape to close it, verify editor doesn't crash, exits 0.
+#
+# Usage:
+#   expect tests/smoke/menu_nav.exp
+#
+# Exit codes:
+#   0  — editor started, handled Alt+F + Esc without crashing, exited cleanly
+#   1  — any failure (timeout, non-zero exit, crash)
+
+set timeout 10
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+proc fail {msg} {
+    puts stderr "FAIL: $msg"
+    exit 1
+}
+
+# ── Launch the editor with no file argument ───────────────────────────────────
+
+spawn ./target/debug/edit
+
+# Wait for the editor to initialise and render at least one frame.
+expect {
+    timeout { fail "editor did not start within $timeout seconds" }
+    -re ".+" {
+        # Any output means the TUI has started; proceed.
+    }
+}
+
+# Small pause to let the initial frame fully render.
+after 300
+
+# ── Send Alt+F to open the File menu ─────────────────────────────────────────
+# In most terminals Alt+F is sent as ESC followed by 'f'.
+
+send "\x1bf"
+
+# Wait briefly for the menu to open and the frame to re-render.
+after 400
+
+# ── Send Escape to close the menu ────────────────────────────────────────────
+
+send "\x1b"
+
+# Allow time for the menu to close and the frame to settle.
+after 300
+
+# ── Quit cleanly with Ctrl+Q ─────────────────────────────────────────────────
+
+send "\x11"
+
+# Wait for the process to exit.
+expect {
+    eof     { }
+    timeout { fail "editor did not exit within $timeout seconds after Ctrl+Q" }
+}
+
+# Collect the exit status.
+catch {wait} result
+set exit_code [lindex $result 3]
+if {$exit_code != 0} {
+    fail "editor exited with non-zero status: $exit_code"
+}
+
+puts "PASS: editor handled Alt+F (open menu) + Escape (close) without crashing"
+exit 0

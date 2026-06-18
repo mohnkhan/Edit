@@ -1,0 +1,103 @@
+#!/usr/bin/env expect
+# Smoke test T112: search and replace — open file with known content, trigger
+# search (Ctrl+F), type a query, press Enter/F3 to find next, then quit.
+#
+# Usage:
+#   expect tests/smoke/search_replace.exp
+#
+# The test verifies that the editor does not crash during a basic search
+# interaction sequence.  It does NOT assert specific TUI output because the
+# rendering pipeline is terminal-dependent.
+#
+# Exit codes:
+#   0  — all assertions passed (editor launched, accepted input, exited cleanly)
+#   1  — any failure (timeout, unexpected crash, non-zero exit)
+
+set timeout 10
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+proc fail {msg} {
+    puts stderr "FAIL: $msg"
+    exit 1
+}
+
+# ── Prepare a temp file with known content ────────────────────────────────────
+
+set test_file "/tmp/test_search_replace_smoke.txt"
+
+# Write the known content directly from expect using exec.
+set fh [open $test_file w]
+puts $fh "foo bar foo"
+close $fh
+
+# ── Launch the editor ─────────────────────────────────────────────────────────
+
+spawn ./target/debug/edit $test_file
+
+# Wait for the editor to initialise — any output means the TUI started.
+expect {
+    timeout { fail "editor did not start within $timeout seconds" }
+    -re ".+" {
+        # TUI rendered at least one frame; proceed.
+    }
+}
+
+# Small settle pause.
+after 200
+
+# ── Trigger Find: Ctrl+F ──────────────────────────────────────────────────────
+
+send "\x06"
+
+after 150
+
+# ── Type the search term ──────────────────────────────────────────────────────
+
+send "foo"
+
+after 150
+
+# ── Confirm / find next: Enter then F3 ───────────────────────────────────────
+
+# Enter to confirm the query (if dialog is open).
+send "\r"
+
+after 150
+
+# F3 to jump to next match.
+send "\x1bOR"
+
+after 150
+
+# F3 again — should wrap or stay on last match, not crash.
+send "\x1bOR"
+
+after 150
+
+# ── Quit without saving ───────────────────────────────────────────────────────
+
+send "\x11"
+
+# Wait for process to exit.
+expect {
+    eof     { }
+    timeout { fail "editor did not exit within $timeout seconds after Ctrl+Q" }
+}
+
+catch {wait} result
+set exit_code [lindex $result 3]
+
+# Acceptable exit codes: 0 (clean quit) or non-zero only when the binary is
+# not yet built.  We accept 0 exclusively for a smoke test.
+if {$exit_code != 0} {
+    fail "editor exited with non-zero status $exit_code — possible crash"
+}
+
+# Clean up temp file.
+if {[file exists $test_file]} {
+    file delete $test_file
+}
+
+puts "PASS: search_replace smoke test — editor launched, searched for 'foo', exited cleanly"
+exit 0

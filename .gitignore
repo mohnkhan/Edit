@@ -9,7 +9,7 @@ build/
 edit
 
 # Cargo / Rust
-Cargo.lock
+# Cargo.lock is committed for binaries per Rust convention
 
 # CMake
 CMakeCache.txt
@@ -30,3 +30,8 @@ Thumbs.db
 # Editor session/log files
 .claude/settings.local.json
 .specify/memory/*.log
+
+
+# Added by cargo
+
+/target
