@@ -52,6 +52,10 @@ path = "tests/integration/recovery.rs"
 name = "stress"
 path = "tests/integration/stress.rs"
 
+[[test]]
+name = "session"
+path = "tests/integration/session.rs"
+
 [[bench]]
 name = "startup"
 harness = false

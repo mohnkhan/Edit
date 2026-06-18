@@ -14,6 +14,7 @@ pub mod highlight;
 pub mod input;
 pub mod search;
 pub mod security;
+pub mod session;
 pub mod ui;
 
 // `app` depends on the full TUI stack; expose it as well so integration tests

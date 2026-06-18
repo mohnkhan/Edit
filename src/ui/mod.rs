@@ -112,6 +112,31 @@ impl Ui {
         frame.render_widget(status_bar, statusbar_area);
 
         // ── Dialogs (overlaid) ────────────────────────────────────────────────
+        // Session restore dialog takes priority over the save prompt.
+        if app.pending_session_restore.is_some() {
+            let dialog = ratatui::widgets::Paragraph::new("Restore previous session? [Y/n]")
+                .style(
+                    ratatui::style::Style::default()
+                        .fg(app.theme.menubar_fg)
+                        .bg(app.theme.menubar_bg),
+                )
+                .block(
+                    ratatui::widgets::Block::default()
+                        .title("Restore Session")
+                        .borders(ratatui::widgets::Borders::ALL),
+                );
+
+            let dw = 50u16.min(size.width);
+            let dh = 5u16.min(size.height);
+            let dx = size.x + size.width.saturating_sub(dw) / 2;
+            let dy = size.y + size.height.saturating_sub(dh) / 2;
+            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
+
+            frame.render_widget(ratatui::widgets::Clear, dialog_area);
+            frame.render_widget(dialog, dialog_area);
+            return;
+        }
+
         // When app.pending_save_prompt is set, render the save-prompt dialog.
         if app.pending_save_prompt {
             use crate::ui::dialog::SavePromptDialog;
