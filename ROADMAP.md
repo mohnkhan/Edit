@@ -35,17 +35,12 @@
   BOM handling, surrogate-pair support, `--encoding` CLI aliases.
 
 ### Save-As Encoding Selection UI (UTF-16 follow-up)
-- **Issue**: #9
-- **Status**: Deferred from feature 002
-- **Description**: Interactive Save As... dialog that lets the user pick the output encoding
-  (e.g. UTF-16 LE, UTF-8, CP437) from within the editor, rather than relying on CLI flags.
-- **Why deferred**: The ratatui encoding-picker dialog does not yet exist; building it in-scope
-  would have inflated the feature 002 PR beyond its stated goal. The transcoding plumbing is
-  already present — only the interactive UI layer is missing.
-- **Suggested approach**: Modal listbox dialog wired to a new `Action::SaveAsEncoding`; bind to
-  File > Save As Encoding... and/or F12. See `specs/002-utf16-transcoding/plan.md` §US4.
-- **Effort**: Small–Medium (~3 days)
-- **Label**: `follow-up`
+- **Issue**: #9 (closed — implemented in feature 004)
+- **Status**: Complete as of 2026-06-19
+- **Description**: Modal TUI listbox dialog (F12 / File › Save As Encoding...) to select
+  output encoding (UTF-8, UTF-16 LE/BE, CP437, CP850, ISO-8859-1, Windows-1252). Encoding
+  persists for subsequent saves. Filename prompt invoked for new (unsaved) buffers.
+- **Implementation**: `src/ui/dialog.rs` (`EncodingSelectDialog`), wired via `Action::SaveAsEncoding`.
 
 ### Menu Item Checked-State Indicator
 - **Issue**: #13 (closed — implemented in feature 006)
@@ -55,13 +50,9 @@
   as a general mechanism (FR-007): no per-item bespoke code required for future toggleable items.
 
 ### Session Restore
-- **Issue**: #6
-- **Status**: Deferred from v0.1.0
-- **Description**: On startup without file arguments, restore the previous editing session
-  (open buffers, cursor positions, split layout).
-- **Why deferred**: Requires a stable session-state serialization format; deferred to let the
-  buffer and UI APIs stabilize first.
-- **Suggested approach**: Write a `session.toml` to `$XDG_STATE_HOME/edit/` on clean exit;
-  deserialize on startup.
-- **Effort**: Small (2–3 days)
-- **Label**: `follow-up`
+- **Issue**: #6 (closed — implemented in feature 003)
+- **Status**: Complete as of 2026-06-19
+- **Description**: On clean exit, write `session.toml` to `$XDG_STATE_HOME/edit/`; on next
+  startup without file arguments, offer a TUI restore dialog. `--no-session` flag suppresses
+  the prompt. Explicit file arguments bypass restore.
+- **Implementation**: `src/session/` module; `specs/003-session-restore/`.
