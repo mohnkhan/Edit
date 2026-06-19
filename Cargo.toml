@@ -75,6 +75,10 @@ path = "tests/integration/file_watch.rs"
 name = "plugin_api"
 path = "tests/integration/plugin_api.rs"
 
+[[test]]
+name = "menu_activation"
+path = "tests/integration/menu_activation.rs"
+
 [[bench]]
 name = "startup"
 harness = false

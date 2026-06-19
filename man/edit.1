@@ -55,10 +55,10 @@ Quit editor.
 Find next match.
 .TP
 .B F10
-Open menu bar.
+Activate the menu bar (highlights the first menu without opening a dropdown).
 .TP
 .B Alt+F
-Open File menu.
+Open the File menu dropdown directly (likewise Alt+E/S/V/O/H for the other menus).
 .TP
 .B Ctrl+F
 Open Find dialog.
@@ -88,9 +88,18 @@ Log directory.
 .SH MENUS
 Press
 .B F10
-or
+to activate the menu bar, or
 .B Alt+F
-to open the menu bar.
+(and Alt+E/S/V/O/H) to open a menu directly.
+Once active, use
+.B Left/Right
+to move between top-level menus,
+.B Up/Down
+to move within the open dropdown,
+.B Enter
+to activate the highlighted item, and
+.B Esc
+to close the menu.
 .PP
 .B File menu:
 New, Open, Save, Save As, Save As Encoding\&.\&.\&. (F12), Exit.
@@ -100,6 +109,13 @@ Undo, Redo, Cut, Copy, Paste, Select All.
 .PP
 .B Search menu:
 Find, Find Next, Find Previous, Replace.
+.PP
+.B Options menu:
+Toggle Highlight, Plugins\&.\&.\&. (plugin manager).
+.PP
+.B Plugin menus:
+Menu-item plugins contribute additional top-level menus, shown between Options and Help; they
+are navigated and activated with the same keys.
 .SH ENCODING
 All file I/O is UTF-8 by default. Use \-\-encoding to force a specific encoding.
 Legacy CP437 files are transcoded on read.

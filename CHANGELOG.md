@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — feature 009: Live menu-bar activation
+
+### Added
+
+- **Keyboard menu navigation**: pull-down menus are now fully operable from the keyboard.
+  `F10` activates the menu bar (top-level highlight); `Alt+<letter>` opens a menu's dropdown
+  directly; `←`/`→` move between top-level menus (wrapping, opening the adjacent dropdown);
+  `↑`/`↓` move within a dropdown (wrapping); `Enter` activates the highlighted item; `Esc`
+  closes the menu. Works for both built-in and plugin menus.
+- **Plugin-contributed top-level menus** now render in the menu bar, positioned **between
+  Options and Help** (Help stays rightmost). Items from a plugin whose menu name matches a
+  built-in menu are merged into that built-in dropdown. Activating a plugin item runs its
+  sandboxed `menu_action` and shows the result in the status bar. Completes the deferred
+  portion of the Plugin API (issue #19).
+
+### Fixed
+
+- Open dropdowns were previously drawn *under* the editor content and never visible; the menu
+  bar now renders on top of the editor area so dropdowns appear correctly.
+- Transient status messages (search results, save confirmations, and plugin menu-action
+  results) are now displayed in the status bar; previously `status_message` was set but never
+  rendered.
+
+---
+
 ## [Unreleased] — feature 008: Plugin API (Rhai)
 
 ### Added

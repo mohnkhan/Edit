@@ -1,7 +1,7 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.3.0 (dev — feature 008 complete)
+**Version**: 0.3.0 (dev — features 008 + 009 complete)
 **Last updated**: 2026-06-19
 
 ## Implementation Status
@@ -10,7 +10,10 @@
 |---|---|---|
 | F008-US1 | Syntax highlighter plugins (Rhai); plugin highlighter takes precedence over built-in | Complete |
 | F008-US2 | Custom keybinding plugins; merged into keymap; Save/Quit non-overridable | Complete |
-| F008-US3 | Menu item plugins; `menu_action` dispatched in sandbox (live menu-bar activation deferred, see ROADMAP) | Partial |
+| F008-US3 | Menu item plugins; `menu_action` dispatched in sandbox; live menu-bar activation wired in feature 009 | Complete |
+| F009-US1 | Keyboard navigation/activation of built-in pull-down menus (arrows/Enter/Esc; F10 + Alt+letter entry) | Complete |
+| F009-US2 | Plugin-contributed top-level menus render (between Options and Help) and activate via keyboard | Complete |
+| F009-US3 | DOS-faithful navigation semantics: wrap-around, Left/Right ring, modal precedence | Complete |
 | F008-US4 | Plugin manager (Options > Plugins) + one-time consent dialog; decisions persisted | Complete |
 | F008-US5 | Default-deny sandbox: 50 ms timeout, FS-violation denial, crash isolation | Complete |
 | F007-US1 | Detect external file modification, prompt Y/N reload dialog | Complete |
@@ -99,5 +102,6 @@ Runs in order:
 5. `make perf-check` — benchmarks (non-regressing, results logged)
 
 ## Known Limitations
-- Plugin API not implemented (deferred; see `ROADMAP.md`)
-- Mouse support requires a terminal emulator that reports mouse events in crossterm's supported protocol
+- Menu activation is keyboard-driven; mouse-click menu selection is not yet wired (keyboard
+  navigation covers all menus). General mouse support requires a terminal emulator that reports
+  mouse events in crossterm's supported protocol.

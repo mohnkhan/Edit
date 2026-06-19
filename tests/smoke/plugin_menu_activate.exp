@@ -1,0 +1,95 @@
+#!/usr/bin/env expect
+# Smoke test (Feature 009): drive live menu-bar keyboard activation of a
+# plugin-contributed menu item. Installs the word-count plugin (pre-consented),
+# opens the menu bar with F10, walks right to the "Tools" menu, opens it, and
+# activates "Word Count"; verifies the status bar reports a word count and the
+# editor exits cleanly.
+#
+# Exit codes: 0 = PASS, 1 = any failure (timeout, crash, missing count).
+
+set timeout 10
+
+# Give the spawned pty a concrete size so the TUI renders content (headless
+# CI shells may otherwise spawn a 0x0 pty and the editor draws nothing).
+set stty_init "rows 30 columns 120"
+
+proc fail {msg} {
+    puts stderr "FAIL: $msg"
+    exit 1
+}
+
+# ── Isolated XDG config dir with a pre-consented word-count plugin ────────────
+set cfg "/tmp/edit_smoke_menu_cfg"
+file delete -force $cfg
+file mkdir "$cfg/edit/plugins/word-count"
+exec cp tests/fixtures/plugins/word-count/plugin.toml "$cfg/edit/plugins/word-count/plugin.toml"
+exec cp tests/fixtures/plugins/word-count/plugin.rhai "$cfg/edit/plugins/word-count/plugin.rhai"
+
+set fh [open "$cfg/edit/plugins.toml" w]
+puts $fh "\[plugins.word-count\]"
+puts $fh "allowed = true"
+puts $fh "consented_at = \"2026-06-19T00:00:00Z\""
+puts $fh "version_consented = \"1.0.0\""
+close $fh
+
+# ── A five-word buffer ────────────────────────────────────────────────────────
+set test_file "/tmp/edit_smoke_menu.txt"
+set fh [open $test_file w]
+puts $fh "one two three four five"
+close $fh
+
+set env(XDG_CONFIG_HOME) $cfg
+set env(LC_ALL) "C.UTF-8"
+set env(LANG) "C.UTF-8"
+
+spawn ./target/debug/edit $test_file
+expect {
+    timeout { fail "editor did not start" }
+    -re ".+" { }
+}
+after 300
+
+# F10 → activate the menu bar (top-level highlight, no dropdown).
+send "\x1b\[21~"
+after 300
+
+# Walk Right to the Tools menu. Built-in order is File,Edit,Search,View,Options,
+# then the plugin "Tools" menu (index 5). Five Right presses land on Tools.
+for {set i 0} {$i < 5} {incr i} {
+    send "\x1b\[C"
+    after 250
+}
+
+# Down opens the Tools dropdown at the first item ("Word Count").
+send "\x1b\[B"
+after 300
+
+# Enter activates the highlighted item.
+send "\r"
+after 700
+
+# The status bar should now contain the word count. Match the lowercase "count:"
+# from the status message ("Word count: 5") — this is distinct from the dropdown
+# item label "Word Count" and survives the terminal's cell-by-cell repaint.
+expect {
+    timeout { fail "status bar did not show a word count after activation" }
+    -re "count:" { }
+}
+
+# Quit cleanly (buffer unmodified → no save prompt).
+send "\x11"
+expect {
+    eof     { }
+    timeout { fail "editor did not exit after Ctrl+Q" }
+}
+
+catch {wait} result
+set exit_code [lindex $result 3]
+if {$exit_code != 0} {
+    fail "editor exited with non-zero status: $exit_code"
+}
+
+file delete $test_file
+file delete -force $cfg
+puts "PASS: plugin menu keyboard activation smoke test"
+exit 0
