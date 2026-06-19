@@ -1,7 +1,7 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.3.0 (dev — features 008 + 009 complete)
+**Version**: 0.3.0 (features 008 + 009 complete)
 **Last updated**: 2026-06-19
 
 ## Implementation Status
