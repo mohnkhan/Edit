@@ -82,6 +82,8 @@ pub struct App {
     pub default_encoding: EncodingId,
     /// Index into ENCODING_OPTIONS of the highlighted row; `Some` = dialog is open.
     pub pending_encoding_select: Option<usize>,
+    /// Path being typed in the Open-file dialog; `Some` = dialog is open (Feature 010).
+    pub pending_open: Option<String>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
     pub pending_save_as_encoding: Option<EncodingId>,
     /// Whether soft-wrap visual rendering is active (Feature 005).
@@ -275,6 +277,7 @@ impl App {
             pending_session_restore: session,
             default_encoding,
             pending_encoding_select: None,
+            pending_open: None,
             pending_save_as_encoding: None,
             soft_wrap: soft_wrap_initial,
             wrap_cache: None,
@@ -544,6 +547,38 @@ impl App {
             return Ok(());
         }
 
+        // Feature 010 — Open-file dialog intercept: typing edits the path,
+        // Enter opens it, Esc/MenuClose cancels. All other actions are consumed
+        // so the dialog stays modal over the buffer.
+        if let Some(mut input) = self.pending_open.take() {
+            match &action {
+                Action::InsertChar(c) => {
+                    input.push(*c);
+                    self.pending_open = Some(input);
+                }
+                Action::Backspace => {
+                    input.pop();
+                    self.pending_open = Some(input);
+                }
+                Action::InsertNewline => {
+                    let trimmed = input.trim();
+                    if !trimmed.is_empty() {
+                        self.handle_open_file(PathBuf::from(trimmed));
+                    }
+                    // Dialog closes whether or not a path was entered;
+                    // handle_open_file logs and leaves state intact on failure.
+                }
+                Action::MenuClose => {
+                    // Cancelled — dialog already taken, leave it closed.
+                }
+                // Any other action keeps the dialog open, unchanged.
+                _ => {
+                    self.pending_open = Some(input);
+                }
+            }
+            return Ok(());
+        }
+
         // Feature 008 — Plugin consent dialog intercept: Enter/Y = allow, Esc/N = deny.
         if !self.pending_plugin_consent.is_empty() {
             match &action {
@@ -645,6 +680,10 @@ impl App {
             // Deletion — T027
             Action::Backspace => self.delete_backward(),
             Action::Delete => self.delete_forward(),
+
+            // Open-file dialog (Feature 010). Selecting File ▸ Open shows a
+            // modal path prompt handled by the pending_open intercept above.
+            Action::Open => self.pending_open = Some(String::new()),
 
             // Save prompt responses (T033)
             Action::Save => self.handle_save_action(),
@@ -2383,6 +2422,76 @@ mod tests {
         assert_eq!(app.pending_encoding_select, Some(2));
         // Cursor must not have moved.
         assert_eq!(app.buffers[0].cursor.grapheme_col, gcol_before);
+    }
+
+    // ── Feature 010 — Open-file dialog ──────────────────────────────────────
+
+    #[test]
+    fn test_open_action_opens_dialog() {
+        let mut app = make_app();
+        assert_eq!(app.pending_open, None);
+        app.handle_action(Action::Open).unwrap();
+        assert_eq!(app.pending_open.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn test_open_dialog_typing_builds_path() {
+        let mut app = make_app();
+        app.handle_action(Action::Open).unwrap();
+        for c in "ab".chars() {
+            app.handle_action(Action::InsertChar(c)).unwrap();
+        }
+        assert_eq!(app.pending_open.as_deref(), Some("ab"));
+        app.handle_action(Action::Backspace).unwrap();
+        assert_eq!(app.pending_open.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn test_open_dialog_escape_cancels_without_opening() {
+        let mut app = make_app();
+        let n_before = app.buffers.len();
+        app.handle_action(Action::Open).unwrap();
+        app.handle_action(Action::MenuClose).unwrap();
+        assert_eq!(app.pending_open, None);
+        assert_eq!(app.buffers.len(), n_before, "cancel must not open a buffer");
+    }
+
+    #[test]
+    fn test_open_dialog_other_action_keeps_dialog_open() {
+        let mut app = make_app();
+        app.handle_action(Action::Open).unwrap();
+        let gcol_before = app.buffers[0].cursor.grapheme_col;
+        app.handle_action(Action::MoveLeft).unwrap();
+        // Dialog stays open and the buffer cursor must not move.
+        assert_eq!(app.pending_open.as_deref(), Some(""));
+        assert_eq!(app.buffers[0].cursor.grapheme_col, gcol_before);
+    }
+
+    #[test]
+    fn test_open_dialog_enter_loads_file_into_buffer() {
+        let mut path = std::env::temp_dir();
+        path.push("edit_open_dialog_test_010.txt");
+        std::fs::write(&path, "hello from disk\n").expect("write temp file");
+
+        let mut app = make_app();
+        let n_before = app.buffers.len();
+        app.handle_action(Action::Open).unwrap();
+        for c in path.to_string_lossy().chars() {
+            app.handle_action(Action::InsertChar(c)).unwrap();
+        }
+        app.handle_action(Action::InsertNewline).unwrap();
+
+        assert_eq!(app.pending_open, None, "dialog closes after opening");
+        assert_eq!(app.buffers.len(), n_before + 1, "a new buffer is added");
+        assert!(
+            app.active_buffer()
+                .rope
+                .to_string()
+                .contains("hello from disk"),
+            "active buffer holds the opened file's content"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 
     // ── T017 — Cancel contract ──────────────────────────────────────────────

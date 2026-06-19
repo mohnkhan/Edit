@@ -1,13 +1,15 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.3.0 (features 008 + 009 complete)
+**Version**: 0.3.0 (features 008 + 009 complete; 010 unreleased)
 **Last updated**: 2026-06-19
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F010-US1 | File ▸ Open (and `Ctrl+O`) opens a modal path dialog that loads the file into a new buffer | Complete |
+| F010-US2 | `Esc` bound to `MenuClose`: closes menus and cancels all modal dialogs (was a no-op) | Complete |
 | F008-US1 | Syntax highlighter plugins (Rhai); plugin highlighter takes precedence over built-in | Complete |
 | F008-US2 | Custom keybinding plugins; merged into keymap; Save/Quit non-overridable | Complete |
 | F008-US3 | Menu item plugins; `menu_action` dispatched in sandbox; live menu-bar activation wired in feature 009 | Complete |
