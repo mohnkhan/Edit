@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — feature 005: Soft-Wrap Mode
+
+### Added
+
+- **Soft-wrap rendering mode** (non-DOS extension): optional visual line wrapping at the terminal
+  width, toggled via **Alt+Z** or the new "Soft Wrap (ext)" item in the View menu.
+- `WrapCache` in `src/ui/wrap.rs`: per-logical-line byte-offset cache computed from grapheme
+  clusters using `unicode-segmentation` + `unicode-width`; word-break heuristics for space, tab,
+  comma, period, semicolon, colon, hyphen, slash; hard-break fallback at grapheme boundary.
+- `»` (U+00BB) continuation marker rendered at the left of each visual continuation row.
+- Visual/logical coordinate separation: cursor moves on logical lines; `scroll_offset.0` switches
+  to visual-row units when wrap is active; horizontal scroll is zeroed while wrap is on.
+- `App::wrap_cache: Option<WrapCache>` and `App::wrap_text_gen: u64` for cache lifecycle management;
+  cache rebuilt on resize and after every buffer mutation.
+- `App::save_config_to_disk()`: atomic tmp-rename persist of `soft_wrap` to
+  `$XDG_CONFIG_HOME/edit/config.toml`; failure logs a warning and sets the status bar message
+  without reverting the toggle.
+- `soft_wrap: bool` field in `Config` (`src/config/schema.rs`) with TOML round-trip support.
+- `[WRAP]` indicator in the status bar when soft-wrap is active.
+- Mouse click mapping through `WrapCache::visual_to_logical()` for correct cursor placement in
+  soft-wrap mode.
+- 10-column viewport-width guard: toggling on below the minimum shows a status message and no-ops.
+- 10 new unit tests (toggle cycle, cursor unchanged, Home/End, Up/Down, save byte-identity).
+- 3 integration tests in `tests/integration/soft_wrap.rs`.
+
+### Deferred
+
+- Menu check-indicator (✓ prefix next to "Soft Wrap (ext)" when active): tracked in issue TBD,
+  ROADMAP.md. The `[WRAP]` status-bar indicator serves as a workaround for v1.
+
+---
+
 ## [Unreleased] — feature 004: Save-As Encoding Selection UI
 
 ### Added

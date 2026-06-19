@@ -91,6 +91,12 @@ edit [OPTIONS] [FILE...]
 | `Ctrl+W` | Close current buffer |
 | `F6` | Switch to next split pane |
 
+### View
+
+| Key | Action |
+|---|---|
+| `Alt+Z` | Toggle soft-wrap mode (non-DOS extension) |
+
 ### Menu
 
 | Key | Action |
@@ -99,6 +105,7 @@ edit [OPTIONS] [FILE...]
 | `Alt+F` | File menu |
 | `Alt+E` | Edit menu |
 | `Alt+S` | Search menu |
+| `Alt+V` | View menu |
 | `Alt+O` | Options menu |
 | `Alt+H` | Help menu |
 | `Esc` | Close menu / cancel dialog |
@@ -141,6 +148,13 @@ edit [OPTIONS] [FILE...]
 - Line Numbers (toggle)
 - Syntax Highlighting (toggle)
 - Auto-save (toggle)
+
+### View
+- Split View
+- Next Buffer
+- Prev Buffer
+- Toggle Line Nos
+- Soft Wrap (ext) (`Alt+Z`) — non-DOS extension; wraps long lines at terminal width
 
 ### Help
 - About

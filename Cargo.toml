@@ -60,6 +60,10 @@ path = "tests/integration/session.rs"
 name = "encoding_select"
 path = "tests/integration/encoding_select.rs"
 
+[[test]]
+name = "soft_wrap"
+path = "tests/integration/soft_wrap.rs"
+
 [[bench]]
 name = "startup"
 harness = false
