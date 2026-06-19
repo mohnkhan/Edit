@@ -2,6 +2,7 @@
 name = "edit"
 version = "0.3.0"
 edition = "2021"
+authors = ["Mohiuddin Khan Inamdar"]
 description = "Cross-platform reimplementation of MS-DOS EDIT.COM (Linux, BSD, macOS, MyOS)"
 license = "MPL-2.0"
 

@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ui/menubar.rs`), so it is correct for built-in *and* plugin menus and for the checkable
   View items. Clicking outside an open menu closes it; clicking in the editor repositions the
   cursor.
-- **Help ▸ About** screen showing the program name, version, description, and copyright.
+- **Help ▸ About** screen showing the program name, version, description, author
+  (Mohiuddin Khan Inamdar), and copyright.
 - **Help ▸ Help** screen with a key-binding cheat sheet.
 - **`Ctrl+N` / File ▸ New** creates a fresh empty buffer.
 - **File ▸ Save As** opens a path-entry dialog and writes the active buffer to the new path.
