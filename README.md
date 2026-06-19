@@ -217,6 +217,11 @@ make stress-test  # 5-minute continuous-editing stress test
 make ci-local     # full gate: fmt → clippy → test → smoke → bench
 ```
 
+> 💾 **Save your SSD**: `make tmpfs-setup` redirects `target/` (the only large gitignored output
+> tree) into `/tmp/edit/<hash>/` so Cargo's write-heavy build cycle hits RAM instead of the SSD.
+> Reversible (`make tmpfs-teardown`), idempotent, opt-in, no-op on CI. See
+> [`docs/dev-tmpfs.md`](docs/dev-tmpfs.md).
+
 ### Module layout (`src/`)
 
 | Module | Responsibility |
