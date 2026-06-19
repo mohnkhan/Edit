@@ -262,7 +262,7 @@ mod tests {
             let path = session_path();
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, b"this is not valid toml [[[").unwrap();
-            assert!(matches!(load_session(), Err(_)));
+            assert!(load_session().is_err());
         });
     }
 
@@ -273,7 +273,7 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let toml = "version = 99\nactive_buffer = 0\nactive_pane = 0\nsplit_layout = \"none\"\n\n[[buffers]]\npath = \"/tmp/x.txt\"\ncursor_line = 1\ncursor_col = 1\n";
             std::fs::write(&path, toml).unwrap();
-            assert!(matches!(load_session(), Err(_)));
+            assert!(load_session().is_err());
         });
     }
 

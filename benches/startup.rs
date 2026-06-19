@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
 fn bench_config_load(c: &mut Criterion) {
-    c.bench_function("config_load", |b| b.iter(|| edit::config::load_config()));
+    c.bench_function("config_load", |b| b.iter(edit::config::load_config));
 }
 
 fn bench_config_validate(c: &mut Criterion) {

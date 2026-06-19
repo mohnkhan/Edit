@@ -181,7 +181,7 @@ fn parse_recovery_content_len_mismatch() {
 
 #[test]
 fn parse_recovery_missing_separator() {
-    use edit::buffer::autosave::{parse_recovery_bytes, RecoveryError};
+    use edit::buffer::autosave::parse_recovery_bytes;
     let raw =
         b"EDIT-RECOVERY-V1\npath: /tmp/x\nencoding: utf-8\ntimestamp: 0\ncontent_len: 0\n".to_vec();
     let err = parse_recovery_bytes(&raw).unwrap_err();
@@ -322,7 +322,6 @@ fn autosave_writes_recovery_before_sigkill() {
     // SIGKILL the editor (simulates a crash).
     #[cfg(unix)]
     {
-        use std::os::unix::process::ExitStatusExt;
         let _ = child.kill(); // sends SIGKILL
     }
     let _ = child.wait();
