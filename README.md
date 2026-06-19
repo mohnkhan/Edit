@@ -1,6 +1,7 @@
 # edit
 
-> A faithful MS-DOS **EDIT.COM** for the modern Linux terminal — DOS look-and-feel, Unicode soul.
+> A faithful MS-DOS **EDIT.COM** for the modern terminal — cross-platform (Linux, BSD, macOS, MyOS),
+> DOS look-and-feel, Unicode soul.
 
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)](docs/STATUS.md)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](Cargo.toml)
@@ -9,15 +10,16 @@
 [![Version](https://img.shields.io/badge/version-0.3.0-informational)](CHANGELOG.md)
 
 `edit` recreates the unmistakable blue-screen experience of Microsoft's MS-DOS text editor —
-pull-down menus, F-key bindings, and a status bar — as a single, fast, native Linux binary.
-Unlike the original, it is **UTF-8/Unicode native from the ground up**, written in **Rust** with
+pull-down menus, F-key bindings, and a status bar — as a single, fast, portable native binary that
+runs on **Linux, FreeBSD, macOS, and MyOS**. Unlike the original, it is **UTF-8/Unicode native from
+the ground up**, written in **Rust** with
 [`ratatui`](https://ratatui.rs) and [`crossterm`](https://github.com/crossterm-rs/crossterm), and
 extensible through a **sandboxed plugin API**.
 
 ```text
 ┌ File  Edit  Search  View  Options  Help ─────────────────────────────────────┐
 │                                                                               │
-│  Welcome to edit — the DOS editor, reborn for Linux.                          │
+│  Welcome to edit — the DOS editor, reborn for your terminal.                  │
 │                                                                               │
 │  • Arrow keys to move, F10 for the menu bar, Alt+F to drop down File.         │
 │  • Ctrl+S saves, Ctrl+F finds, Ctrl+Q quits.                                  │
@@ -54,11 +56,13 @@ extensible through a **sandboxed plugin API**.
 
 ## 🧩 Part of MyOS
 
-`edit` is developed as a **standalone terminal editor** that is also destined to ship as the
-built-in text editor of **[MyOS](https://github.com/)** — a Linux-based operating system project
-that this repository lives within (`/MyOS-2026/`). It is designed to stand on its own anywhere a
-Linux terminal runs, while fitting cleanly into MyOS as a dependency-light, self-contained
-component. You can use it today; MyOS will adopt it as a first-class part of its base userland.
+`edit` is developed as a **standalone, OS-agnostic terminal editor** that is also destined to ship
+as the built-in text editor of **[MyOS](https://github.com/mohnkhan/MyOS2026)** — a from-scratch
+x86_64 operating system written in Rust (with a Linux-compatible syscall ABI) that this repository
+lives within (`/MyOS-2026/`). It is designed to stand on its own anywhere a terminal runs —
+**Linux, FreeBSD, and macOS** (per the project constitution), in addition to MyOS — while fitting
+cleanly into MyOS as a dependency-light, self-contained component. You can use it today; MyOS will
+adopt it as a first-class part of its base userland.
 
 ---
 
@@ -96,6 +100,14 @@ make package-rpm    # .rpm via rpmbuild + packaging/edit.spec
 | `x86_64-unknown-linux-gnu` | stable 1.74+ | debug, release |
 | `aarch64-unknown-linux-gnu` | stable 1.74+ (cross) | debug, release |
 | `x86_64-unknown-linux-musl` | nightly | `release-static` |
+| `x86_64-unknown-freebsd` | stable 1.74+ | debug, release |
+| `x86_64-apple-darwin` | stable 1.74+ | debug, release |
+| `aarch64-apple-darwin` | stable 1.74+ | debug, release |
+
+`edit` is **OS-agnostic, pure-Rust** with no platform-specific runtime dependency, so it builds from
+the same source on every target above (Linux, FreeBSD, macOS — and MyOS, where it ships as the
+built-in editor). Linux x86_64 is the primary CI-gated target; the others are supported per the
+[project constitution](.specify/memory/constitution.md) (Principle III — Portable Build).
 
 ---
 
@@ -274,4 +286,4 @@ Contributions are welcome! A few project conventions:
 ## 📄 License
 
 Released under the **Mozilla Public License 2.0**, matching the parent
-[MyOS](../MyOS2026/) project. See [`LICENSE`](LICENSE).
+[MyOS](https://github.com/mohnkhan/MyOS2026) project. See [`LICENSE`](LICENSE).
