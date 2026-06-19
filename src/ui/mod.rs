@@ -280,6 +280,16 @@ impl Ui {
             frame.render_widget(dialog, size);
         }
 
+        // Feature 010 — Open-file dialog overlay.
+        if let Some(ref input) = app.pending_open {
+            use crate::ui::dialog::OpenFileDialog;
+            let dialog = OpenFileDialog {
+                input: input.clone(),
+                theme: app.theme,
+            };
+            frame.render_widget(dialog, size);
+        }
+
         // Feature 008 — Plugin consent dialog (exclusive modal; highest priority).
         if let Some(plugin) = app.pending_plugin_consent.first() {
             let body = crate::ui::plugin_manager::consent_body(plugin);

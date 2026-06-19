@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### feature 010: Working Escape key and File ▸ Open
+
+#### Added
+
+- **File ▸ Open is now functional.** Selecting *Open* from the File menu opens a modal
+  path-entry dialog; typing a path and pressing `Enter` loads the file into a new buffer
+  (path-validated via the existing sanitizer). Previously the menu item dispatched an
+  `Open` action that no action handler matched, so it silently did nothing — the
+  `OpenFileDialog` widget and `handle_open_file` were present but never wired up.
+- **`Ctrl+O` now opens the File ▸ Open dialog.** This shortcut was documented in
+  `CAPABILITIES.md` but had no keymap binding; it is now bound to the `Open` action.
+
+#### Fixed
+
+- **Escape key now works.** `Esc` was never bound to any action (no `"Esc"` entry in the
+  default keymap and no fallback arm in the key dispatcher), so pressing it did nothing —
+  it could not close an open menu/dropdown or cancel any modal dialog, despite the
+  handling code (`Action::MenuClose`) already being in place. `Esc` is now bound to
+  `MenuClose`, restoring DOS-faithful "Escape backs out" behavior across the menu bar and
+  all modal dialogs (encoding select, plugin consent, plugin manager). This completes the
+  `Esc` closes the menu behavior described under feature 009.
+
+---
+
 ## [0.3.0] - 2026-06-19
 
 ### feature 009: Live menu-bar activation

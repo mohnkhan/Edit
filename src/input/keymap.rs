@@ -106,6 +106,7 @@ impl KeybindingMap {
         map.insert("Ctrl+S".to_string(), Action::Save);
         map.insert("F5".to_string(), Action::Save);
         map.insert("F12".to_string(), Action::SaveAsEncoding);
+        map.insert("Ctrl+O".to_string(), Action::Open);
         map.insert("Ctrl+Q".to_string(), Action::Quit);
 
         // Edit
@@ -125,6 +126,9 @@ impl KeybindingMap {
         // Help / menu
         map.insert("F1".to_string(), Action::Help);
         map.insert("F10".to_string(), Action::Menu);
+        // Escape closes an open menu/dropdown and cancels modal dialogs
+        // (DOS-faithful: ESC always backs out of the current context).
+        map.insert("Esc".to_string(), Action::MenuClose);
 
         // Soft-wrap toggle (Feature 005)
         map.insert("Alt+Z".to_string(), Action::ToggleSoftWrap);
@@ -313,6 +317,21 @@ mod tests {
     fn default_map_contains_quit() {
         let km = KeybindingMap::default_map();
         assert_eq!(km.get_action("Ctrl+Q"), Some(&Action::Quit));
+    }
+
+    #[test]
+    fn default_map_binds_ctrl_o_to_open() {
+        // Docs promised Ctrl+O = Open file dialog, but it was never bound.
+        let km = KeybindingMap::default_map();
+        assert_eq!(km.get_action("Ctrl+O"), Some(&Action::Open));
+    }
+
+    #[test]
+    fn default_map_binds_escape_to_menu_close() {
+        // Regression: Escape produced no Action because "Esc" was unbound,
+        // so it could never close a menu or cancel a modal dialog.
+        let km = KeybindingMap::default_map();
+        assert_eq!(km.get_action("Esc"), Some(&Action::MenuClose));
     }
 
     #[test]
