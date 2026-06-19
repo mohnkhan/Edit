@@ -19,6 +19,7 @@ use ratatui::{
 };
 
 use crate::input::keymap::Action;
+use crate::plugin::types::PluginMenuItem;
 use crate::ui::theme::Theme;
 
 // ---------------------------------------------------------------------------
@@ -207,6 +208,111 @@ static BAR_LABELS: &[BarLabel] = &[
 ];
 
 // ---------------------------------------------------------------------------
+// Resolved menu model (Feature 009) — the composite of built-in + plugin menus
+// ---------------------------------------------------------------------------
+
+/// A single resolved, displayable dropdown item.
+///
+/// Owned `String` label (built-in labels are cloned from the static `&'static str`
+/// slices; plugin labels are runtime strings) so built-in and plugin items can
+/// live in one list. `action` is a static [`Action`] for built-ins and
+/// [`Action::PluginMenuActivated`] for plugin items.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedItem {
+    pub label: String,
+    pub action: Action,
+}
+
+/// A single resolved top-level menu as it appears in the bar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMenu {
+    pub label: String,
+    pub items: Vec<ResolvedItem>,
+}
+
+/// Build the ordered composite of top-level menus shown in the bar.
+///
+/// Rules (see `specs/009-menu-bar-activation/data-model.md`):
+/// 1. Seed from the six built-in menus, in order.
+/// 2. Plugin items whose `menu` name matches a built-in menu are appended to
+///    that built-in dropdown (merge on name collision).
+/// 3. Remaining plugin items are grouped into new top-level menus inserted
+///    immediately before Help (so Help stays rightmost — DOS-faithful).
+/// 4. Items within a group are ordered by `position` (ascending) when set,
+///    otherwise by stable load order.
+///
+/// `resolve_menus(&[])` returns exactly the built-in set (parity invariant for
+/// FR-011 / SC-003).
+pub fn resolve_menus(plugin_items: &[PluginMenuItem]) -> Vec<ResolvedMenu> {
+    // 1. Seed from built-ins.
+    let mut menus: Vec<ResolvedMenu> = BAR_LABELS
+        .iter()
+        .zip(ALL_MENUS.iter())
+        .map(|(bl, items)| ResolvedMenu {
+            label: bl.label.to_string(),
+            items: items
+                .iter()
+                .map(|it| ResolvedItem {
+                    label: it.label.to_string(),
+                    action: it.action.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+
+    // Parity fast-path: no plugin menus → identical to built-ins.
+    if plugin_items.is_empty() {
+        return menus;
+    }
+
+    // Group plugin items by `menu` name, preserving first-appearance order of
+    // new menu names.
+    let mut groups: Vec<(String, Vec<&PluginMenuItem>)> = Vec::new();
+    for pi in plugin_items {
+        if let Some(entry) = groups.iter_mut().find(|(name, _)| *name == pi.menu) {
+            entry.1.push(pi);
+        } else {
+            groups.push((pi.menu.clone(), vec![pi]));
+        }
+    }
+
+    for (name, mut items) in groups {
+        // Stable sort: items with `position` first (ascending), then load order.
+        items.sort_by(|a, b| match (a.position, b.position) {
+            (Some(x), Some(y)) => x.cmp(&y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        });
+
+        let resolved_items: Vec<ResolvedItem> = items
+            .iter()
+            .map(|pi| ResolvedItem {
+                label: pi.item.clone(),
+                action: Action::PluginMenuActivated(pi.plugin_id.clone(), pi.item_id.clone()),
+            })
+            .collect();
+
+        if let Some(existing) = menus.iter_mut().find(|m| m.label == name) {
+            // Name collision with a built-in menu → merge items.
+            existing.items.extend(resolved_items);
+        } else {
+            // New plugin menu → insert immediately before Help (current last).
+            let insert_at = menus.len().saturating_sub(1);
+            menus.insert(
+                insert_at,
+                ResolvedMenu {
+                    label: name,
+                    items: resolved_items,
+                },
+            );
+        }
+    }
+
+    menus
+}
+
+// ---------------------------------------------------------------------------
 // MenuState — T041
 // ---------------------------------------------------------------------------
 
@@ -242,11 +348,23 @@ impl MenuBarState {
         }
     }
 
-    /// Open (or switch to) the top-level menu at index `idx`.
+    /// Activate the menu bar at the first top-level menu **without** opening a
+    /// dropdown (the F10 / DOS-faithful entry path). From here Left/Right move
+    /// the highlight and Up/Down open the highlighted menu's dropdown.
+    pub fn activate_bar(&mut self) {
+        self.state = MenuState::TopActive(0);
+    }
+
+    /// Open (or switch to) the top-level menu at index `idx`, showing its
+    /// dropdown directly (the Alt+&lt;letter&gt; entry path).
     ///
+    /// `idx` is clamped against the resolved menu count.
     /// Transitions: any state → `DropDown { top_idx: idx, item_idx: 0 }`.
-    pub fn open_menu(&mut self, idx: usize) {
-        let clamped = idx.min(ALL_MENUS.len().saturating_sub(1));
+    pub fn open_menu(&mut self, idx: usize, menus: &[ResolvedMenu]) {
+        if menus.is_empty() {
+            return;
+        }
+        let clamped = idx.min(menus.len().saturating_sub(1));
         self.state = MenuState::DropDown {
             top_idx: clamped,
             item_idx: 0,
@@ -258,24 +376,34 @@ impl MenuBarState {
         self.state = MenuState::Inactive;
     }
 
+    /// Number of items in the resolved menu at `idx` (0 if out of range).
+    fn item_count(menus: &[ResolvedMenu], idx: usize) -> usize {
+        menus.get(idx).map(|m| m.items.len()).unwrap_or(0)
+    }
+
     /// Move the dropdown highlight one item downward (wrapping).
     ///
-    /// If the menu is `Inactive` this is a no-op.
-    /// If it is `TopActive`, transitions to `DropDown` at item 0.
-    pub fn navigate_down(&mut self) {
+    /// `Inactive` → no-op. `TopActive` → open the dropdown at item 0 (if the
+    /// menu has items). `DropDown` → next item, wrapping.
+    pub fn navigate_down(&mut self, menus: &[ResolvedMenu]) {
         match self.state {
             MenuState::Inactive => {}
             MenuState::TopActive(top_idx) => {
-                self.state = MenuState::DropDown {
-                    top_idx,
-                    item_idx: 0,
-                };
+                if Self::item_count(menus, top_idx) > 0 {
+                    self.state = MenuState::DropDown {
+                        top_idx,
+                        item_idx: 0,
+                    };
+                }
             }
             MenuState::DropDown { top_idx, item_idx } => {
-                let item_count = ALL_MENUS.get(top_idx).map(|m| m.len()).unwrap_or(1);
+                let count = Self::item_count(menus, top_idx);
+                if count == 0 {
+                    return;
+                }
                 self.state = MenuState::DropDown {
                     top_idx,
-                    item_idx: (item_idx + 1) % item_count,
+                    item_idx: (item_idx + 1) % count,
                 };
             }
         }
@@ -283,22 +411,27 @@ impl MenuBarState {
 
     /// Move the dropdown highlight one item upward (wrapping).
     ///
-    /// If the menu is `Inactive` this is a no-op.
-    /// If it is `TopActive`, transitions to `DropDown` at the last item.
-    pub fn navigate_up(&mut self) {
+    /// `Inactive` → no-op. `TopActive` → open the dropdown at the last item (if
+    /// the menu has items). `DropDown` → previous item, wrapping.
+    pub fn navigate_up(&mut self, menus: &[ResolvedMenu]) {
         match self.state {
             MenuState::Inactive => {}
             MenuState::TopActive(top_idx) => {
-                let item_count = ALL_MENUS.get(top_idx).map(|m| m.len()).unwrap_or(1);
-                self.state = MenuState::DropDown {
-                    top_idx,
-                    item_idx: item_count.saturating_sub(1),
-                };
+                let count = Self::item_count(menus, top_idx);
+                if count > 0 {
+                    self.state = MenuState::DropDown {
+                        top_idx,
+                        item_idx: count - 1,
+                    };
+                }
             }
             MenuState::DropDown { top_idx, item_idx } => {
-                let item_count = ALL_MENUS.get(top_idx).map(|m| m.len()).unwrap_or(1);
+                let count = Self::item_count(menus, top_idx);
+                if count == 0 {
+                    return;
+                }
                 let new_idx = if item_idx == 0 {
-                    item_count.saturating_sub(1)
+                    count - 1
                 } else {
                     item_idx - 1
                 };
@@ -310,15 +443,60 @@ impl MenuBarState {
         }
     }
 
-    /// Activate the currently highlighted item and return the associated
-    /// [`Action`], or `None` if no dropdown item is highlighted.
+    /// Move focus to the previous top-level menu (wrapping over the full ring).
     ///
-    /// After returning an action the menu is closed.
-    pub fn select_item(&mut self) -> Option<Action> {
+    /// From `TopActive` the highlight moves without opening a dropdown; from
+    /// `DropDown` the adjacent menu's dropdown opens (item 0) — DOS-faithful.
+    pub fn navigate_left(&mut self, menus: &[ResolvedMenu]) {
+        let n = menus.len();
+        if n == 0 {
+            return;
+        }
+        match self.state {
+            MenuState::Inactive => {}
+            MenuState::TopActive(t) => {
+                self.state = MenuState::TopActive((t + n - 1) % n);
+            }
+            MenuState::DropDown { top_idx, .. } => {
+                self.state = MenuState::DropDown {
+                    top_idx: (top_idx + n - 1) % n,
+                    item_idx: 0,
+                };
+            }
+        }
+    }
+
+    /// Move focus to the next top-level menu (wrapping over the full ring).
+    ///
+    /// From `TopActive` the highlight moves without opening a dropdown; from
+    /// `DropDown` the adjacent menu's dropdown opens (item 0) — DOS-faithful.
+    pub fn navigate_right(&mut self, menus: &[ResolvedMenu]) {
+        let n = menus.len();
+        if n == 0 {
+            return;
+        }
+        match self.state {
+            MenuState::Inactive => {}
+            MenuState::TopActive(t) => {
+                self.state = MenuState::TopActive((t + 1) % n);
+            }
+            MenuState::DropDown { top_idx, .. } => {
+                self.state = MenuState::DropDown {
+                    top_idx: (top_idx + 1) % n,
+                    item_idx: 0,
+                };
+            }
+        }
+    }
+
+    /// Activate the currently highlighted dropdown item and return its
+    /// [`Action`], or `None` if no dropdown item is highlighted (e.g. the bar
+    /// is only in `TopActive`). After returning an action the menu is closed.
+    pub fn select_item(&mut self, menus: &[ResolvedMenu]) -> Option<Action> {
         if let MenuState::DropDown { top_idx, item_idx } = self.state {
-            let action = ALL_MENUS
+            let action = menus
                 .get(top_idx)
-                .and_then(|menu| menu.get(item_idx))
+                .and_then(|menu| menu.items.get(item_idx))
                 .map(|item| item.action.clone());
             self.state = MenuState::Inactive;
             action
@@ -356,6 +534,10 @@ pub struct MenuBarWidget<'a> {
     /// or a `  ` filler (`checked = false`). An empty slice produces
     /// identical rendering to pre-feature behavior.
     pub toggle_states: &'a [(Action, bool)],
+    /// The resolved composite menu list (built-in + plugin) to render. Built by
+    /// the caller via [`resolve_menus`]. With no plugin menus this equals the
+    /// built-in set and reproduces the pre-feature geometry exactly.
+    pub menus: &'a [ResolvedMenu],
 }
 
 impl<'a> MenuBarWidget<'a> {
@@ -364,13 +546,38 @@ impl<'a> MenuBarWidget<'a> {
         theme: &'static Theme,
         menu_state: &'a MenuBarState,
         toggle_states: &'a [(Action, bool)],
+        menus: &'a [ResolvedMenu],
     ) -> Self {
         Self {
             theme,
             menu_state,
             toggle_states,
+            menus,
         }
     }
+}
+
+/// Compute the 0-based bar column for each top-level label.
+///
+/// When the resolved set is exactly the built-in menus (no plugin menus), the
+/// exact historical columns are reproduced (FR-011 / SC-003 parity). Otherwise
+/// labels are laid out sequentially with a 2-space gap.
+fn bar_label_columns(menus: &[ResolvedMenu]) -> Vec<u16> {
+    let is_builtin_only = menus.len() == BAR_LABELS.len()
+        && menus
+            .iter()
+            .zip(BAR_LABELS.iter())
+            .all(|(m, b)| m.label == b.label);
+    if is_builtin_only {
+        return BAR_LABELS.iter().map(|b| b.col).collect();
+    }
+    let mut cols = Vec::with_capacity(menus.len());
+    let mut next = 1u16;
+    for m in menus {
+        cols.push(next);
+        next += m.label.chars().count() as u16 + 2;
+    }
+    cols
 }
 
 /// Return `Some(true)` if `action` is in `toggle_states` and checked,
@@ -410,16 +617,20 @@ impl<'a> Widget for MenuBarWidget<'a> {
             MenuState::DropDown { top_idx, .. } => Some(*top_idx),
         };
 
+        // Resolved top-level columns (built-in parity preserved when no plugins).
+        let columns = bar_label_columns(self.menus);
+
         // Draw each top-level menu label.
-        for (menu_idx, bar_label) in BAR_LABELS.iter().enumerate() {
-            let base_x = area.left() + bar_label.col;
+        for (menu_idx, menu) in self.menus.iter().enumerate() {
+            let col = columns.get(menu_idx).copied().unwrap_or(0);
+            let base_x = area.left() + col;
             let style = if active_top == Some(menu_idx) {
                 selected_style
             } else {
                 bar_style
             };
 
-            for (i, ch) in bar_label.label.chars().enumerate() {
+            for (i, ch) in menu.label.chars().enumerate() {
                 let x = base_x + i as u16;
                 if x >= area.right() {
                     break;
@@ -434,14 +645,14 @@ impl<'a> Widget for MenuBarWidget<'a> {
             let top_idx = *top_idx;
             let item_idx = *item_idx;
 
-            let menu_items = match ALL_MENUS.get(top_idx) {
-                Some(m) => m,
+            let menu_items: &[ResolvedItem] = match self.menus.get(top_idx) {
+                Some(m) => &m.items,
                 None => return,
             };
 
             // Compute the dropdown column: align with the bar label's start col,
             // clamping so the dropdown doesn't run off the right edge.
-            let drop_col: u16 = BAR_LABELS.get(top_idx).map(|bl| bl.col).unwrap_or(0);
+            let drop_col: u16 = columns.get(top_idx).copied().unwrap_or(0);
 
             // T005: Is this a checkable-aware dropdown?
             // True when at least one item's action appears in toggle_states.
@@ -554,22 +765,31 @@ mod tests {
     use crate::ui::theme::theme_by_name;
     use ratatui::{buffer::Buffer, layout::Rect};
 
+    // Built-in resolved menus (no plugins) — used by the geometry tests so
+    // their assertions stay identical to the pre-feature layout.
+    fn builtin_menus() -> Vec<ResolvedMenu> {
+        resolve_menus(&[])
+    }
+
     // T009: shared helpers — open a specific menu dropdown for rendering.
     fn view_open() -> MenuBarState {
+        let menus = builtin_menus();
         let mut s = MenuBarState::new();
-        s.open_menu(3); // View is index 3 in ALL_MENUS / BAR_LABELS
+        s.open_menu(3, &menus); // View is index 3 in ALL_MENUS / BAR_LABELS
         s
     }
 
     fn file_open() -> MenuBarState {
+        let menus = builtin_menus();
         let mut s = MenuBarState::new();
-        s.open_menu(0); // File is index 0
+        s.open_menu(0, &menus); // File is index 0
         s
     }
 
     fn options_open() -> MenuBarState {
+        let menus = builtin_menus();
         let mut s = MenuBarState::new();
-        s.open_menu(4); // Options is index 4
+        s.open_menu(4, &menus); // Options is index 4
         s
     }
 
@@ -580,10 +800,36 @@ mod tests {
         width: u16,
         height: u16,
     ) -> Buffer {
+        let menus = builtin_menus();
         let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
-        let widget = MenuBarWidget::new(theme_by_name("classic"), state, toggle_states);
+        let widget = MenuBarWidget::new(theme_by_name("classic"), state, toggle_states, &menus);
         widget.render(buf.area, &mut buf);
         buf
+    }
+
+    // Render with an explicit resolved-menu list (for plugin-menu rendering tests).
+    fn render_into_with_menus(
+        state: &MenuBarState,
+        toggle_states: &[(Action, bool)],
+        menus: &[ResolvedMenu],
+        width: u16,
+        height: u16,
+    ) -> Buffer {
+        let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
+        let widget = MenuBarWidget::new(theme_by_name("classic"), state, toggle_states, menus);
+        widget.render(buf.area, &mut buf);
+        buf
+    }
+
+    // A synthetic plugin menu item for tests.
+    fn plugin_item(menu: &str, item: &str, id: &str, plugin: &str) -> PluginMenuItem {
+        PluginMenuItem {
+            menu: menu.to_string(),
+            item: item.to_string(),
+            item_id: id.to_string(),
+            plugin_id: plugin.to_string(),
+            position: None,
+        }
     }
 
     // T010: checkmark shown when toggle true
@@ -749,5 +995,308 @@ mod tests {
             "✓",
             "config-persisted soft_wrap=true must show '✓' immediately on first render (US3)"
         );
+    }
+
+    // ── Feature 009: resolve_menus model (T002) ─────────────────────────────
+
+    #[test]
+    fn test_resolve_menus_empty_matches_builtin() {
+        let menus = resolve_menus(&[]);
+        let labels: Vec<&str> = menus.iter().map(|m| m.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["File", "Edit", "Search", "View", "Options", "Help"]
+        );
+        // Item labels/actions match the built-in slices exactly.
+        for (m, items) in menus.iter().zip(ALL_MENUS.iter()) {
+            let got: Vec<&str> = m.items.iter().map(|i| i.label.as_str()).collect();
+            let want: Vec<&str> = items.iter().map(|i| i.label).collect();
+            assert_eq!(got, want, "items of {} must match built-in", m.label);
+        }
+    }
+
+    #[test]
+    fn test_resolve_menus_inserts_plugin_before_help() {
+        let items = vec![plugin_item("Tools", "Word Count", "wc", "word-count")];
+        let menus = resolve_menus(&items);
+        // "Tools" is at len-2; Help remains last.
+        assert_eq!(menus.last().unwrap().label, "Help");
+        assert_eq!(menus[menus.len() - 2].label, "Tools");
+        assert_eq!(menus[menus.len() - 2].items.len(), 1);
+        assert_eq!(menus[menus.len() - 2].items[0].label, "Word Count");
+        assert_eq!(
+            menus[menus.len() - 2].items[0].action,
+            Action::PluginMenuActivated("word-count".into(), "wc".into())
+        );
+    }
+
+    #[test]
+    fn test_resolve_menus_merges_into_builtin_on_name_collision() {
+        let items = vec![plugin_item("Edit", "Sort Lines", "sort", "sorter")];
+        let menus = resolve_menus(&items);
+        // Exactly one "Edit" top-level menu (no duplicate).
+        assert_eq!(menus.iter().filter(|m| m.label == "Edit").count(), 1);
+        let edit = menus.iter().find(|m| m.label == "Edit").unwrap();
+        assert!(
+            edit.items.iter().any(|i| i.label == "Sort Lines"),
+            "plugin item must be merged into the built-in Edit menu"
+        );
+        // No "Edit" inserted as a plugin top-level; total count is built-ins.
+        assert_eq!(menus.len(), 6);
+    }
+
+    #[test]
+    fn test_resolve_menus_groups_multiple_plugins_same_menu() {
+        let items = vec![
+            plugin_item("Tools", "Word Count", "wc", "word-count"),
+            plugin_item("Tools", "Line Count", "lc", "line-count"),
+        ];
+        let menus = resolve_menus(&items);
+        let tools: Vec<&ResolvedMenu> = menus.iter().filter(|m| m.label == "Tools").collect();
+        assert_eq!(tools.len(), 1, "a single shared Tools menu");
+        assert_eq!(tools[0].items.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_menus_orders_by_position_then_load_order() {
+        let mut a = plugin_item("Tools", "Second", "b", "p");
+        a.position = Some(10);
+        let mut b = plugin_item("Tools", "First", "a", "p");
+        b.position = Some(1);
+        let c = plugin_item("Tools", "Loadorder", "c", "p"); // None position → after positioned
+        let menus = resolve_menus(&[a, b, c]);
+        let tools = menus.iter().find(|m| m.label == "Tools").unwrap();
+        let labels: Vec<&str> = tools.items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, ["First", "Second", "Loadorder"]);
+    }
+
+    #[test]
+    fn test_resolve_menus_widechar_plugin_label_preserved() {
+        // FR-014 / remediation M2: UTF-8 wide-character labels survive resolution intact.
+        let items = vec![plugin_item("ツール", "文字数", "wc", "jp")];
+        let menus = resolve_menus(&items);
+        let tools = menus.iter().find(|m| m.label == "ツール").unwrap();
+        assert_eq!(tools.items[0].label, "文字数");
+    }
+
+    // ── Feature 009: MenuBarState navigation (T005) ─────────────────────────
+
+    #[test]
+    fn test_navigate_down_wraps() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        s.open_menu(0, &menus); // File, item 0
+        let last = menus[0].items.len() - 1;
+        for _ in 0..last {
+            s.navigate_down(&menus);
+        }
+        assert_eq!(
+            s.state,
+            MenuState::DropDown {
+                top_idx: 0,
+                item_idx: last
+            }
+        );
+        s.navigate_down(&menus); // wrap to 0
+        assert_eq!(
+            s.state,
+            MenuState::DropDown {
+                top_idx: 0,
+                item_idx: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_navigate_up_wraps() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        s.open_menu(0, &menus); // item 0
+        s.navigate_up(&menus); // wrap to last
+        let last = menus[0].items.len() - 1;
+        assert_eq!(
+            s.state,
+            MenuState::DropDown {
+                top_idx: 0,
+                item_idx: last
+            }
+        );
+    }
+
+    #[test]
+    fn test_top_active_down_opens_dropdown() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        s.activate_bar();
+        assert_eq!(s.state, MenuState::TopActive(0));
+        s.navigate_down(&menus);
+        assert_eq!(
+            s.state,
+            MenuState::DropDown {
+                top_idx: 0,
+                item_idx: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_top_active_up_opens_last_item() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        s.activate_bar();
+        s.navigate_up(&menus);
+        let last = menus[0].items.len() - 1;
+        assert_eq!(
+            s.state,
+            MenuState::DropDown {
+                top_idx: 0,
+                item_idx: last
+            }
+        );
+    }
+
+    #[test]
+    fn test_activate_bar_enters_top_active() {
+        let mut s = MenuBarState::new();
+        s.activate_bar();
+        assert_eq!(s.state, MenuState::TopActive(0));
+        assert!(s.is_active());
+    }
+
+    #[test]
+    fn test_navigate_left_right_wraps_over_ring() {
+        let menus = builtin_menus(); // 6 menus
+        let mut s = MenuBarState::new();
+        s.activate_bar(); // TopActive(0)
+        s.navigate_left(&menus); // wrap to last
+        assert_eq!(s.state, MenuState::TopActive(menus.len() - 1));
+        s.navigate_right(&menus); // wrap forward to 0
+        assert_eq!(s.state, MenuState::TopActive(0));
+    }
+
+    #[test]
+    fn test_navigate_left_right_opens_adjacent_dropdown() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        s.open_menu(1, &menus); // Edit dropdown
+        s.navigate_right(&menus);
+        assert_eq!(
+            s.state,
+            MenuState::DropDown {
+                top_idx: 2,
+                item_idx: 0
+            }
+        );
+        s.navigate_left(&menus);
+        assert_eq!(
+            s.state,
+            MenuState::DropDown {
+                top_idx: 1,
+                item_idx: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_navigate_left_right_top_active_moves_highlight_only() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        s.activate_bar();
+        s.navigate_right(&menus);
+        assert_eq!(s.state, MenuState::TopActive(1)); // no dropdown
+    }
+
+    #[test]
+    fn test_select_item_returns_builtin_action_and_closes() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        s.open_menu(0, &menus); // File, item 0 "New"
+        s.navigate_down(&menus); // Open
+        s.navigate_down(&menus); // Save (index 2)
+        let action = s.select_item(&menus);
+        assert_eq!(action, Some(Action::Save));
+        assert_eq!(s.state, MenuState::Inactive);
+    }
+
+    #[test]
+    fn test_select_item_returns_plugin_activated_action() {
+        let items = vec![plugin_item("Tools", "Word Count", "wc", "word-count")];
+        let menus = resolve_menus(&items);
+        let tools_idx = menus.iter().position(|m| m.label == "Tools").unwrap();
+        let mut s = MenuBarState::new();
+        s.open_menu(tools_idx, &menus);
+        let action = s.select_item(&menus);
+        assert_eq!(
+            action,
+            Some(Action::PluginMenuActivated(
+                "word-count".into(),
+                "wc".into()
+            ))
+        );
+        assert_eq!(s.state, MenuState::Inactive);
+    }
+
+    #[test]
+    fn test_select_item_inactive_returns_none() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        assert_eq!(s.select_item(&menus), None);
+    }
+
+    #[test]
+    fn test_select_item_top_active_returns_none() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        s.activate_bar();
+        assert_eq!(s.select_item(&menus), None); // Enter at TopActive is a no-op
+        assert_eq!(s.state, MenuState::TopActive(0)); // unchanged
+    }
+
+    #[test]
+    fn test_open_menu_clamps_to_resolved_len() {
+        let menus = builtin_menus();
+        let mut s = MenuBarState::new();
+        s.open_menu(999, &menus);
+        assert_eq!(
+            s.state,
+            MenuState::DropDown {
+                top_idx: menus.len() - 1,
+                item_idx: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_empty_plugin_menu_not_openable() {
+        // A resolved menu with zero items must be a no-op on navigate_down and
+        // select_item must return None (no panic).
+        let empty = vec![ResolvedMenu {
+            label: "Empty".into(),
+            items: vec![],
+        }];
+        let mut s = MenuBarState::new();
+        s.state = MenuState::TopActive(0);
+        s.navigate_down(&empty);
+        assert_eq!(s.state, MenuState::TopActive(0)); // did not open
+        s.state = MenuState::DropDown {
+            top_idx: 0,
+            item_idx: 0,
+        };
+        assert_eq!(s.select_item(&empty), None);
+    }
+
+    #[test]
+    fn test_plugin_menu_renders_between_options_and_help() {
+        // Rendering smoke: the Tools label appears in the bar to the left of Help.
+        let items = vec![plugin_item("Tools", "Word Count", "wc", "word-count")];
+        let menus = resolve_menus(&items);
+        let state = MenuBarState::new();
+        let buf = render_into_with_menus(&state, &[], &menus, 60, 1);
+        let row: String = (0..60)
+            .map(|x| buf.get(x, 0).symbol().to_string())
+            .collect();
+        let tools_at = row.find("Tools").expect("Tools rendered");
+        let help_at = row.find("Help").expect("Help rendered");
+        assert!(tools_at < help_at, "Tools must render left of Help");
     }
 }

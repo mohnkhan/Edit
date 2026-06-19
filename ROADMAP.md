@@ -16,19 +16,16 @@
 
 ### Plugin top-level menu activation (follow-up to feature 008)
 - **Issue**: #19 (`follow-up`)
-- **Status**: Deferred from feature 008
+- **Status**: Complete as of 2026-06-19 (feature 009, branch `009-menu-bar-activation`)
 - **Description**: Live keyboard activation of plugin-contributed top-level menu items (e.g.
-  "Tools > Word Count") via the menu bar. The plugin menu registry, sandboxed `menu_action`
-  dispatch (`Action::PluginMenuActivated`), consent dialog, and plugin manager are all complete;
-  what remains is wiring the menu-bar dropdown *item-selection* event path.
-- **Why deferred**: The editor's menu-bar item-selection path is not yet wired for built-in
-  menus either (`MenuBarState::select_item`/`navigate_*` are unused in the event loop), so this
-  belongs with a broader menu-interaction pass rather than feature 008.
-- **Suggested approach**: Wire dropdown navigation/selection in the key event loop for both
-  built-in and plugin menus; dispatch the selected `MenuItem.action` (including
-  `Action::PluginMenuActivated`).
-- **Effort**: Small–Medium
-- **Label**: `follow-up`
+  "Tools > Word Count") via the menu bar, plus the broader menu-interaction pass it depended on.
+- **Implementation**: Keyboard navigation (`F10` top-level highlight, `Alt+<letter>` direct
+  dropdown, Left/Right between menus, Up/Down within a dropdown, Enter activate, Esc close) is
+  wired in `App::handle_action` for both built-in and plugin menus. A single resolved menu model
+  (`resolve_menus()` in `src/ui/menubar.rs`) drives both rendering and navigation; plugin menus
+  render between Options and Help (Help stays rightmost), merging into a built-in menu on name
+  collision. Activation dispatches `Action::PluginMenuActivated` and shows the result in the
+  status bar. Spec: `specs/009-menu-bar-activation/`.
 
 ### External File Modification Detection
 - **Issue**: #3 (closed — implemented in feature 007)

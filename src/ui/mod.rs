@@ -19,7 +19,11 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::ui::{editor::EditorWidget, menubar::MenuBarWidget, statusbar::StatusBar};
+use crate::ui::{
+    editor::EditorWidget,
+    menubar::{resolve_menus, MenuBarWidget},
+    statusbar::StatusBar,
+};
 
 // ---------------------------------------------------------------------------
 // SplitMode — T067
@@ -69,12 +73,6 @@ impl Ui {
         let menubar_area = chunks[0];
         let editor_area = chunks[1];
         let statusbar_area = chunks[2];
-
-        // ── Menu bar ─────────────────────────────────────────────────────────
-        use crate::input::keymap::Action;
-        let toggle_states: &[(Action, bool)] = &[(Action::ToggleSoftWrap, app.soft_wrap)];
-        let menubar = MenuBarWidget::new(app.theme, &app.menu_bar, toggle_states);
-        frame.render_widget(menubar, menubar_area);
 
         // ── Editor area ───────────────────────────────────────────────────────
         let buf = app.active_buffer();
@@ -131,15 +129,33 @@ impl Ui {
         }
 
         // ── Status bar ────────────────────────────────────────────────────────
+        // Feature 007 watcher notice takes precedence; otherwise show the
+        // transient action message (search result, save confirmation, and —
+        // Feature 009 — plugin menu-action results). FR-009.
+        let status_notice = app
+            .watcher_notice
+            .as_deref()
+            .or(app.status_message.as_deref());
         let status_bar = StatusBar::new(
             buf,
             app.theme,
             app.active_idx,
             app.buffers.len(),
             app.soft_wrap,
-            app.watcher_notice.as_deref(),
+            status_notice,
         );
         frame.render_widget(status_bar, statusbar_area);
+
+        // ── Menu bar ──────────────────────────────────────────────────────────
+        // Rendered AFTER the editor/status bar so an open dropdown overlays the
+        // editor content (the dropdown extends into the editor rows), but BEFORE
+        // the modal dialog overlays so dialogs stay on top.
+        use crate::input::keymap::Action;
+        let toggle_states: &[(Action, bool)] = &[(Action::ToggleSoftWrap, app.soft_wrap)];
+        // Feature 009: render the composite menu list (built-in + active plugin menus).
+        let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+        let menubar = MenuBarWidget::new(app.theme, &app.menu_bar, toggle_states, &menus);
+        frame.render_widget(menubar, menubar_area);
 
         // ── Dialogs (overlaid) ────────────────────────────────────────────────
         // Session restore dialog takes priority over the save prompt.

@@ -103,16 +103,20 @@ edit [OPTIONS] [FILE...]
 
 | Key | Action |
 |---|---|
-| `F10` | Activate menu bar |
-| `Alt+F` | File menu |
-| `Alt+E` | Edit menu |
-| `Alt+S` | Search menu |
-| `Alt+V` | View menu |
-| `Alt+O` | Options menu |
-| `Alt+H` | Help menu |
+| `F10` | Activate menu bar (highlight first menu, no dropdown) |
+| `Alt+F` | Open File menu (dropdown) |
+| `Alt+E` | Open Edit menu (dropdown) |
+| `Alt+S` | Open Search menu (dropdown) |
+| `Alt+V` | Open View menu (dropdown) |
+| `Alt+O` | Open Options menu (dropdown) |
+| `Alt+H` | Open Help menu (dropdown) |
+| `←` / `→` | Move between top-level menus (wraps; opens the adjacent dropdown) |
+| `↑` / `↓` | Move between items within the open dropdown (wraps) |
+| `Enter` | Activate the highlighted menu item |
 | `Esc` | Close menu / cancel dialog |
-| Arrow keys | Navigate menu items |
-| `Enter` | Activate menu item |
+
+Plugin-contributed top-level menus appear in the menu bar **between Options and Help** and are
+navigable/activatable with the same keys (Feature 009).
 
 ## Menu Structure
 
@@ -156,6 +160,9 @@ edit [OPTIONS] [FILE...]
 - Plugins are installed in `$XDG_CONFIG_HOME/edit/plugins/<id>/` as a `plugin.toml` manifest
   plus an optional `plugin.rhai` script (Rhai language).
 - Plugin types: syntax highlighters, custom keybindings, menu items.
+- Menu-item plugins contribute top-level menus (rendered between Options and Help) that are
+  navigable and activatable by keyboard; activation runs the plugin's sandboxed `menu_action`
+  and shows the result in the status bar (Feature 009).
 - First run of a newly-installed plugin shows a one-time consent dialog
   (`Enter` allow / `Esc` deny); decisions are saved in `$XDG_CONFIG_HOME/edit/plugins.toml`.
 - Plugin manager: **Options > Plugins** lists installed plugins and toggles them on/off

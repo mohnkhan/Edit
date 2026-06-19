@@ -23,7 +23,7 @@ use crate::{
     encoding::EncodingId,
     input::{dispatch_event, Action, KeybindingMap},
     search::{SearchEngine, SearchState},
-    ui::menubar::MenuBarState,
+    ui::menubar::{resolve_menus, MenuBarState, ResolvedMenu},
     ui::theme::{theme_by_name, Theme},
 };
 
@@ -432,6 +432,19 @@ impl App {
 
     // ── Action dispatch ──────────────────────────────────────────────────────
 
+    /// Build the resolved composite menu list (built-in + active plugin menus).
+    /// Recomputed on demand so mid-session plugin enable/disable is reflected.
+    fn resolved_menus(&self) -> Vec<ResolvedMenu> {
+        resolve_menus(&self.plugin_host.registry.menu_items())
+    }
+
+    /// Open the dropdown for top-level menu `idx`, clamped against the resolved
+    /// menu count.
+    fn open_menu_idx(&mut self, idx: usize) {
+        let menus = self.resolved_menus();
+        self.menu_bar.open_menu(idx, &menus);
+    }
+
     pub fn handle_action(&mut self, action: Action) -> io::Result<()> {
         // When the session restore dialog is active, only Y/y/Enter (confirm)
         // and N/n/Escape/Quit (decline) are forwarded; everything else is
@@ -569,6 +582,45 @@ impl App {
             return Ok(());
         }
 
+        // Feature 009 — Menu-bar navigation intercept. Placed AFTER all modal
+        // dialog guards (modals win — FR-012) and BEFORE the normal action match.
+        // Routes navigation/selection keys to the menu state machine over the
+        // resolved (built-in + plugin) menu list, and consumes all other actions
+        // so navigation never mutates the buffer (FR-006).
+        if self.menu_bar.is_active() {
+            // Ctrl+Q must still quit while a menu is open: close the menu and
+            // fall through to the normal quit handling in the main match below.
+            if matches!(action, Action::Quit) {
+                self.menu_bar.close_menu();
+            } else {
+                let menus = self.resolved_menus();
+                match action {
+                    Action::MoveUp => self.menu_bar.navigate_up(&menus),
+                    Action::MoveDown => self.menu_bar.navigate_down(&menus),
+                    Action::MoveLeft => self.menu_bar.navigate_left(&menus),
+                    Action::MoveRight => self.menu_bar.navigate_right(&menus),
+                    Action::MenuClose => self.menu_bar.close_menu(),
+                    Action::InsertNewline => {
+                        if let Some(selected) = self.menu_bar.select_item(&menus) {
+                            return self.handle_action(selected);
+                        }
+                    }
+                    // Switching/opening menus while the bar is active.
+                    Action::MenuFile => self.menu_bar.open_menu(0, &menus),
+                    Action::MenuEdit => self.menu_bar.open_menu(1, &menus),
+                    Action::MenuSearch => self.menu_bar.open_menu(2, &menus),
+                    Action::MenuView => self.menu_bar.open_menu(3, &menus),
+                    Action::MenuOptions => self.menu_bar.open_menu(4, &menus),
+                    Action::MenuHelp => self.menu_bar.open_menu(5, &menus),
+                    Action::MenuOpen(idx) => self.menu_bar.open_menu(idx, &menus),
+                    Action::Menu => self.menu_bar.activate_bar(),
+                    // Everything else is consumed (no buffer mutation) while open.
+                    _ => {}
+                }
+                return Ok(());
+            }
+        }
+
         match action {
             Action::Quit => self.handle_quit(),
             Action::Resize(w, h) => self.handle_resize(w, h),
@@ -618,16 +670,18 @@ impl App {
                 log::debug!("FindReplace action triggered");
             }
 
-            // Menu navigation (T048)
-            Action::MenuFile => self.menu_bar.open_menu(0),
-            Action::MenuEdit => self.menu_bar.open_menu(1),
-            Action::MenuSearch => self.menu_bar.open_menu(2),
-            Action::MenuView => self.menu_bar.open_menu(3),
-            Action::MenuOptions => self.menu_bar.open_menu(4),
-            Action::MenuHelp => self.menu_bar.open_menu(5),
+            // Menu navigation (T048 / Feature 009). Alt+<letter> opens a
+            // dropdown directly; F10 (`Menu`) enters the top-level highlight
+            // (no dropdown) — the DOS-faithful entry path (FR-015).
+            Action::MenuFile => self.open_menu_idx(0),
+            Action::MenuEdit => self.open_menu_idx(1),
+            Action::MenuSearch => self.open_menu_idx(2),
+            Action::MenuView => self.open_menu_idx(3),
+            Action::MenuOptions => self.open_menu_idx(4),
+            Action::MenuHelp => self.open_menu_idx(5),
             Action::MenuClose => self.menu_bar.close_menu(),
-            Action::Menu => self.menu_bar.open_menu(0),
-            Action::MenuOpen(idx) => self.menu_bar.open_menu(idx),
+            Action::Menu => self.menu_bar.activate_bar(),
+            Action::MenuOpen(idx) => self.open_menu_idx(idx),
 
             // Multi-buffer navigation (T066)
             Action::NextBuffer => self.next_buffer(),
