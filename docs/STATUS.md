@@ -94,6 +94,5 @@ Runs in order:
 5. `make perf-check` — benchmarks (non-regressing, results logged)
 
 ## Known Limitations
-- External file modification detection (`inotify`) not implemented (deferred; see `ROADMAP.md`)
 - Plugin API not implemented (deferred; see `ROADMAP.md`)
 - Mouse support requires a terminal emulator that reports mouse events in crossterm's supported protocol
