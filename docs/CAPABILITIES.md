@@ -35,8 +35,8 @@ edit [OPTIONS] [FILE...]
 
 | Key | Action |
 |---|---|
+| `Ctrl+N` | New buffer |
 | `Ctrl+S` | Save current file |
-| `Ctrl+Shift+S` | Save As |
 | `F12` | Save As Encoding dialog (select output encoding) |
 | `Ctrl+O` | Open file dialog |
 | `Ctrl+N` | New file |
@@ -114,15 +114,16 @@ edit [OPTIONS] [FILE...]
 | `↑` / `↓` | Move between items within the open dropdown (wraps) |
 | `Enter` | Activate the highlighted menu item |
 | `Esc` | Close menu / cancel dialog |
+| Mouse (left-click) | Click a top-level menu title to open it; click a dropdown item to activate it; click outside to close (Feature 011) |
 
 Plugin-contributed top-level menus appear in the menu bar **between Options and Help** and are
-navigable/activatable with the same keys (Feature 009).
+navigable/activatable with the same keys *and the mouse* (Features 009 / 011).
 
 ## Menu Structure
 
 ### File
-- New
-- Open…
+- New (`Ctrl+N`)
+- Open… (`Ctrl+O`)
 - Save (`Ctrl+S`)
 - Save As…
 - Save As Encoding… (`F12`) — choose output encoding for this file
@@ -181,7 +182,8 @@ navigable/activatable with the same keys (Feature 009).
   - Shows `  Soft Wrap (ext)` (2-space indent) when **OFF**, maintaining label alignment
 
 ### Help
-- About
+- Help — key-binding cheat sheet overlay (`Esc` closes)
+- About — program name, version, and copyright (`Esc` closes)
 
 ## File Formats
 

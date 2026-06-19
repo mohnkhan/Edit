@@ -8,6 +8,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     // File operations
+    New,
     Save,
     SaveAs,
     SaveAsEncoding,
@@ -42,6 +43,7 @@ pub enum Action {
 
     // Help
     Help,
+    About,
 
     // View toggles
     ToggleLineNumbers,
@@ -106,6 +108,7 @@ impl KeybindingMap {
         map.insert("Ctrl+S".to_string(), Action::Save);
         map.insert("F5".to_string(), Action::Save);
         map.insert("F12".to_string(), Action::SaveAsEncoding);
+        map.insert("Ctrl+N".to_string(), Action::New);
         map.insert("Ctrl+O".to_string(), Action::Open);
         map.insert("Ctrl+Q".to_string(), Action::Quit);
 
@@ -251,6 +254,7 @@ fn plugin_action_from_str(s: &str) -> Option<Action> {
 /// strings so callers can emit a diagnostic.
 fn action_from_str(s: &str) -> Option<Action> {
     match s {
+        "New" => Some(Action::New),
         "Save" => Some(Action::Save),
         "SaveAs" => Some(Action::SaveAs),
         "SaveAsEncoding" => Some(Action::SaveAsEncoding),
@@ -276,6 +280,7 @@ fn action_from_str(s: &str) -> Option<Action> {
         "MenuOptions" => Some(Action::MenuOptions),
         "MenuHelp" => Some(Action::MenuHelp),
         "Help" => Some(Action::Help),
+        "About" => Some(Action::About),
         "ToggleLineNumbers" => Some(Action::ToggleLineNumbers),
         "ToggleHighlight" => Some(Action::ToggleHighlight),
         "ToggleTheme" => Some(Action::ToggleTheme),
@@ -324,6 +329,18 @@ mod tests {
         // Docs promised Ctrl+O = Open file dialog, but it was never bound.
         let km = KeybindingMap::default_map();
         assert_eq!(km.get_action("Ctrl+O"), Some(&Action::Open));
+    }
+
+    #[test]
+    fn default_map_binds_ctrl_n_to_new() {
+        let km = KeybindingMap::default_map();
+        assert_eq!(km.get_action("Ctrl+N"), Some(&Action::New));
+    }
+
+    #[test]
+    fn action_from_str_handles_new_and_about() {
+        assert_eq!(action_from_str("New"), Some(Action::New));
+        assert_eq!(action_from_str("About"), Some(Action::About));
     }
 
     #[test]

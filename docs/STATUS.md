@@ -1,13 +1,16 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.3.0 (features 008 + 009 complete; 010 unreleased)
-**Last updated**: 2026-06-19
+**Version**: 0.3.0 (features 008 + 009 complete; 010 + 011 unreleased)
+**Last updated**: 2026-06-20
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F011-US1 | Mouse: click top-level menus and dropdown items; click-outside closes; editor click repositions cursor | Complete |
+| F011-US2 | Edit/File/View menu actions wired (Undo/Redo/Cut/Copy/Paste/Select All/New/Save As/Toggle Line Nos) | Complete |
+| F011-US3 | Help ▸ Help (key bindings) and Help ▸ About (version + copyright) screens | Complete |
 | F010-US1 | File ▸ Open (and `Ctrl+O`) opens a modal path dialog that loads the file into a new buffer | Complete |
 | F010-US2 | `Esc` bound to `MenuClose`: closes menus and cancels all modal dialogs (was a no-op) | Complete |
 | F008-US1 | Syntax highlighter plugins (Rhai); plugin highlighter takes precedence over built-in | Complete |

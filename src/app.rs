@@ -18,14 +18,46 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     buffer::undo::EditOp,
-    buffer::{Buffer, CursorPos},
+    buffer::{Buffer, CursorPos, Selection},
     config::Config,
     encoding::EncodingId,
+    input::mouse::{normalize_mouse, MouseButton, NormalizedMouseKind},
     input::{dispatch_event, Action, KeybindingMap},
     search::{SearchEngine, SearchState},
-    ui::menubar::{resolve_menus, MenuBarState, ResolvedMenu},
+    ui::menubar::{hit_test_menu, resolve_menus, MenuBarState, MenuHit, MenuState, ResolvedMenu},
     ui::theme::{theme_by_name, Theme},
 };
+
+/// Which built-in informational overlay is open (Help menu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpScreen {
+    /// Key-binding cheat sheet (Help ▸ Help).
+    Help,
+    /// Program name, version, and copyright (Help ▸ About).
+    About,
+}
+
+/// Char index where the cursor should land after **undo**-ing `op`.
+fn undo_target_idx(op: &EditOp) -> usize {
+    match op {
+        // Inserted text was removed → land where it had been.
+        EditOp::Insert { at, .. } => *at,
+        // Deleted text was reinserted → land at its end.
+        EditOp::Delete { at, text } => at + text.chars().count(),
+        EditOp::Composite(ops) => ops.first().map(undo_target_idx).unwrap_or(0),
+    }
+}
+
+/// Char index where the cursor should land after **redo**-ing `op`.
+fn redo_target_idx(op: &EditOp) -> usize {
+    match op {
+        // Text was (re)inserted → land at its end.
+        EditOp::Insert { at, text } => at + text.chars().count(),
+        // Text was (re)deleted → land where it had been.
+        EditOp::Delete { at, .. } => *at,
+        EditOp::Composite(ops) => ops.last().map(redo_target_idx).unwrap_or(0),
+    }
+}
 
 /// Minimum terminal dimensions supported by the editor.
 const MIN_WIDTH: u16 = 80;
@@ -84,6 +116,10 @@ pub struct App {
     pub pending_encoding_select: Option<usize>,
     /// Path being typed in the Open-file dialog; `Some` = dialog is open (Feature 010).
     pub pending_open: Option<String>,
+    /// Path being typed in the Save-As dialog; `Some` = dialog is open (Feature 011).
+    pub pending_save_as: Option<String>,
+    /// Which Help overlay is open, if any (Feature 011).
+    pub pending_help: Option<HelpScreen>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
     pub pending_save_as_encoding: Option<EncodingId>,
     /// Whether soft-wrap visual rendering is active (Feature 005).
@@ -278,6 +314,8 @@ impl App {
             default_encoding,
             pending_encoding_select: None,
             pending_open: None,
+            pending_save_as: None,
+            pending_help: None,
             pending_save_as_encoding: None,
             soft_wrap: soft_wrap_initial,
             wrap_cache: None,
@@ -400,9 +438,16 @@ impl App {
             let timeout = TICK_MS.saturating_sub(last_tick.elapsed().as_millis() as u64);
 
             if event::poll(Duration::from_millis(timeout))? {
-                let ev = event::read()?;
-                if let Some(action) = dispatch_event(ev, &self.keymap) {
-                    self.handle_action(action)?;
+                match event::read()? {
+                    // Mouse events need the cursor coordinates AND live menu
+                    // state to hit-test dropdown items, so they are handled in
+                    // the app rather than flattened to an Action (Feature 011).
+                    crossterm::event::Event::Mouse(me) => self.handle_mouse_event(me)?,
+                    other => {
+                        if let Some(action) = dispatch_event(other, &self.keymap) {
+                            self.handle_action(action)?;
+                        }
+                    }
                 }
             }
 
@@ -579,6 +624,47 @@ impl App {
             return Ok(());
         }
 
+        // Feature 011 — Save-As dialog intercept: typing edits the path,
+        // Enter saves the active buffer there, Esc/MenuClose cancels.
+        if let Some(mut input) = self.pending_save_as.take() {
+            match &action {
+                Action::InsertChar(c) => {
+                    input.push(*c);
+                    self.pending_save_as = Some(input);
+                }
+                Action::Backspace => {
+                    input.pop();
+                    self.pending_save_as = Some(input);
+                }
+                Action::InsertNewline => {
+                    let trimmed = input.trim().to_string();
+                    if !trimmed.is_empty() {
+                        self.do_save_as(PathBuf::from(trimmed));
+                    }
+                }
+                Action::MenuClose => {}
+                _ => {
+                    self.pending_save_as = Some(input);
+                }
+            }
+            return Ok(());
+        }
+
+        // Feature 011 — Help / About overlay: any dismissal key closes it; all
+        // other input is consumed so it stays modal.
+        if self.pending_help.is_some() {
+            match &action {
+                Action::MenuClose
+                | Action::InsertNewline
+                | Action::InsertChar(_)
+                | Action::Quit => {
+                    self.pending_help = None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // Feature 008 — Plugin consent dialog intercept: Enter/Y = allow, Esc/N = deny.
         if !self.pending_plugin_consent.is_empty() {
             match &action {
@@ -684,6 +770,29 @@ impl App {
             // Open-file dialog (Feature 010). Selecting File ▸ Open shows a
             // modal path prompt handled by the pending_open intercept above.
             Action::Open => self.pending_open = Some(String::new()),
+
+            // File operations (Feature 011).
+            Action::New => self.new_buffer(),
+            Action::SaveAs => self.pending_save_as = Some(String::new()),
+            Action::Close => self.close_active_buffer(),
+
+            // Edit operations (Feature 011) — previously unhandled, so both the
+            // menu items and the Ctrl+Z/Y/X/C/V/A shortcuts were dead.
+            Action::Undo => self.handle_undo(),
+            Action::Redo => self.handle_redo(),
+            Action::Cut => self.cut_selection(),
+            Action::Copy => self.copy_selection(),
+            Action::Paste => self.paste_clipboard(),
+            Action::SelectAll => self.select_all(),
+
+            // View toggle (Feature 011).
+            Action::ToggleLineNumbers => {
+                self.config.line_numbers = !self.config.line_numbers;
+            }
+
+            // Help menu (Feature 011).
+            Action::Help => self.pending_help = Some(HelpScreen::Help),
+            Action::About => self.pending_help = Some(HelpScreen::About),
 
             // Save prompt responses (T033)
             Action::Save => self.handle_save_action(),
@@ -1979,6 +2088,218 @@ impl App {
         }
     }
 
+    // ── Feature 011 — File / Edit menu actions ────────────────────────────────
+
+    /// Open a fresh empty buffer and make it active (File ▸ New / Ctrl+N).
+    pub fn new_buffer(&mut self) {
+        self.buffers.push(Buffer::new_empty());
+        self.active_idx = self.buffers.len() - 1;
+    }
+
+    /// Close the active buffer (File ▸ Close). The sole buffer is replaced by a
+    /// fresh empty one so the editor always has something to edit.
+    pub fn close_active_buffer(&mut self) {
+        if self.buffers.len() <= 1 {
+            self.buffers[self.active_idx] = Buffer::new_empty();
+            self.active_idx = 0;
+            return;
+        }
+        self.buffers.remove(self.active_idx);
+        if self.active_idx >= self.buffers.len() {
+            self.active_idx = self.buffers.len() - 1;
+        }
+    }
+
+    /// Write the active buffer to `path` (File ▸ Save As).
+    pub fn do_save_as(&mut self, path: PathBuf) {
+        match self.buffers[self.active_idx].save_as(path.clone()) {
+            Ok(()) => {
+                self.buffers[self.active_idx].modified = false;
+                // Feature 007: suppress the watcher event from our own write.
+                self.self_write_times.insert(path.clone(), Instant::now());
+                self.status_message = Some(format!("Saved as {}", path.display()));
+            }
+            Err(e) => {
+                log::error!("save_as failed for {:?}: {}", path, e);
+                self.status_message = Some(format!("Save As failed: {e}"));
+            }
+        }
+    }
+
+    /// Select the entire buffer (Edit ▸ Select All / Ctrl+A).
+    pub fn select_all(&mut self) {
+        let buf = &mut self.buffers[self.active_idx];
+        let line_count = buf.rope.line_count();
+        if line_count == 0 {
+            return;
+        }
+        let last_line = line_count - 1;
+        let last_gcol = buf.rope.grapheme_count_on_line(last_line);
+        let anchor = CursorPos {
+            line: 0,
+            grapheme_col: 0,
+            visual_col: 0,
+        };
+        let active_vcol = CursorPos::visual_col_from_grapheme_col(&buf.rope, last_line, last_gcol);
+        let active = CursorPos {
+            line: last_line,
+            grapheme_col: last_gcol,
+            visual_col: active_vcol,
+        };
+        buf.selection = Some(Selection { anchor, active });
+        buf.cursor = active;
+    }
+
+    /// Undo the most recent edit (Edit ▸ Undo / Ctrl+Z).
+    pub fn handle_undo(&mut self) {
+        if self.buffers[self.active_idx].readonly {
+            return;
+        }
+        let op = {
+            let buf = &mut self.buffers[self.active_idx];
+            buf.undo_stack.undo(&mut buf.rope)
+        };
+        match op {
+            Some(op) => {
+                self.apply_history_cursor(undo_target_idx(&op));
+                self.status_message = Some("Undo".to_string());
+            }
+            None => self.status_message = Some("Nothing to undo".to_string()),
+        }
+    }
+
+    /// Redo the most recently undone edit (Edit ▸ Redo / Ctrl+Y).
+    pub fn handle_redo(&mut self) {
+        if self.buffers[self.active_idx].readonly {
+            return;
+        }
+        let op = {
+            let buf = &mut self.buffers[self.active_idx];
+            buf.undo_stack.redo(&mut buf.rope)
+        };
+        match op {
+            Some(op) => {
+                self.apply_history_cursor(redo_target_idx(&op));
+                self.status_message = Some("Redo".to_string());
+            }
+            None => self.status_message = Some("Nothing to redo".to_string()),
+        }
+    }
+
+    /// Shared post-undo/redo bookkeeping: mark dirty, drop selection, invalidate
+    /// the wrap cache, and move the cursor to `char_idx` (clamped to the buffer).
+    fn apply_history_cursor(&mut self, char_idx: usize) {
+        let (line, gcol) = self.line_col_for_char_idx(char_idx);
+        let buf = &mut self.buffers[self.active_idx];
+        buf.modified = true;
+        buf.selection = None;
+        let vcol = CursorPos::visual_col_from_grapheme_col(&buf.rope, line, gcol);
+        buf.cursor = CursorPos {
+            line,
+            grapheme_col: gcol,
+            visual_col: vcol,
+        };
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
+        self.clamp_scroll();
+    }
+
+    /// Convert a rope char index into a `(line, grapheme_col)` position — the
+    /// inverse of [`Self::char_idx_for`]. Clamps past-end indices to the end.
+    fn line_col_for_char_idx(&self, char_idx: usize) -> (usize, usize) {
+        let buf = &self.buffers[self.active_idx];
+        let line_count = buf.rope.line_count();
+        let mut remaining = char_idx;
+        for line in 0..line_count {
+            let line_str = buf.rope.line_slice(line);
+            let line_chars = line_str.chars().count();
+            if remaining <= line_chars {
+                let mut acc = 0usize;
+                let mut gcol = 0usize;
+                for g in line_str.graphemes(true) {
+                    if acc >= remaining {
+                        break;
+                    }
+                    acc += g.chars().count();
+                    gcol += 1;
+                }
+                return (line, gcol);
+            }
+            remaining -= line_chars + 1; // +1 for the line's trailing newline
+        }
+        let last = line_count.saturating_sub(1);
+        (last, buf.rope.grapheme_count_on_line(last))
+    }
+
+    // ── Feature 011 — Mouse menu interaction ──────────────────────────────────
+
+    /// Handle a raw mouse event: open top-level menus, activate dropdown items,
+    /// close menus on an outside click, or reposition the editor cursor.
+    ///
+    /// Uses [`hit_test_menu`] with the same geometry the menu bar renders with,
+    /// so clicks land on exactly what is drawn — for both built-in and plugin
+    /// menus, and for dropdown items (which previously could not be clicked).
+    pub fn handle_mouse_event(&mut self, me: crossterm::event::MouseEvent) -> io::Result<()> {
+        let Some(ev) = normalize_mouse(me) else {
+            return Ok(());
+        };
+        // Only left-button presses drive the menu / cursor for now.
+        if ev.kind != NormalizedMouseKind::Press || ev.button != MouseButton::Left {
+            return Ok(());
+        }
+
+        // Modal dialogs win: ignore menu/editor mouse while one is open.
+        if self.pending_save_prompt
+            || self.pending_session_restore.is_some()
+            || self.pending_encoding_select.is_some()
+            || self.pending_open.is_some()
+            || self.pending_save_as.is_some()
+            || self.pending_help.is_some()
+            || self.pending_external_change.is_some()
+            || !self.pending_plugin_consent.is_empty()
+            || self.pending_plugin_manager
+        {
+            return Ok(());
+        }
+
+        let menus = self.resolved_menus();
+        let toggle_states = [(Action::ToggleSoftWrap, self.soft_wrap)];
+        let term_width = self.terminal_size.0;
+
+        match hit_test_menu(
+            &menus,
+            &self.menu_bar.state,
+            &toggle_states,
+            term_width,
+            ev.col,
+            ev.row,
+        ) {
+            MenuHit::TopLevel(idx) => {
+                // Clicking the title of the already-open menu closes it (toggle).
+                if let MenuState::DropDown { top_idx, .. } = self.menu_bar.state {
+                    if top_idx == idx {
+                        self.menu_bar.close_menu();
+                        return Ok(());
+                    }
+                }
+                self.menu_bar.open_menu(idx, &menus);
+            }
+            MenuHit::Item { top_idx, item_idx } => {
+                self.menu_bar.state = MenuState::DropDown { top_idx, item_idx };
+                if let Some(action) = self.menu_bar.select_item(&menus) {
+                    return self.handle_action(action);
+                }
+            }
+            MenuHit::Outside => {
+                if self.menu_bar.is_active() {
+                    self.menu_bar.close_menu();
+                } else {
+                    self.handle_mouse_click(ev.col, ev.row);
+                }
+            }
+        }
+        Ok(())
+    }
+
     // ── T111 — Mouse click cursor repositioning ───────────────────────────────
 
     /// Reposition the cursor when the user clicks inside the editor area.
@@ -2492,6 +2813,142 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ── Feature 011 — wired menu actions ─────────────────────────────────────
+
+    #[test]
+    fn test_undo_redo_round_trip() {
+        let mut app = make_app();
+        app.insert_char('a');
+        app.insert_char('b');
+        assert_eq!(app.active_buffer().rope.to_string(), "ab");
+        app.handle_action(Action::Undo).unwrap();
+        assert_eq!(app.active_buffer().rope.to_string(), "a");
+        app.handle_action(Action::Redo).unwrap();
+        assert_eq!(app.active_buffer().rope.to_string(), "ab");
+    }
+
+    #[test]
+    fn test_undo_empty_reports_nothing() {
+        let mut app = make_app();
+        app.handle_action(Action::Undo).unwrap();
+        assert_eq!(app.status_message.as_deref(), Some("Nothing to undo"));
+    }
+
+    #[test]
+    fn test_select_all_spans_buffer() {
+        let mut app = make_app();
+        app.insert_char('x');
+        app.insert_char('y');
+        app.handle_action(Action::SelectAll).unwrap();
+        let sel = app.active_buffer().selection.expect("selection set");
+        assert_eq!(sel.anchor.line, 0);
+        assert_eq!(sel.anchor.grapheme_col, 0);
+        assert_eq!(sel.active.grapheme_col, 2);
+    }
+
+    #[test]
+    fn test_cut_deletes_selection_without_clipboard() {
+        // cut_selection copies (may no-op headless) then deletes — the delete
+        // must happen regardless of clipboard availability.
+        let mut app = make_app();
+        app.insert_char('x');
+        app.insert_char('y');
+        app.handle_action(Action::SelectAll).unwrap();
+        app.handle_action(Action::Cut).unwrap();
+        assert_eq!(app.active_buffer().rope.to_string(), "");
+    }
+
+    #[test]
+    fn test_new_buffer_action_adds_buffer() {
+        let mut app = make_app();
+        let n = app.buffers.len();
+        app.handle_action(Action::New).unwrap();
+        assert_eq!(app.buffers.len(), n + 1);
+        assert_eq!(app.active_idx, app.buffers.len() - 1);
+    }
+
+    #[test]
+    fn test_toggle_line_numbers_flips_config() {
+        let mut app = make_app();
+        let before = app.config.line_numbers;
+        app.handle_action(Action::ToggleLineNumbers).unwrap();
+        assert_eq!(app.config.line_numbers, !before);
+    }
+
+    #[test]
+    fn test_about_action_opens_and_closes() {
+        let mut app = make_app();
+        app.handle_action(Action::About).unwrap();
+        assert_eq!(app.pending_help, Some(HelpScreen::About));
+        app.handle_action(Action::MenuClose).unwrap();
+        assert_eq!(app.pending_help, None);
+    }
+
+    #[test]
+    fn test_save_as_dialog_writes_file() {
+        let mut path = std::env::temp_dir();
+        path.push("edit_saveas_test_011.txt");
+        let _ = std::fs::remove_file(&path);
+
+        let mut app = make_app();
+        app.insert_char('h');
+        app.insert_char('i');
+        app.handle_action(Action::SaveAs).unwrap();
+        assert_eq!(app.pending_save_as.as_deref(), Some(""));
+        for c in path.to_string_lossy().chars() {
+            app.handle_action(Action::InsertChar(c)).unwrap();
+        }
+        app.handle_action(Action::InsertNewline).unwrap();
+
+        assert_eq!(app.pending_save_as, None, "dialog closes after save");
+        let written = std::fs::read_to_string(&path).expect("file written");
+        assert!(written.contains("hi"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── Feature 011 — mouse menu interaction ─────────────────────────────────
+
+    fn mouse_press(col: u16, row: u16) -> crossterm::event::MouseEvent {
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: col,
+            row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn test_mouse_click_opens_top_level_menu() {
+        let mut app = make_app();
+        // Click "Edit" (col 7, row 0).
+        app.handle_mouse_event(mouse_press(7, 0)).unwrap();
+        assert!(matches!(
+            app.menu_bar.state,
+            MenuState::DropDown { top_idx: 1, .. }
+        ));
+    }
+
+    #[test]
+    fn test_mouse_click_activates_dropdown_item() {
+        let mut app = make_app();
+        // Open File menu, then click the "Open" item (row 2).
+        app.handle_mouse_event(mouse_press(1, 0)).unwrap();
+        app.handle_mouse_event(mouse_press(3, 2)).unwrap();
+        // "Open" → Action::Open → opens the Open-file dialog and closes the menu.
+        assert_eq!(app.pending_open.as_deref(), Some(""));
+        assert!(!app.menu_bar.is_active());
+    }
+
+    #[test]
+    fn test_mouse_click_outside_closes_menu() {
+        let mut app = make_app();
+        app.handle_mouse_event(mouse_press(1, 0)).unwrap(); // open File
+        assert!(app.menu_bar.is_active());
+        // Click far down in the editor area.
+        app.handle_mouse_event(mouse_press(40, 12)).unwrap();
+        assert!(!app.menu_bar.is_active());
     }
 
     // ── T017 — Cancel contract ──────────────────────────────────────────────

@@ -105,56 +105,10 @@ fn map_button(btn: CtMouseButton) -> MouseButton {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Action dispatch
-// ---------------------------------------------------------------------------
-
-/// Translate a [`NormalizedMouseEvent`] into an editor [`Action`], if any.
-///
-/// `menu_row` is the terminal row on which the menu bar is rendered.
-///
-/// - A left `Press` on `menu_row` is forwarded to [`handle_mouse_menu_click`]
-///   with a default set of menu label positions.
-/// - All other events return `None` (cursor repositioning handled in T111).
-pub fn handle_mouse(event: NormalizedMouseEvent, menu_row: u16) -> Option<Action> {
-    if event.row == menu_row
-        && event.kind == NormalizedMouseKind::Press
-        && event.button == MouseButton::Left
-    {
-        // Default menu label positions: (start_col, end_col_exclusive, menu_idx)
-        // These mirror the BAR_LABELS in menubar.rs.
-        let positions: &[(u16, u16, usize)] = &[
-            (1, 5, 0),   // File    cols 1-4
-            (7, 11, 1),  // Edit    cols 7-10
-            (13, 19, 2), // Search  cols 13-18
-            (21, 25, 3), // View    cols 21-24
-            (28, 35, 4), // Options cols 28-34
-            (37, 41, 5), // Help    cols 37-40
-        ];
-        return handle_mouse_menu_click(event, positions);
-    }
-
-    None
-}
-
-/// Hit-test a mouse press event against a list of menu label column ranges.
-///
-/// `menu_positions` is a slice of `(start_col, end_col_exclusive, menu_idx)`
-/// tuples describing where each top-level menu label is rendered on row 0.
-///
-/// Returns `Action::MenuOpen(idx)` when the click falls within a label's
-/// column range, or `None` if no label was hit.
-pub fn handle_mouse_menu_click(
-    event: NormalizedMouseEvent,
-    menu_positions: &[(u16, u16, usize)],
-) -> Option<Action> {
-    for &(start_col, end_col, menu_idx) in menu_positions {
-        if event.col >= start_col && event.col < end_col {
-            return Some(Action::MenuOpen(menu_idx));
-        }
-    }
-    None
-}
+// Mouse → menu/cursor routing now lives in `App::handle_mouse_event`
+// (src/app.rs), which has the live menu state and terminal geometry needed to
+// hit-test dropdown items via `ui::menubar::hit_test_menu`. This module only
+// normalises raw crossterm events.
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -220,29 +174,5 @@ mod tests {
     fn normalize_moved_returns_none() {
         let ev = make_ct_event(MouseEventKind::Moved, 0, 0);
         assert!(normalize_mouse(ev).is_none());
-    }
-
-    #[test]
-    fn handle_mouse_menu_row_press_returns_none() {
-        let ev = NormalizedMouseEvent {
-            col: 5,
-            row: 0,
-            button: MouseButton::Left,
-            kind: NormalizedMouseKind::Press,
-        };
-        // menu_row = 0 → should return None (menu subsystem handles it)
-        assert!(handle_mouse(ev, 0).is_none());
-    }
-
-    #[test]
-    fn handle_mouse_non_menu_row_returns_none() {
-        let ev = NormalizedMouseEvent {
-            col: 5,
-            row: 10,
-            button: MouseButton::Left,
-            kind: NormalizedMouseKind::Press,
-        };
-        // row 10 != menu_row 0 → still None (stub)
-        assert!(handle_mouse(ev, 0).is_none());
     }
 }

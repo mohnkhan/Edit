@@ -18,7 +18,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::App;
+use crate::app::{App, HelpScreen};
 use crate::ui::{
     editor::EditorWidget,
     menubar::{resolve_menus, MenuBarWidget},
@@ -290,6 +290,21 @@ impl Ui {
             frame.render_widget(dialog, size);
         }
 
+        // Feature 011 — Save-As dialog overlay.
+        if let Some(ref input) = app.pending_save_as {
+            use crate::ui::dialog::SaveAsFileDialog;
+            let dialog = SaveAsFileDialog {
+                input: input.clone(),
+                theme: app.theme,
+            };
+            frame.render_widget(dialog, size);
+        }
+
+        // Feature 011 — Help / About overlay.
+        if let Some(screen) = app.pending_help {
+            render_help_overlay(frame, app, screen, size);
+        }
+
         // Feature 008 — Plugin consent dialog (exclusive modal; highest priority).
         if let Some(plugin) = app.pending_plugin_consent.first() {
             let body = crate::ui::plugin_manager::consent_body(plugin);
@@ -340,4 +355,59 @@ impl Ui {
             frame.render_widget(dialog, dialog_area);
         }
     }
+}
+
+/// Render the Help / About overlay (Feature 011), centred over the editor.
+fn render_help_overlay(frame: &mut Frame, app: &App, screen: HelpScreen, size: Rect) {
+    use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+
+    let (title, lines): (&str, Vec<String>) = match screen {
+        HelpScreen::Help => (
+            "Help",
+            vec![
+                "Menus:  F10 / Alt+<letter> open • arrows move • Enter select • Esc close".into(),
+                "        Mouse: click a menu title or a dropdown item".into(),
+                "".into(),
+                "File:   Ctrl+N new • Ctrl+O open • Ctrl+S save • F12 save-as-encoding".into(),
+                "Edit:   Ctrl+Z undo • Ctrl+Y redo • Ctrl+X/C/V cut/copy/paste • Ctrl+A all".into(),
+                "Search: Ctrl+F find • F3 next • F2 prev • Ctrl+H replace".into(),
+                "View:   Alt+Z soft-wrap".into(),
+                "Quit:   Ctrl+Q".into(),
+                "".into(),
+                "Press Esc to close.".into(),
+            ],
+        ),
+        HelpScreen::About => (
+            "About",
+            vec![
+                format!("edit {}", env!("CARGO_PKG_VERSION")),
+                env!("CARGO_PKG_DESCRIPTION").to_string(),
+                "".into(),
+                "A UTF-8 native, DOS-faithful EDIT.COM for the modern terminal.".into(),
+                "Runs on Linux, FreeBSD, macOS, and MyOS.".into(),
+                "".into(),
+                "© 2026 MyOS project — Licensed under MPL-2.0.".into(),
+                "".into(),
+                "Press Esc to close.".into(),
+            ],
+        ),
+    };
+
+    let text: Vec<ratatui::text::Line> = lines.into_iter().map(ratatui::text::Line::from).collect();
+    let dh = (text.len() as u16 + 2).min(size.height);
+    let dw = 72u16.min(size.width);
+    let dx = size.x + size.width.saturating_sub(dw) / 2;
+    let dy = size.y + size.height.saturating_sub(dh) / 2;
+    let dialog_area = Rect::new(dx, dy, dw, dh);
+
+    let dialog = Paragraph::new(text)
+        .style(
+            ratatui::style::Style::default()
+                .fg(app.theme.menubar_fg)
+                .bg(app.theme.menubar_bg),
+        )
+        .block(Block::default().title(title).borders(Borders::ALL));
+
+    frame.render_widget(Clear, dialog_area);
+    frame.render_widget(dialog, dialog_area);
 }

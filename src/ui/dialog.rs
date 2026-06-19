@@ -601,6 +601,49 @@ impl Widget for OpenFileDialog {
 }
 
 // ---------------------------------------------------------------------------
+// SaveAsFileDialog — Feature 011
+// ---------------------------------------------------------------------------
+
+/// Modal dialog for saving the active buffer to a new path.
+///
+/// Mirrors [`OpenFileDialog`] but writes instead of reads.
+pub struct SaveAsFileDialog {
+    /// The path the user is typing.
+    pub input: String,
+    /// The active color theme.
+    pub theme: &'static Theme,
+}
+
+impl Widget for SaveAsFileDialog {
+    fn render(self, area: Rect, buf: &mut TuiBuffer) {
+        let dialog_w: u16 = 60.min(area.width);
+        let dialog_h: u16 = 5.min(area.height);
+        let dialog_area = centered_rect(dialog_w, dialog_h, area);
+
+        Clear.render(dialog_area, buf);
+
+        let dialog_style = Style::default().fg(Color::White).bg(Color::DarkGray);
+
+        let content = format!("Save as: [{}]", self.input);
+
+        let text = vec![
+            Line::from(Span::raw(content)),
+            Line::from(Span::raw("")),
+            Line::from(Span::raw("  Enter: save   Esc: cancel  ")),
+        ];
+
+        let paragraph = Paragraph::new(text).style(dialog_style).block(
+            Block::default()
+                .title("Save As")
+                .borders(Borders::ALL)
+                .style(dialog_style),
+        );
+
+        paragraph.render(dialog_area, buf);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // RecoveryDialog — T064 / US5
 // ---------------------------------------------------------------------------
 
