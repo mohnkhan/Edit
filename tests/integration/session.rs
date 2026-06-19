@@ -54,10 +54,7 @@ fn test_corrupt_session_file_returns_err() {
         let path = session_path();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"garbage bytes [[[").unwrap();
-        assert!(
-            matches!(load_session(), Err(_)),
-            "corrupt TOML must return Err"
-        );
+        assert!(load_session().is_err(), "corrupt TOML must return Err");
     });
 }
 
@@ -78,10 +75,7 @@ fn test_unknown_version_returns_err() {
             "cursor_col = 1\n",
         );
         std::fs::write(&path, toml).unwrap();
-        assert!(
-            matches!(load_session(), Err(_)),
-            "unknown version must return Err"
-        );
+        assert!(load_session().is_err(), "unknown version must return Err");
     });
 }
 

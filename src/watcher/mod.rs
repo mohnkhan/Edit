@@ -297,7 +297,7 @@ mod tests {
     fn test_unknown_path_ignored() {
         let mut fw = make_watcher();
         let watched_path = std::env::temp_dir().join("fw_known.txt");
-        let unknown_path = std::env::temp_dir().join("fw_unknown.txt");
+        let _unknown_path = std::env::temp_dir().join("fw_unknown.txt");
 
         fw.watch_path(&watched_path).unwrap();
         let self_write_times = HashMap::new();

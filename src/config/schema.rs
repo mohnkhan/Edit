@@ -215,15 +215,19 @@ mod tests {
 
     #[test]
     fn resolved_log_level_valid() {
-        let mut cfg = Config::default();
-        cfg.log_level = "debug".to_owned();
+        let cfg = Config {
+            log_level: "debug".to_owned(),
+            ..Default::default()
+        };
         assert_eq!(cfg.resolved_log_level(), log::LevelFilter::Debug);
     }
 
     #[test]
     fn resolved_log_level_invalid_falls_back_to_warn() {
-        let mut cfg = Config::default();
-        cfg.log_level = "not-a-level".to_owned();
+        let cfg = Config {
+            log_level: "not-a-level".to_owned(),
+            ..Default::default()
+        };
         assert_eq!(cfg.resolved_log_level(), log::LevelFilter::Warn);
     }
 

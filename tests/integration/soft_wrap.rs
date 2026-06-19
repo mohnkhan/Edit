@@ -5,14 +5,6 @@ use edit::config::Config;
 use edit::encoding::EncodingId;
 use edit::input::Action;
 
-fn make_app_soft_wrap_enabled() -> App {
-    let mut cfg = Config::default();
-    cfg.soft_wrap = true;
-    let mut app = App::new(cfg, vec![], EncodingId::Utf8, None, None);
-    app.terminal_size = (80, 24);
-    app
-}
-
 #[test]
 fn test_toggle_on_off() {
     let mut app = App::new(Config::default(), vec![], EncodingId::Utf8, None, None);
@@ -64,8 +56,10 @@ fn test_toggle_off_buffer_unchanged() {
 
 #[test]
 fn test_persistence_from_config() {
-    let mut cfg = Config::default();
-    cfg.soft_wrap = true;
+    let cfg = Config {
+        soft_wrap: true,
+        ..Default::default()
+    };
     let app = App::new(cfg, vec![], EncodingId::Utf8, None, None);
     assert!(
         app.soft_wrap,

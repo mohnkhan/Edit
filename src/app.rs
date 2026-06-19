@@ -2316,6 +2316,34 @@ impl App {
     }
 }
 
+/// Approximate display width of a grapheme cluster (1 for narrow, 2 for wide).
+///
+/// This is a simple heuristic — for full Unicode width support the `unicode-width`
+/// crate is the correct tool, but that dependency is not yet in the tree.
+fn unicode_segmentation_width(grapheme: &str) -> u16 {
+    // Treat grapheme clusters whose first scalar is in a common CJK range as
+    // double-width; everything else as single-width.
+    let first = grapheme.chars().next().unwrap_or(' ');
+    let cp = first as u32;
+    if (0x1100..=0x115F).contains(&cp)   // Hangul Jamo
+        || (0x2E80..=0x303E).contains(&cp)  // CJK Radicals / Kangxi
+        || (0x3041..=0x33BF).contains(&cp)  // Hiragana / Katakana / Bopomofo
+        || (0x4E00..=0x9FFF).contains(&cp)  // CJK Unified
+        || (0xAC00..=0xD7AF).contains(&cp)  // Hangul Syllables
+        || (0xF900..=0xFAFF).contains(&cp)  // CJK Compatibility
+        || (0xFE10..=0xFE6F).contains(&cp)  // CJK Compatibility Forms
+        || (0xFF01..=0xFF60).contains(&cp)  // Fullwidth Latin
+        || (0xFFE0..=0xFFE6).contains(&cp)  // Fullwidth Signs
+        || (0x1F300..=0x1F9FF).contains(&cp) // Emoji
+        || (0x20000..=0x2A6DF).contains(&cp)
+    // CJK Extension B
+    {
+        2
+    } else {
+        1
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests — T016 / T017 / T018 / T019 / T022
 // ---------------------------------------------------------------------------
@@ -2484,7 +2512,7 @@ mod tests {
         assert!(
             app.status_message
                 .as_deref()
-                .map_or(true, |m| !m.starts_with("Saved as")),
+                .is_none_or(|m| !m.starts_with("Saved as")),
             "cancel must not produce a 'Saved as' message"
         );
     }
@@ -2736,33 +2764,5 @@ mod tests {
             saved, content,
             "saved bytes must be identical to original content"
         );
-    }
-}
-
-/// Approximate display width of a grapheme cluster (1 for narrow, 2 for wide).
-///
-/// This is a simple heuristic — for full Unicode width support the `unicode-width`
-/// crate is the correct tool, but that dependency is not yet in the tree.
-fn unicode_segmentation_width(grapheme: &str) -> u16 {
-    // Treat grapheme clusters whose first scalar is in a common CJK range as
-    // double-width; everything else as single-width.
-    let first = grapheme.chars().next().unwrap_or(' ');
-    let cp = first as u32;
-    if (0x1100..=0x115F).contains(&cp)   // Hangul Jamo
-        || (0x2E80..=0x303E).contains(&cp)  // CJK Radicals / Kangxi
-        || (0x3041..=0x33BF).contains(&cp)  // Hiragana / Katakana / Bopomofo
-        || (0x4E00..=0x9FFF).contains(&cp)  // CJK Unified
-        || (0xAC00..=0xD7AF).contains(&cp)  // Hangul Syllables
-        || (0xF900..=0xFAFF).contains(&cp)  // CJK Compatibility
-        || (0xFE10..=0xFE6F).contains(&cp)  // CJK Compatibility Forms
-        || (0xFF01..=0xFF60).contains(&cp)  // Fullwidth Latin
-        || (0xFFE0..=0xFFE6).contains(&cp)  // Fullwidth Signs
-        || (0x1F300..=0x1F9FF).contains(&cp) // Emoji
-        || (0x20000..=0x2A6DF).contains(&cp)
-    // CJK Extension B
-    {
-        2
-    } else {
-        1
     }
 }

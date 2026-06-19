@@ -155,8 +155,11 @@ fn test_dismiss_marks_buffer_dirty() {
 
     let path = make_temp_file("dismiss_dirty", b"content\n");
 
-    let mut config = Config::default();
-    config.no_watch = true; // avoid live watcher for this unit-style test
+    // no_watch avoids the live watcher for this unit-style test
+    let config = Config {
+        no_watch: true,
+        ..Default::default()
+    };
     let mut app = App::new(config, vec![path.clone()], EncodingId::Utf8, None, None);
 
     // Simulate an external change detection.
@@ -194,8 +197,10 @@ fn test_external_change_dialog_shows_unsaved_warning_when_dirty() {
 
     let path = make_temp_file("dialog_dirty", b"initial\n");
 
-    let mut config = Config::default();
-    config.no_watch = true;
+    let config = Config {
+        no_watch: true,
+        ..Default::default()
+    };
     let mut app = App::new(config, vec![path.clone()], EncodingId::Utf8, None, None);
 
     // Mark buffer as having unsaved changes.
@@ -231,8 +236,10 @@ fn test_unsaved_changes_discarded_on_reload() {
 
     let path = make_temp_file("discard_reload", b"on disk\n");
 
-    let mut config = Config::default();
-    config.no_watch = true;
+    let config = Config {
+        no_watch: true,
+        ..Default::default()
+    };
     let mut app = App::new(config, vec![path.clone()], EncodingId::Utf8, None, None);
 
     // Simulate unsaved in-editor content (we can't easily mutate the rope here
@@ -283,8 +290,11 @@ fn test_delete_produces_notice_not_dialog() {
 
     let path = make_temp_file("delete_notice", b"content\n");
 
-    let mut config = Config::default();
-    config.no_watch = true; // control events manually
+    // no_watch lets the test control events manually
+    let config = Config {
+        no_watch: true,
+        ..Default::default()
+    };
     let mut app = App::new(config, vec![path.clone()], EncodingId::Utf8, None, None);
 
     // Simulate what handle_tick does for a Delete event.
@@ -317,8 +327,10 @@ fn test_no_watch_config_leaves_watcher_none() {
     use edit::config::Config;
     use edit::encoding::EncodingId;
 
-    let mut config = Config::default();
-    config.no_watch = true;
+    let config = Config {
+        no_watch: true,
+        ..Default::default()
+    };
     let app = App::new(config, vec![], EncodingId::Utf8, None, None);
 
     assert!(
@@ -337,8 +349,10 @@ fn test_no_watch_no_events() {
 
     let path = make_temp_file("no_watch_events", b"content\n");
 
-    let mut config = Config::default();
-    config.no_watch = true;
+    let config = Config {
+        no_watch: true,
+        ..Default::default()
+    };
     let app = App::new(config, vec![path.clone()], EncodingId::Utf8, None, None);
 
     // With no_watch=true there is no FileWatcher, so no events can arrive.
@@ -483,8 +497,10 @@ fn test_deleted_file_close_without_save_prompts() {
 
     let path = make_temp_file("close_without_save", b"content\n");
 
-    let mut config = Config::default();
-    config.no_watch = true;
+    let config = Config {
+        no_watch: true,
+        ..Default::default()
+    };
     let mut app = App::new(config, vec![path.clone()], EncodingId::Utf8, None, None);
 
     app.buffers[0].modified = true;
