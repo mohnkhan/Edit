@@ -101,6 +101,15 @@ pub struct Config {
     /// Set by `--no-session` CLI flag; suppresses the session restore prompt.
     #[serde(skip)]
     pub no_session: bool,
+
+    /// Disable all file-watching for this session.
+    ///
+    /// Set by `--no-watch` CLI flag or `no_watch = true` in `config.toml`.
+    /// When true, no reload prompts or deletion notices will appear.
+    ///
+    /// Default: `false`
+    #[serde(default)]
+    pub no_watch: bool,
 }
 
 impl Default for Config {
@@ -119,6 +128,7 @@ impl Default for Config {
             readonly: false,
             locale_override: None,
             no_session: false,
+            no_watch: false,
         }
     }
 }

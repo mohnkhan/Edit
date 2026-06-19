@@ -1,13 +1,17 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.2.0 (dev — feature 006 complete)
+**Version**: 0.2.0 (dev — feature 007 complete)
 **Last updated**: 2026-06-19
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F007-US1 | Detect external file modification, prompt Y/N reload dialog | Complete |
+| F007-US2 | Unsaved-changes warning shown in reload dialog when buffer is dirty | Complete |
+| F007-US3 | File-deleted notice in status bar; buffer kept in memory | Complete |
+| F007-US4 | `--no-watch` CLI flag / `no_watch` config option to disable watching | Complete |
 | US1 | Basic File Editing (open, navigate, edit, save, quit) | Complete |
 | US2 | UTF-8/Unicode support, CP437/CP850/ISO-8859-1/Windows-1252 transcoding | Complete |
 | F002-US1 | UTF-16 LE/BE auto-detect (BOM sniffing) | Complete |
@@ -90,6 +94,5 @@ Runs in order:
 5. `make perf-check` — benchmarks (non-regressing, results logged)
 
 ## Known Limitations
-- External file modification detection (`inotify`) not implemented (deferred; see `ROADMAP.md`)
 - Plugin API not implemented (deferred; see `ROADMAP.md`)
 - Mouse support requires a terminal emulator that reports mouse events in crossterm's supported protocol

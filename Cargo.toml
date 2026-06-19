@@ -31,6 +31,7 @@ log = "0.4"
 env_logger = "0.11"
 signal-hook = "0.3"
 arboard = "3"
+notify = "6"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -63,6 +64,10 @@ path = "tests/integration/encoding_select.rs"
 [[test]]
 name = "soft_wrap"
 path = "tests/integration/soft_wrap.rs"
+
+[[test]]
+name = "file_watch"
+path = "tests/integration/file_watch.rs"
 
 [[bench]]
 name = "startup"

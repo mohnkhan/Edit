@@ -20,6 +20,7 @@ edit [OPTIONS] [FILE...]
 | `--no-highlight` | Disable syntax highlighting |
 | `--no-autosave` | Disable auto-save and crash recovery |
 | `--no-session` | Skip the session restore prompt on startup; open a blank buffer |
+| `--no-watch` | Disable external file modification watching for this session |
 | `--readonly` | Open all files in read-only mode |
 | `--locale <LOC>` | Override locale detection (e.g. `C.UTF-8`) |
 | `--legacy-cp437` | Enable CP437→UTF-8 transcoding on file open |

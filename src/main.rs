@@ -15,6 +15,7 @@ mod search;
 mod security;
 mod session;
 mod ui;
+mod watcher;
 
 use std::path::PathBuf;
 use std::process;
@@ -171,6 +172,12 @@ fn build_cli() -> Command {
                 .long("no-session")
                 .action(ArgAction::SetTrue)
                 .help("Skip session restore prompt on startup"),
+        )
+        .arg(
+            Arg::new("no-watch")
+                .long("no-watch")
+                .action(ArgAction::SetTrue)
+                .help("Disable external file modification watching"),
         )
 }
 

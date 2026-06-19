@@ -33,6 +33,9 @@ pub struct StatusBar<'a> {
     pub total_buffers: usize,
     /// Whether soft-wrap mode is active (Feature 005).
     pub soft_wrap: bool,
+    /// Feature 007: one-shot notice (e.g. "file deleted") displayed centred;
+    /// cleared by the render loop after one frame.
+    pub notice: Option<&'a str>,
 }
 
 impl<'a> StatusBar<'a> {
@@ -43,6 +46,7 @@ impl<'a> StatusBar<'a> {
         buffer_idx: usize,
         total_buffers: usize,
         soft_wrap: bool,
+        notice: Option<&'a str>,
     ) -> Self {
         Self {
             buffer,
@@ -50,6 +54,7 @@ impl<'a> StatusBar<'a> {
             buffer_idx,
             total_buffers,
             soft_wrap,
+            notice,
         }
     }
 
@@ -175,6 +180,26 @@ impl<'a> Widget for StatusBar<'a> {
                 buf.get_mut(x, y).set_style(style).set_char(*ch);
             }
         }
+
+        // Feature 007: overlay one-shot watcher notice centred in the bar.
+        if let Some(notice) = self.notice {
+            let notice_chars: Vec<char> = notice.chars().collect();
+            let notice_len = notice_chars.len();
+            if notice_len > 0 {
+                let start_col = if notice_len < width {
+                    (width - notice_len) / 2
+                } else {
+                    0
+                };
+                for (i, ch) in notice_chars.iter().enumerate().take(width) {
+                    let x = area.left() + (start_col + i) as u16;
+                    if x >= area.right() {
+                        break;
+                    }
+                    buf.get_mut(x, y).set_style(style).set_char(*ch);
+                }
+            }
+        }
     }
 }
 
@@ -187,7 +212,7 @@ mod tests {
     fn make_status_bar(soft_wrap: bool) -> StatusBar<'static> {
         // We need a Buffer for the lifetime but we use Box::leak to get 'static for tests.
         let buf = Box::leak(Box::new(Buffer::new_empty()));
-        StatusBar::new(buf, theme_by_name("classic"), 0, 1, soft_wrap)
+        StatusBar::new(buf, theme_by_name("classic"), 0, 1, soft_wrap, None)
     }
 
     #[test]
@@ -212,7 +237,7 @@ mod tests {
     fn flags_wrap_and_modified_both_shown() {
         let buf = Box::leak(Box::new(Buffer::new_empty()));
         buf.modified = true;
-        let sb = StatusBar::new(buf, theme_by_name("classic"), 0, 1, true);
+        let sb = StatusBar::new(buf, theme_by_name("classic"), 0, 1, true, None);
         let f = sb.flags();
         assert!(f.contains("[WRAP]"), "missing [WRAP]");
         assert!(f.contains("[Modified]"), "missing [Modified]");
