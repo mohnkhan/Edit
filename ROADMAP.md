@@ -15,7 +15,7 @@
   Spec: `specs/008-plugin-api/`.
 
 ### Plugin top-level menu activation (follow-up to feature 008)
-- **Issue**: _to file_ (`follow-up`)
+- **Issue**: #19 (`follow-up`)
 - **Status**: Deferred from feature 008
 - **Description**: Live keyboard activation of plugin-contributed top-level menu items (e.g.
   "Tools > Word Count") via the menu bar. The plugin menu registry, sandboxed `menu_action`
