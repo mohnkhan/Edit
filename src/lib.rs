@@ -20,3 +20,4 @@ pub mod ui;
 // `app` depends on the full TUI stack; expose it as well so integration tests
 // can drive App directly if needed in future.
 pub mod app;
+pub mod watcher;

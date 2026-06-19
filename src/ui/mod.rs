@@ -136,6 +136,7 @@ impl Ui {
             app.active_idx,
             app.buffers.len(),
             app.soft_wrap,
+            app.watcher_notice.as_deref(),
         );
         frame.render_widget(status_bar, statusbar_area);
 
@@ -195,6 +196,55 @@ impl Ui {
             // Centered overlay rect (fixed 60×5)
             let dw = 60u16.min(size.width);
             let dh = 5u16.min(size.height);
+            let dx = size.x + size.width.saturating_sub(dw) / 2;
+            let dy = size.y + size.height.saturating_sub(dh) / 2;
+            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
+
+            frame.render_widget(ratatui::widgets::Clear, dialog_area);
+            frame.render_widget(dialog, dialog_area);
+        }
+
+        // Feature 007 — External-change dialog overlay (T022 / T028).
+        if let Some(ref ec) = app.pending_external_change {
+            let fname = ec
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| ec.path.display().to_string());
+
+            let dirty = app
+                .buffers
+                .get(ec.buf_idx)
+                .map(|b| b.modified)
+                .unwrap_or(false);
+
+            let body = if dirty {
+                format!(
+                    "  \"{}\" was modified externally.\n  WARNING: You have unsaved changes.\n\n  [Y] Reload from disk   [N] Keep in editor",
+                    fname
+                )
+            } else {
+                format!(
+                    "  \"{}\" was modified externally.\n\n  [Y] Reload from disk   [N] Keep in editor",
+                    fname
+                )
+            };
+
+            let dh: u16 = if dirty { 7 } else { 5 };
+            let dialog = ratatui::widgets::Paragraph::new(body)
+                .style(
+                    ratatui::style::Style::default()
+                        .fg(app.theme.menubar_fg)
+                        .bg(app.theme.menubar_bg),
+                )
+                .block(
+                    ratatui::widgets::Block::default()
+                        .title("File Changed on Disk")
+                        .borders(ratatui::widgets::Borders::ALL),
+                );
+
+            let dw = 60u16.min(size.width);
+            let dh = dh.min(size.height);
             let dx = size.x + size.width.saturating_sub(dw) / 2;
             let dy = size.y + size.height.saturating_sub(dh) / 2;
             let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);

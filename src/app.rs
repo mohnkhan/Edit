@@ -90,6 +90,16 @@ pub struct App {
     pub wrap_cache: Option<crate::ui::wrap::WrapCache>,
     /// Generation counter incremented on every buffer mutation for cache invalidation.
     pub wrap_text_gen: u64,
+
+    // ── Feature 007: External File Modification Detection ─────────────────────
+    /// OS-native filesystem watcher; `None` when `--no-watch` is active.
+    pub file_watcher: Option<crate::watcher::FileWatcher>,
+    /// Tracks when the editor last wrote each backing file path (self-write suppression).
+    pub self_write_times: std::collections::HashMap<PathBuf, Instant>,
+    /// Set when an external modification is detected; cleared by user's Y/N response.
+    pub pending_external_change: Option<crate::watcher::ExternalChange>,
+    /// One-shot status-bar notice (e.g., file-deleted notice); cleared after one render frame.
+    pub watcher_notice: Option<String>,
 }
 
 // ── App impl ─────────────────────────────────────────────────────────────────
@@ -184,6 +194,38 @@ impl App {
 
         let soft_wrap_initial = config.soft_wrap;
 
+        // ── Feature 007: initialise file watcher ─────────────────────────────
+        let (file_watcher, initial_watch_notice) = if config.no_watch {
+            (None, None)
+        } else {
+            match crate::watcher::FileWatcher::new() {
+                Ok(mut fw) => {
+                    for buf in &buffers {
+                        if let Some(ref p) = buf.path {
+                            if let Err(e) = fw.watch_path(p) {
+                                log::warn!("FileWatcher: could not watch {:?}: {}", p, e);
+                            }
+                        }
+                    }
+                    (Some(fw), None)
+                }
+                Err(e) => {
+                    log::warn!("FileWatcher: failed to initialise watcher: {}", e);
+                    (
+                        None,
+                        Some(
+                            "File watching unavailable — external changes won't be detected"
+                                .to_owned(),
+                        ),
+                    )
+                }
+            }
+        };
+
+        // Watch-init notice is one-shot; prefer session startup warning in status_message.
+        let watcher_notice = initial_watch_notice;
+        let status_message = initial_status;
+
         Self {
             config,
             keymap,
@@ -198,7 +240,7 @@ impl App {
             pending_save_prompt: false,
             too_small: false,
             search_state: SearchState::default(),
-            status_message: initial_status,
+            status_message,
             pending_session_restore: session,
             default_encoding,
             pending_encoding_select: None,
@@ -206,6 +248,10 @@ impl App {
             soft_wrap: soft_wrap_initial,
             wrap_cache: None,
             wrap_text_gen: 0,
+            file_watcher,
+            self_write_times: std::collections::HashMap::new(),
+            pending_external_change: None,
+            watcher_notice,
         }
     }
 
@@ -223,6 +269,15 @@ impl App {
         for buf in &self.buffers {
             if buf.autosave.enabled && !buf.autosave.lock_path.as_os_str().is_empty() {
                 crate::buffer::autosave::release_lock(&buf.autosave.lock_path);
+            }
+        }
+
+        // Feature 007: unwatch all buffer paths on exit.
+        if let Some(ref mut fw) = self.file_watcher {
+            for buf in &self.buffers {
+                if let Some(ref p) = buf.path {
+                    let _ = fw.unwatch_path(p);
+                }
             }
         }
 
@@ -301,6 +356,8 @@ impl App {
             }
 
             terminal.draw(|frame| self.render(frame))?;
+            // Feature 007: watcher_notice is one-shot — clear after one rendered frame.
+            self.watcher_notice = None;
 
             let timeout = TICK_MS.saturating_sub(last_tick.elapsed().as_millis() as u64);
 
@@ -377,6 +434,37 @@ impl App {
                 }
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'C') => {
                     self.prompt_cancel_quit();
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        // Feature 007 — External-change dialog intercept: only Y/Enter (reload)
+        // and N/Esc (keep) are forwarded while the dialog is active.
+        if self.pending_external_change.is_some() {
+            match &action {
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'Y') => {
+                    let ec = self.pending_external_change.take().unwrap();
+                    self.reload_from_disk(ec.buf_idx);
+                }
+                Action::InsertNewline => {
+                    let ec = self.pending_external_change.take().unwrap();
+                    self.reload_from_disk(ec.buf_idx);
+                }
+                Action::ReloadFile => {
+                    let ec = self.pending_external_change.take().unwrap();
+                    self.reload_from_disk(ec.buf_idx);
+                }
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
+                    if let Some(ec) = self.pending_external_change.take() {
+                        self.buffers[ec.buf_idx].modified = true;
+                    }
+                }
+                Action::MenuClose | Action::DismissExternalChange => {
+                    if let Some(ec) = self.pending_external_change.take() {
+                        self.buffers[ec.buf_idx].modified = true;
+                    }
                 }
                 _ => {}
             }
@@ -525,6 +613,10 @@ impl App {
     pub fn prompt_save_and_quit(&mut self) {
         match self.active_buffer().save() {
             Ok(()) => {
+                // Feature 007: record write time for self-write suppression (FR-007).
+                if let Some(path) = self.buffers[self.active_idx].path.clone() {
+                    self.self_write_times.insert(path, Instant::now());
+                }
                 self.pending_save_prompt = false;
                 if let Some(data) = self.build_session_data() {
                     if let Err(e) = crate::session::save_session(&data) {
@@ -692,6 +784,17 @@ impl App {
         // Replace buffers with restored set.
         self.buffers = new_buffers;
 
+        // Feature 007: register watches for newly-restored buffer paths.
+        if let Some(ref mut fw) = self.file_watcher {
+            for buf in &self.buffers {
+                if let Some(ref p) = buf.path {
+                    if let Err(e) = fw.watch_path(p) {
+                        log::warn!("FileWatcher: could not watch {:?}: {}", p, e);
+                    }
+                }
+            }
+        }
+
         // Restore split layout.
         self.split_mode = match session.split_layout {
             SplitLayoutKind::None => crate::ui::SplitMode::Single,
@@ -719,6 +822,10 @@ impl App {
         match self.active_buffer().save() {
             Ok(()) => {
                 self.active_buffer_mut().modified = false;
+                // Feature 007: record write time for self-write suppression (FR-007).
+                if let Some(path) = self.buffers[self.active_idx].path.clone() {
+                    self.self_write_times.insert(path, Instant::now());
+                }
                 log::info!("Buffer saved");
             }
             Err(e) => {
@@ -743,6 +850,10 @@ impl App {
             match self.buffers[self.active_idx].save() {
                 Ok(()) => {
                     self.buffers[self.active_idx].modified = false;
+                    // Feature 007: record write time for self-write suppression.
+                    if let Some(path) = self.buffers[self.active_idx].path.clone() {
+                        self.self_write_times.insert(path, Instant::now());
+                    }
                     let label = Self::label_for_encoding(enc);
                     self.status_message = Some(format!("Saved as {}", label));
                 }
@@ -788,27 +899,86 @@ impl App {
     }
 
     fn handle_tick(&mut self) {
-        // US5 — Autosave: check EDIT_AUTOSAVE_INTERVAL env override, then write
-        // a recovery file if the active buffer is modified and the interval has elapsed.
+        // US5 — Autosave
         let interval = std::env::var("EDIT_AUTOSAVE_INTERVAL")
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(self.config.autosave_interval)
             .clamp(1, 300);
 
-        // Skip if config says no-autosave.
-        if self.config.no_autosave {
-            return;
+        if !self.config.no_autosave {
+            let buf = &self.buffers[self.active_idx];
+            if buf.autosave.enabled && buf.modified {
+                let elapsed = buf.autosave.last_save_at.elapsed().as_secs() as u32;
+                if elapsed >= interval {
+                    crate::buffer::autosave::write_recovery_for_buffer(
+                        &mut self.buffers[self.active_idx],
+                        interval,
+                    );
+                }
+            }
         }
 
-        let buf = &self.buffers[self.active_idx];
-        if buf.autosave.enabled && buf.modified {
-            let elapsed = buf.autosave.last_save_at.elapsed().as_secs() as u32;
-            if elapsed >= interval {
-                crate::buffer::autosave::write_recovery_for_buffer(
-                    &mut self.buffers[self.active_idx],
-                    interval,
-                );
+        // Feature 007 — drain the file-watcher event queue (non-blocking).
+        // Only drain when no dialog is already pending (one prompt at a time).
+        if self.pending_external_change.is_none() {
+            if let Some(ref mut fw) = self.file_watcher {
+                let watched_paths: Vec<PathBuf> =
+                    self.buffers.iter().filter_map(|b| b.path.clone()).collect();
+                if let Some(event) = fw.try_recv_event(&self.self_write_times, &watched_paths) {
+                    match event.kind {
+                        crate::watcher::WatchEventKind::Modified => {
+                            // Find the buffer index whose path matches.
+                            if let Some(buf_idx) = self
+                                .buffers
+                                .iter()
+                                .position(|b| b.path.as_deref() == Some(event.path.as_path()))
+                            {
+                                self.pending_external_change =
+                                    Some(crate::watcher::ExternalChange {
+                                        buf_idx,
+                                        path: event.path.clone(),
+                                        kind: crate::watcher::WatchEventKind::Modified,
+                                    });
+                            }
+                        }
+                        crate::watcher::WatchEventKind::Deleted => {
+                            let name = event
+                                .path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| event.path.display().to_string());
+                            self.watcher_notice = Some(format!(
+                                "[{}] File deleted on disk \u{2014} buffer kept in memory",
+                                name
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Feature 007 — Reload from disk ───────────────────────────────────────
+
+    /// Replace buffer at `buf_idx` with the current on-disk content.
+    ///
+    /// Uses `Buffer::open()` which runs the full encoding detection pipeline
+    /// (FR-004 compliance: no raw-byte bypass).  Clears undo history.
+    pub fn reload_from_disk(&mut self, buf_idx: usize) {
+        let path = match self.buffers.get(buf_idx).and_then(|b| b.path.clone()) {
+            Some(p) => p,
+            None => return,
+        };
+        let enc = self.buffers[buf_idx].encoding;
+        match Buffer::open(path.clone(), enc) {
+            Ok(new_buf) => {
+                self.buffers[buf_idx] = new_buf;
+                log::info!("Buffer {} reloaded from {:?}", buf_idx, path);
+            }
+            Err(e) => {
+                log::warn!("reload_from_disk failed for {:?}: {}", path, e);
+                self.watcher_notice = Some(format!("Reload failed: {}", e));
             }
         }
     }
@@ -1609,6 +1779,12 @@ impl App {
 
         match Buffer::open(safe_path.clone(), default_encoding) {
             Ok(buf) => {
+                // Feature 007: watch the newly-opened file.
+                if let Some(ref mut fw) = self.file_watcher {
+                    if let Err(e) = fw.watch_path(&safe_path) {
+                        log::warn!("FileWatcher: could not watch {:?}: {}", safe_path, e);
+                    }
+                }
                 self.buffers.push(buf);
                 self.active_idx = self.buffers.len() - 1;
                 log::info!("Opened {:?} as buffer {}", safe_path, self.active_idx);

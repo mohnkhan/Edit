@@ -14,16 +14,12 @@
 - **Label**: `follow-up`
 
 ### External File Modification Detection
-- **Issue**: #3
-- **Status**: Deferred from v0.1.0
-- **Description**: Detect when a file opened in the editor is modified by an external process
-  (e.g. via `inotify`), and prompt the user to reload or keep their version.
-- **Why deferred**: `inotify` integration adds complexity and Linux-specific code paths that
-  require more careful design to avoid races with the auto-save subsystem.
-- **Suggested approach**: Use `inotify` (Linux) via the `notify` crate; poll as fallback on
-  other platforms.
-- **Effort**: Medium (1 week)
-- **Label**: `follow-up`
+- **Issue**: #3 (closed — implemented in feature 007)
+- **Status**: Complete as of 2026-06-19
+- **Description**: Detect when a file opened in the editor is modified by an external process;
+  prompt the user to reload or keep their in-editor version; show a one-shot notice on file
+  deletion; suppress self-writes; debounce rapid changes; `--no-watch` flag.
+- **Implementation**: `src/watcher/mod.rs` using `notify = "6"` (inotify on Linux).
 
 ### Soft-Wrap Mode
 - **Issue**: #4 (closed — implemented in feature 005)

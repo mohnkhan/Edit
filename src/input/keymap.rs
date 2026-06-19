@@ -78,6 +78,12 @@ pub enum Action {
 
     // Explicit no-op
     Noop,
+
+    // Feature 007 — External file modification detection
+    /// User chose to reload buffer from disk after external modification.
+    ReloadFile,
+    /// User chose to keep in-editor version after external modification.
+    DismissExternalChange,
 }
 
 /// Maps canonical key-chord strings (e.g. `"Ctrl+S"`) to [`Action`] variants.
