@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — feature 009: Live menu-bar activation
+## [0.3.0] - 2026-06-19
 
-### Added
+### feature 009: Live menu-bar activation
+
+#### Added
 
 - **Keyboard menu navigation**: pull-down menus are now fully operable from the keyboard.
   `F10` activates the menu bar (top-level highlight); `Alt+<letter>` opens a menu's dropdown
@@ -22,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sandboxed `menu_action` and shows the result in the status bar. Completes the deferred
   portion of the Plugin API (issue #19).
 
-### Fixed
+#### Fixed
 
 - Open dropdowns were previously drawn *under* the editor content and never visible; the menu
   bar now renders on top of the editor area so dropdowns appear correctly.
@@ -32,9 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — feature 008: Plugin API (Rhai)
+### feature 008: Plugin API (Rhai)
 
-### Added
+#### Added
 
 - **Plugin API**: third-party plugins can extend the editor with syntax highlighters, custom
   keybindings, and menu items without modifying the source. Plugins live in
@@ -62,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (each with a README), plus `infinite-loop` / `fs-violation` test fixtures.
 - New dependencies: `rhai` (with `sync`) and `semver`. No `extism`/`wasm`/C++ runtime.
 
-### Notes
+#### Notes
 
 - Live keyboard activation of plugin-contributed top-level menu items via the menu bar is
   deferred (the editor's menu-bar item-selection event path is shared with built-in menus and
@@ -71,9 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — feature 007: External File Modification Detection
+### feature 007: External File Modification Detection
 
-### Added
+#### Added
 
 - **External modification detection**: when a file open in the editor is written by another process
   (e.g. `git checkout`, a build tool, another editor), the editor detects the change via inotify
@@ -105,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `StatusBar` now accepts an optional one-shot `notice: &str` parameter; notice is displayed
   centred in the status bar for exactly one render frame.
 
-### Changed
+#### Changed
 
 - `StatusBar::new()` signature: now takes a 6th parameter `notice: Option<&'a str>`.
 - `App` struct gains four new fields: `file_watcher`, `self_write_times`, `pending_external_change`,
@@ -114,9 +116,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — feature 006: Menu Check-State Indicator
+### feature 006: Menu Check-State Indicator
 
-### Added
+#### Added
 
 - **Check-state indicator** (non-DOS extension): toggleable View menu items now display a `✓`
   (U+2713) prefix when their associated toggle is active, and a 2-space filler when inactive,
@@ -139,16 +141,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and config-persisted initial state (US3).
 - Closes issue #13 (deferred from feature 005).
 
-### Changed
+#### Changed
 
 - `MenuBarWidget::new()` signature: accepts a third `toggle_states: &'a [(Action, bool)]` argument.
   Call site in `src/ui/mod.rs` updated to pass `&[(Action::ToggleSoftWrap, app.soft_wrap)]`.
 
 ---
 
-## [Unreleased] — feature 005: Soft-Wrap Mode
+### feature 005: Soft-Wrap Mode
 
-### Added
+#### Added
 
 - **Soft-wrap rendering mode** (non-DOS extension): optional visual line wrapping at the terminal
   width, toggled via **Alt+Z** or the new "Soft Wrap (ext)" item in the View menu.
@@ -171,16 +173,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 10 new unit tests (toggle cycle, cursor unchanged, Home/End, Up/Down, save byte-identity).
 - 3 integration tests in `tests/integration/soft_wrap.rs`.
 
-### Deferred
+#### Deferred
 
 - Menu check-indicator (✓ prefix next to "Soft Wrap (ext)" when active): tracked in issue TBD,
   ROADMAP.md. The `[WRAP]` status-bar indicator serves as a workaround for v1.
 
 ---
 
-## [Unreleased] — feature 004: Save-As Encoding Selection UI
+### feature 004: Save-As Encoding Selection UI
 
-### Added
+#### Added
 
 - Save As Encoding dialog (F12 / File › Save As Encoding...): interactive TUI listbox
   for selecting the output encoding when saving a file (FR-001–FR-013)
@@ -200,9 +202,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — feature 003: Session Restore
+### feature 003: Session Restore
 
-### Added
+#### Added
 
 - `src/session/mod.rs` — new module: `BufferEntry`, `SplitLayoutKind`, `SessionData` types with
   serde round-trip support; `session_path()`, `save_session()`, `load_session()` functions
@@ -230,16 +232,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `App::new` signature extended with `session: Option<SessionData>` and
   `session_warning: Option<String>` parameters
 
-### Changed
+#### Changed
 
 - `App::new` now accepts two additional arguments; callers (`src/main.rs`) pass the
   session data resolved at startup
 
 ---
 
-## [Unreleased] — feature 002: UTF-16 Transcoding
+### feature 002: UTF-16 Transcoding
 
-### Added
+#### Added
 
 - `EncodingId::Utf16Le` and `EncodingId::Utf16Be` variants in `src/encoding/detect.rs`
 - UTF-16 LE/BE auto-detection via BOM sniffing (`0xFF 0xFE` / `0xFE 0xFF`) in `detect_encoding()`
@@ -258,7 +260,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All four integration test suites (`encoding_roundtrip`, `file_io`, `recovery`, `stress`)
   registered in `Cargo.toml` so `cargo test` discovers them
 
-### Fixed
+#### Fixed
 
 - FNV-1a 64-bit prime constant in `src/buffer/autosave.rs` corrected to
   `0x0000_0100_0000_01b3` (was `0x0000_0001_00000_01b3` — wrong grouping and wrong value)
@@ -267,7 +269,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 11 pre-existing clippy warnings across `autosave.rs`, `rope.rs`, `buffer/mod.rs`,
   `search/mod.rs`, and `app.rs`
 
-### Deferred
+#### Deferred
 
 - Save-As encoding selection UI (interactive dialog to choose output encoding at save time):
   tracked in issue #9, ROADMAP.md
