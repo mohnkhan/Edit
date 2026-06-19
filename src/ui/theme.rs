@@ -49,6 +49,10 @@ pub struct Theme {
     pub highlight_comment: Color,
     /// Color used for numeric literals.
     pub highlight_number: Color,
+    /// Color used for operators (plugin-provided highlighters; Feature 008).
+    pub highlight_operator: Color,
+    /// Color used for type names (plugin-provided highlighters; Feature 008).
+    pub highlight_type: Color,
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +84,8 @@ pub static CLASSIC: Theme = Theme {
     highlight_string: Color::Green,
     highlight_comment: Color::DarkGray,
     highlight_number: Color::Cyan,
+    highlight_operator: Color::White,
+    highlight_type: Color::LightCyan,
 };
 
 // ---------------------------------------------------------------------------
@@ -110,6 +116,8 @@ pub static HIGH_CONTRAST: Theme = Theme {
     highlight_string: Color::Green,
     highlight_comment: Color::Cyan,
     highlight_number: Color::Magenta,
+    highlight_operator: Color::White,
+    highlight_type: Color::LightYellow,
 };
 
 // ---------------------------------------------------------------------------
@@ -135,6 +143,8 @@ pub static PLAIN: Theme = Theme {
     highlight_string: Color::Reset,
     highlight_comment: Color::Reset,
     highlight_number: Color::Reset,
+    highlight_operator: Color::Reset,
+    highlight_type: Color::Reset,
 };
 
 // ---------------------------------------------------------------------------

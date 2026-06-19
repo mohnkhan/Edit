@@ -87,6 +87,9 @@ pub fn merge_cli_flags(config: &mut Config, matches: &ArgMatches) {
     if matches.get_flag("no-watch") {
         config.no_watch = true;
     }
+    if matches.get_flag("no-plugins") {
+        config.no_plugins = true;
+    }
 }
 
 /// Validate config fields after loading; clamp out-of-range values and log errors.

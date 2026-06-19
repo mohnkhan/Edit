@@ -1,0 +1,12 @@
+id = "word-count"
+name = "Word Count"
+version = "1.0.0"
+host_api = "^1"
+types = ["menu"]
+publisher = "edit reference plugins"
+description = "Adds Tools > Word Count; reports the active buffer's word count in the status bar."
+
+[[menu_items]]
+menu = "Tools"
+item = "Word Count"
+item_id = "wc"

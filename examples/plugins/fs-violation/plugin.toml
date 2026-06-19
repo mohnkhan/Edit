@@ -1,0 +1,12 @@
+id = "fs-violation"
+name = "Filesystem Violation (test)"
+version = "1.0.0"
+host_api = "^1"
+types = ["menu"]
+publisher = "edit test fixtures"
+description = "Deliberately attempts to read an undeclared path to verify sandbox denial. Do not use."
+
+[[menu_items]]
+menu = "Tools"
+item = "Leak passwd"
+item_id = "leak"

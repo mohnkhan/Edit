@@ -1,0 +1,48 @@
+#!/usr/bin/env expect
+# Smoke test (Feature 008): launch the editor on a .lua file with the lua-syntax plugin
+# installed and pre-consented; verify it starts and exits cleanly (plugin load + highlight
+# path does not crash or hang the editor).
+
+set timeout 10
+
+# Isolated XDG config dir with a pre-consented lua-syntax plugin.
+set cfg "/tmp/edit_smoke_plugins_cfg"
+file delete -force $cfg
+file mkdir "$cfg/edit/plugins/lua-syntax"
+exec cp tests/fixtures/plugins/lua-syntax/plugin.toml "$cfg/edit/plugins/lua-syntax/plugin.toml"
+exec cp tests/fixtures/plugins/lua-syntax/plugin.rhai "$cfg/edit/plugins/lua-syntax/plugin.rhai"
+
+set fh [open "$cfg/edit/plugins.toml" w]
+puts $fh "\[plugins.lua-syntax\]"
+puts $fh "allowed = true"
+puts $fh "consented_at = \"2026-06-19T00:00:00Z\""
+puts $fh "version_consented = \"1.0.0\""
+close $fh
+
+set test_file "/tmp/edit_smoke_plugin.lua"
+set fh [open $test_file w]
+puts $fh "-- a comment"
+puts $fh "local x = 5"
+close $fh
+
+set env(XDG_CONFIG_HOME) $cfg
+set env(LC_ALL) "C.UTF-8"
+set env(LANG) "C.UTF-8"
+
+spawn ./target/debug/edit $test_file
+expect {
+    timeout { puts stderr "FAIL: editor did not start"; exit 1 }
+    -re ".+" { }
+}
+
+# Quit (Ctrl+Q). Buffer is unmodified, so it exits without a save prompt.
+send "\x11"
+expect {
+    timeout { puts stderr "FAIL: editor did not exit after Ctrl+Q"; exit 1 }
+    eof { }
+}
+
+file delete $test_file
+file delete -force $cfg
+puts "PASS: plugin highlighter smoke test"
+exit 0

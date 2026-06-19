@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — feature 008: Plugin API (Rhai)
+
+### Added
+
+- **Plugin API**: third-party plugins can extend the editor with syntax highlighters, custom
+  keybindings, and menu items without modifying the source. Plugins live in
+  `$XDG_CONFIG_HOME/edit/plugins/<id>/` as a `plugin.toml` manifest plus (for highlighter/menu
+  plugins) a `plugin.rhai` script. Engine: **Rhai** — pure-Rust embedded scripting, no C/C++
+  dependencies, statically linkable, builds on every target including FreeBSD.
+- **Syntax highlighter plugins**: a plugin highlighter integrates with the existing highlight
+  pipeline and takes precedence over the built-in highlighter for its file extensions.
+- **Keybinding plugins**: manifest `[keybindings]` entries merge into the keymap; plugin
+  bindings take precedence over built-ins, except safety-critical actions (Save, Quit) which
+  cannot be overridden.
+- **Menu plugins**: manifest `[[menu_items]]` register plugin commands; `menu_action` is
+  dispatched in the sandbox and may post a status-bar message.
+- **One-time consent dialog**: each newly-installed plugin must be approved before it runs;
+  decisions persist to `$XDG_CONFIG_HOME/edit/plugins.toml`.
+- **Plugin manager**: Options > Plugins lists installed plugins and toggles them on/off
+  (persisted).
+- **Default-deny sandbox** (Constitution VII): scripts have no filesystem/process/network
+  access; the only file access is the permission-gated `read_file` host function. A 50 ms
+  per-call wall-clock limit and resource caps bound execution; a plugin that loops, errors,
+  or repeatedly violates the sandbox is disabled for the session — the editor stays responsive.
+- **`--no-plugins` CLI flag**: suppresses all plugin loading for the session without modifying
+  persisted consent.
+- **Reference plugins** under `examples/plugins/`: `lua-syntax`, `word-count`, `custom-keys`
+  (each with a README), plus `infinite-loop` / `fs-violation` test fixtures.
+- New dependencies: `rhai` (with `sync`) and `semver`. No `extism`/`wasm`/C++ runtime.
+
+### Notes
+
+- Live keyboard activation of plugin-contributed top-level menu items via the menu bar is
+  deferred (the editor's menu-bar item-selection event path is shared with built-in menus and
+  is future work); the menu registry, dispatch, and consent/manager dialogs are complete. See
+  ROADMAP and the issue tracker (`follow-up`).
+
+---
+
 ## [Unreleased] — feature 007: External File Modification Detection
 
 ### Added

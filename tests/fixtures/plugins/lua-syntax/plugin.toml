@@ -1,0 +1,8 @@
+id = "lua-syntax"
+name = "Lua Syntax Highlighter"
+version = "1.0.0"
+host_api = "^1"
+types = ["highlighter"]
+extensions = [".lua", ".luac"]
+publisher = "edit reference plugins"
+description = "Syntax highlighting for Lua: comments, keywords, and numbers."

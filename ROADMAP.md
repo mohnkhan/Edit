@@ -3,14 +3,31 @@
 ## Deferred Features
 
 ### Plugin API
-- **Issue**: #2
-- **Status**: Deferred from v0.1.0
-- **Description**: A plugin API allowing external tools to register custom syntax highlighters,
-  key bindings, and menu items.
-- **Why deferred**: Scope constraint — core editor stability takes priority. Plugin ABI requires
-  stabilization of internal APIs first.
-- **Suggested approach**: Expose a C FFI or WASM plugin interface via `dlopen` or a WASM runtime.
-- **Effort**: Large (2–3 weeks)
+- **Issue**: #2 (implemented in feature 008)
+- **Status**: Complete as of 2026-06-19 (branch `008-plugin-api`)
+- **Description**: Plugin API allowing external plugins to register custom syntax highlighters,
+  keybindings, and menu items, in a default-deny sandbox with one-time user consent.
+- **Implementation**: `src/plugin/` using **Rhai** (pure-Rust embedded scripting — chosen over
+  WASM/dlopen for minimal footprint, trivial static linking, and FreeBSD support per
+  Constitution III/IV). Per-call 50 ms wall-clock limit via Rhai `on_progress`; `read_file` is
+  the only host FS capability and is permission-gated; consent persisted to `plugins.toml`;
+  manager at Options > Plugins; `--no-plugins` flag. Reference plugins in `examples/plugins/`.
+  Spec: `specs/008-plugin-api/`.
+
+### Plugin top-level menu activation (follow-up to feature 008)
+- **Issue**: #19 (`follow-up`)
+- **Status**: Deferred from feature 008
+- **Description**: Live keyboard activation of plugin-contributed top-level menu items (e.g.
+  "Tools > Word Count") via the menu bar. The plugin menu registry, sandboxed `menu_action`
+  dispatch (`Action::PluginMenuActivated`), consent dialog, and plugin manager are all complete;
+  what remains is wiring the menu-bar dropdown *item-selection* event path.
+- **Why deferred**: The editor's menu-bar item-selection path is not yet wired for built-in
+  menus either (`MenuBarState::select_item`/`navigate_*` are unused in the event loop), so this
+  belongs with a broader menu-interaction pass rather than feature 008.
+- **Suggested approach**: Wire dropdown navigation/selection in the key event loop for both
+  built-in and plugin menus; dispatch the selected `MenuItem.action` (including
+  `Action::PluginMenuActivated`).
+- **Effort**: Small–Medium
 - **Label**: `follow-up`
 
 ### External File Modification Detection

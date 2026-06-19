@@ -100,6 +100,16 @@ pub struct App {
     pub pending_external_change: Option<crate::watcher::ExternalChange>,
     /// One-shot status-bar notice (e.g., file-deleted notice); cleared after one render frame.
     pub watcher_notice: Option<String>,
+
+    // ── Feature 008: plugin subsystem ────────────────────────────────────────
+    /// The Rhai plugin host owning the engine and registry for this session.
+    pub plugin_host: crate::plugin::PluginHost,
+    /// Plugins awaiting a first-run consent decision; the front item is prompted.
+    pub pending_plugin_consent: Vec<crate::plugin::PluginMeta>,
+    /// When true, the Options > Plugins manager overlay is open.
+    pub pending_plugin_manager: bool,
+    /// Cursor index within the plugin manager list.
+    pub plugin_manager_cursor: usize,
 }
 
 // ── App impl ─────────────────────────────────────────────────────────────────
@@ -115,13 +125,30 @@ impl App {
         session: Option<crate::session::SessionData>,
         session_warning: Option<String>,
     ) -> Self {
+        let theme = theme_by_name(&config.theme);
+        let readonly = config.readonly;
+
+        // ── Feature 008: initialise the plugin host and load allowed plugins ──
+        let plugin_config_dir = crate::plugin::edit_config_dir();
+        let mut plugin_host = crate::plugin::PluginHost::new(config.no_plugins);
+        let mut pending_plugin_consent: Vec<crate::plugin::PluginMeta> = Vec::new();
+        {
+            let consent_records = crate::plugin::load_consent_records(&plugin_config_dir);
+            plugin_host.load_all(
+                &plugin_config_dir,
+                &consent_records,
+                &mut pending_plugin_consent,
+            );
+        }
+
         let keymap = {
             let mut km = KeybindingMap::default_map();
             km.apply_user_overrides(&config.keybindings);
+            // Plugin-provided keybindings take precedence over built-ins, except
+            // safety-critical actions (Quit/Save) which cannot be overridden.
+            km.apply_plugin_bindings(&plugin_host.registry.all_keybindings());
             km
         };
-        let theme = theme_by_name(&config.theme);
-        let readonly = config.readonly;
 
         let mut buffers: Vec<Buffer> = if files.is_empty() {
             vec![Buffer::new_empty()]
@@ -149,10 +176,14 @@ impl App {
         };
 
         // T077 — Auto-detect syntax highlighter for each buffer on startup.
+        // Feature 008: an active plugin highlighter takes precedence over the built-in
+        // for the same extension; the built-in is the fallback.
         if config.highlight {
             for buf in &mut buffers {
                 if let Some(ref path) = buf.path.clone() {
-                    buf.syntax = crate::highlight::detect_highlighter(path);
+                    buf.syntax = plugin_host
+                        .highlighter_for(path, theme)
+                        .or_else(|| crate::highlight::detect_highlighter(path));
                 }
             }
         }
@@ -252,6 +283,10 @@ impl App {
             self_write_times: std::collections::HashMap::new(),
             pending_external_change: None,
             watcher_notice,
+            plugin_host,
+            pending_plugin_consent,
+            pending_plugin_manager: false,
+            plugin_manager_cursor: 0,
         }
     }
 
@@ -496,6 +531,44 @@ impl App {
             return Ok(());
         }
 
+        // Feature 008 — Plugin consent dialog intercept: Enter/Y = allow, Esc/N = deny.
+        if !self.pending_plugin_consent.is_empty() {
+            match &action {
+                Action::InsertNewline => self.consent_decide(true),
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'Y') => {
+                    self.consent_decide(true)
+                }
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
+                    self.consent_decide(false)
+                }
+                Action::MenuClose | Action::Quit => self.consent_decide(false),
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        // Feature 008 — Plugin manager dialog intercept: Up/Down navigate,
+        // Space/Enter toggle enabled, Esc closes.
+        if self.pending_plugin_manager {
+            let n = self.plugin_host.registry.instances.len();
+            match &action {
+                Action::MoveUp if n > 0 => {
+                    self.plugin_manager_cursor = (self.plugin_manager_cursor + n - 1) % n;
+                }
+                Action::MoveDown if n > 0 => {
+                    self.plugin_manager_cursor = (self.plugin_manager_cursor + 1) % n;
+                }
+                Action::InsertChar(' ') | Action::InsertNewline => {
+                    self.plugin_manager_toggle_current();
+                }
+                Action::MenuClose | Action::Quit => {
+                    self.pending_plugin_manager = false;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         match action {
             Action::Quit => self.handle_quit(),
             Action::Resize(w, h) => self.handle_resize(w, h),
@@ -583,6 +656,21 @@ impl App {
 
             // Soft-wrap toggle (Feature 005)
             Action::ToggleSoftWrap => self.handle_toggle_soft_wrap()?,
+
+            // Feature 008 — Plugin API
+            Action::OpenPluginManager => {
+                self.pending_plugin_manager = true;
+                self.plugin_manager_cursor = 0;
+            }
+            Action::PluginMenuActivated(plugin_id, item_id) => {
+                let content = self.active_buffer().rope.to_string();
+                if let Some(msg) = self
+                    .plugin_host
+                    .dispatch_menu_action(&plugin_id, &item_id, &content)
+                {
+                    self.status_message = Some(msg);
+                }
+            }
 
             _ => {
                 log::debug!("Unhandled action: {:?}", action);
@@ -758,10 +846,13 @@ impl App {
                         grapheme_col: clamped_gcol,
                         visual_col: vcol,
                     };
-                    // Apply syntax highlighting if configured.
+                    // Apply syntax highlighting if configured (plugin highlighter wins).
                     if self.config.highlight {
                         if let Some(ref path) = buf.path.clone() {
-                            buf.syntax = crate::highlight::detect_highlighter(path);
+                            buf.syntax = self
+                                .plugin_host
+                                .highlighter_for(path, self.theme)
+                                .or_else(|| crate::highlight::detect_highlighter(path));
                         }
                     }
                     new_buffers.push(buf);
@@ -1925,6 +2016,87 @@ impl App {
         log::debug!("Theme set to: {}", self.theme.name);
     }
 
+    // ── Feature 008 — Plugin consent & manager ───────────────────────────────
+
+    /// Record the user's consent decision for the front pending plugin, persist it,
+    /// and (if allowed) load the plugin immediately.
+    fn consent_decide(&mut self, allow: bool) {
+        if self.pending_plugin_consent.is_empty() {
+            return;
+        }
+        let plugin = self.pending_plugin_consent.remove(0);
+        let dir = crate::plugin::edit_config_dir();
+        let rec = crate::plugin::consent::ConsentRecord {
+            allowed: allow,
+            consented_at: crate::plugin::utc_now_rfc3339(),
+            version_consented: plugin.version.to_string(),
+        };
+        if let Err(e) = crate::plugin::save_consent_record(&dir, &plugin.id, &rec) {
+            log::warn!("failed to persist consent for {}: {e}", plugin.id);
+        }
+        if allow {
+            let id = plugin.id.clone();
+            match self.plugin_host.load_plugin_now(plugin) {
+                Ok(()) => {
+                    self.status_message = Some(format!("Plugin '{id}' enabled"));
+                    self.reapply_plugin_highlighters();
+                }
+                Err(e) => {
+                    log::warn!("failed to load consented plugin {id}: {e}");
+                    self.status_message = Some(format!("Plugin '{id}' failed to load"));
+                }
+            }
+        } else {
+            self.status_message = Some(format!("Plugin '{}' disabled", plugin.id));
+        }
+    }
+
+    /// Toggle the enabled state of the plugin under the manager cursor and persist it.
+    fn plugin_manager_toggle_current(&mut self) {
+        let idx = self.plugin_manager_cursor;
+        let Some((id, new_enabled, version)) =
+            self.plugin_host.registry.instances.get(idx).map(|i| {
+                (
+                    i.plugin.id.clone(),
+                    !i.enabled,
+                    i.plugin.version.to_string(),
+                )
+            })
+        else {
+            return;
+        };
+        self.plugin_host.registry.set_enabled(&id, new_enabled);
+        let dir = crate::plugin::edit_config_dir();
+        let rec = crate::plugin::consent::ConsentRecord {
+            allowed: new_enabled,
+            consented_at: crate::plugin::utc_now_rfc3339(),
+            version_consented: version,
+        };
+        if let Err(e) = crate::plugin::save_consent_record(&dir, &id, &rec) {
+            log::warn!("failed to persist plugin toggle for {id}: {e}");
+        }
+        self.status_message = Some(format!(
+            "Plugin '{id}' {}",
+            if new_enabled { "enabled" } else { "disabled" }
+        ));
+        self.reapply_plugin_highlighters();
+    }
+
+    /// Re-attach plugin highlighters to open buffers (e.g. after enabling a plugin).
+    fn reapply_plugin_highlighters(&mut self) {
+        if !self.config.highlight {
+            return;
+        }
+        let theme = self.theme;
+        for i in 0..self.buffers.len() {
+            if let Some(path) = self.buffers[i].path.clone() {
+                if let Some(hl) = self.plugin_host.highlighter_for(&path, theme) {
+                    self.buffers[i].syntax = Some(hl);
+                }
+            }
+        }
+    }
+
     // ── T077 — Syntax-highlight toggle ───────────────────────────────────────
 
     /// Toggle syntax highlighting on the active buffer.
@@ -1933,16 +2105,18 @@ impl App {
     /// the buffer has a known path, the correct highlighter is re-detected and
     /// assigned.  Buffers with no path stay un-highlighted.
     pub fn toggle_highlight(&mut self) {
-        let buf = self.active_buffer_mut();
-        if buf.syntax.is_some() {
-            buf.syntax = None;
+        if self.active_buffer().syntax.is_some() {
+            self.active_buffer_mut().syntax = None;
             log::debug!("Syntax highlighting disabled");
-        } else if let Some(ref path) = buf.path.clone() {
-            buf.syntax = crate::highlight::detect_highlighter(path);
-            log::debug!(
-                "Syntax highlighting enabled: {:?}",
-                buf.syntax.as_ref().map(|h| h.name())
-            );
+        } else if let Some(path) = self.active_buffer().path.clone() {
+            // A plugin highlighter takes precedence over the built-in (Feature 008).
+            let hl = self
+                .plugin_host
+                .highlighter_for(&path, self.theme)
+                .or_else(|| crate::highlight::detect_highlighter(&path));
+            let name = hl.as_ref().map(|h| h.name());
+            self.active_buffer_mut().syntax = hl;
+            log::debug!("Syntax highlighting enabled: {:?}", name);
         }
     }
 

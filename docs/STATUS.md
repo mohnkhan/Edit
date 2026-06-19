@@ -1,13 +1,18 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.2.0 (dev — feature 007 complete)
+**Version**: 0.3.0 (dev — feature 008 complete)
 **Last updated**: 2026-06-19
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F008-US1 | Syntax highlighter plugins (Rhai); plugin highlighter takes precedence over built-in | Complete |
+| F008-US2 | Custom keybinding plugins; merged into keymap; Save/Quit non-overridable | Complete |
+| F008-US3 | Menu item plugins; `menu_action` dispatched in sandbox (live menu-bar activation deferred, see ROADMAP) | Partial |
+| F008-US4 | Plugin manager (Options > Plugins) + one-time consent dialog; decisions persisted | Complete |
+| F008-US5 | Default-deny sandbox: 50 ms timeout, FS-violation denial, crash isolation | Complete |
 | F007-US1 | Detect external file modification, prompt Y/N reload dialog | Complete |
 | F007-US2 | Unsaved-changes warning shown in reload dialog when buffer is dirty | Complete |
 | F007-US3 | File-deleted notice in status bar; buffer kept in memory | Complete |
