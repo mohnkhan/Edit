@@ -77,12 +77,14 @@ pub fn session_path() -> PathBuf {
 /// it into place.  Callers log any returned error as `warn!`.
 pub fn save_session(data: &SessionData) -> io::Result<()> {
     let path = session_path();
-    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("/tmp"));
+    let parent = path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("/tmp"));
 
     std::fs::create_dir_all(parent)?;
 
-    let toml_str = toml::to_string_pretty(data)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let toml_str =
+        toml::to_string_pretty(data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     let tmp_path = path.with_extension("toml.tmp");
     std::fs::write(&tmp_path, toml_str.as_bytes())?;
@@ -141,7 +143,10 @@ pub fn load_session() -> Result<Option<SessionData>, String> {
 
     // (b) Unknown schema version.
     if data.version != 1 {
-        let msg = format!("session: unknown schema version {} in {:?}", data.version, path);
+        let msg = format!(
+            "session: unknown schema version {} in {:?}",
+            data.version, path
+        );
         log::warn!("{}", msg);
         return Err(msg);
     }
@@ -170,7 +175,11 @@ pub fn load_session() -> Result<Option<SessionData>, String> {
         }
     }
 
-    log::info!("session loaded from {:?} ({} buffers)", path, data.buffers.len());
+    log::info!(
+        "session loaded from {:?} ({} buffers)",
+        path,
+        data.buffers.len()
+    );
     Ok(Some(data))
 }
 
@@ -228,8 +237,16 @@ mod tests {
                 split_layout: SplitLayoutKind::Vertical,
                 active_pane: 1,
                 buffers: vec![
-                    BufferEntry { path: "/tmp/a.txt".to_string(), cursor_line: 1, cursor_col: 1 },
-                    BufferEntry { path: "/tmp/b.txt".to_string(), cursor_line: 3, cursor_col: 7 },
+                    BufferEntry {
+                        path: "/tmp/a.txt".to_string(),
+                        cursor_line: 1,
+                        cursor_col: 1,
+                    },
+                    BufferEntry {
+                        path: "/tmp/b.txt".to_string(),
+                        cursor_line: 3,
+                        cursor_col: 7,
+                    },
                 ],
             };
             save_session(&data).unwrap();

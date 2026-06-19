@@ -25,9 +25,18 @@ fn test_toggle_on_off() {
 
     // Toggle off.
     app.handle_action(Action::ToggleSoftWrap).unwrap();
-    assert!(!app.soft_wrap, "soft_wrap must be false after second toggle");
-    assert!(app.wrap_cache.is_none(), "cache must be None when wrap is off");
-    assert_eq!(app.buffers[0].scroll_offset.1, 0, "h-scroll must be 0 after toggle off");
+    assert!(
+        !app.soft_wrap,
+        "soft_wrap must be false after second toggle"
+    );
+    assert!(
+        app.wrap_cache.is_none(),
+        "cache must be None when wrap is off"
+    );
+    assert_eq!(
+        app.buffers[0].scroll_offset.1, 0,
+        "h-scroll must be 0 after toggle off"
+    );
 }
 
 #[test]
@@ -47,7 +56,10 @@ fn test_toggle_off_buffer_unchanged() {
     app.handle_action(Action::ToggleSoftWrap).unwrap();
 
     let after: String = app.buffers[0].rope.to_string();
-    assert_eq!(before, after, "buffer content must be unchanged after toggle cycle");
+    assert_eq!(
+        before, after,
+        "buffer content must be unchanged after toggle cycle"
+    );
 }
 
 #[test]
@@ -55,5 +67,8 @@ fn test_persistence_from_config() {
     let mut cfg = Config::default();
     cfg.soft_wrap = true;
     let app = App::new(cfg, vec![], EncodingId::Utf8, None, None);
-    assert!(app.soft_wrap, "App must start with soft_wrap=true when config says so");
+    assert!(
+        app.soft_wrap,
+        "App must start with soft_wrap=true when config says so"
+    );
 }

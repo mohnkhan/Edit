@@ -70,7 +70,9 @@ impl Ui {
         let statusbar_area = chunks[2];
 
         // ── Menu bar ─────────────────────────────────────────────────────────
-        let menubar = MenuBarWidget::new(app.theme, &app.menu_bar);
+        use crate::input::keymap::Action;
+        let toggle_states: &[(Action, bool)] = &[(Action::ToggleSoftWrap, app.soft_wrap)];
+        let menubar = MenuBarWidget::new(app.theme, &app.menu_bar, toggle_states);
         frame.render_widget(menubar, menubar_area);
 
         // ── Editor area ───────────────────────────────────────────────────────
@@ -80,7 +82,13 @@ impl Ui {
         match app.split_mode {
             SplitMode::Single => {
                 let wrap_starts = app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice());
-                let editor_widget = EditorWidget::new(buf, app.theme, show_line_numbers, app.soft_wrap, wrap_starts);
+                let editor_widget = EditorWidget::new(
+                    buf,
+                    app.theme,
+                    show_line_numbers,
+                    app.soft_wrap,
+                    wrap_starts,
+                );
                 frame.render_widget(editor_widget, editor_area);
             }
             SplitMode::Vertical => {
@@ -94,7 +102,13 @@ impl Ui {
                     editor_area.height,
                 );
                 frame.render_widget(
-                    EditorWidget::new(&app.buffers[0], app.theme, show_line_numbers, app.soft_wrap, app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice())),
+                    EditorWidget::new(
+                        &app.buffers[0],
+                        app.theme,
+                        show_line_numbers,
+                        app.soft_wrap,
+                        app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice()),
+                    ),
                     left_area,
                 );
                 let right_buf_idx = if app.buffers.len() > 1 {
@@ -103,14 +117,26 @@ impl Ui {
                     0
                 };
                 frame.render_widget(
-                    EditorWidget::new(&app.buffers[right_buf_idx], app.theme, show_line_numbers, app.soft_wrap, app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice())),
+                    EditorWidget::new(
+                        &app.buffers[right_buf_idx],
+                        app.theme,
+                        show_line_numbers,
+                        app.soft_wrap,
+                        app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice()),
+                    ),
                     right_area,
                 );
             }
         }
 
         // ── Status bar ────────────────────────────────────────────────────────
-        let status_bar = StatusBar::new(buf, app.theme, app.active_idx, app.buffers.len(), app.soft_wrap);
+        let status_bar = StatusBar::new(
+            buf,
+            app.theme,
+            app.active_idx,
+            app.buffers.len(),
+            app.soft_wrap,
+        );
         frame.render_widget(status_bar, statusbar_area);
 
         // ── Dialogs (overlaid) ────────────────────────────────────────────────
