@@ -11,16 +11,18 @@ subsystem.
 ## Project Overview
 
 **Goal:** A Linux-compatible reimplementation of Microsoft's EDIT.COM (MS-DOS text editor), packaged
-as a modern Linux application. The editor wraps a DOS-style UI clone (FreeDOS EDIT lineage or a
-ncurses-based equivalent) and enforces UTF-8/Unicode throughout the toolchain and runtime.
+as a modern Linux application. The editor recreates the DOS-style look-and-feel as a native **Rust**
+TUI and enforces UTF-8/Unicode throughout the toolchain and runtime. It is developed standalone and
+is destined to ship as the built-in text editor component of **MyOS**.
 
 **Key design constraints:**
 - Build target: Linux (x86_64, aarch64); no DOS/DPMI runtime dependency
 - UI: full DOS-like look-and-feel (blue background, pull-down menus, F-key bindings, status bar)
 - Encoding: UTF-8 everywhere — source files, runtime locale (`LC_ALL=en_US.UTF-8`), file I/O,
   clipboard; legacy CP437/CP850 input must transcode on read
-- Toolchain: gcc/clang + make/cmake; ncurses or PDCurses for terminal rendering
-- Distribution: single static or minimally-dynamic binary; no X11/Wayland dependency
+- Toolchain: **Rust** (cargo + rustc, MSRV 1.74, edition 2021); `ratatui` + `crossterm` for terminal
+  rendering, `ropey` for the text buffer, `encoding_rs`/`oem_cp` for transcoding, `rhai` for plugins
+- Distribution: single static (musl) or minimally-dynamic binary; no X11/Wayland dependency
 
 ## AI Context File Ecosystem
 
@@ -53,27 +55,32 @@ symlinked `AGENT.MD` / `GEMINI.MD` stay accurate.
   any AI system (Claude, Gemini, GPT, …) anywhere user-facing: commits, PR bodies, issue bodies,
   comments, or docs. Strip any "Generated with …" footer before `gh pr create`.
 - **UTF-8 hygiene** — All source files must be UTF-8. Any function that reads external bytes must
-  validate or transcode before passing to the editor buffer. Never widen `char` paths to accept raw
-  bytes — use the `utf8_*` helpers in `src/encoding/`.
+  validate or transcode before passing to the editor buffer. Never construct buffer text directly
+  from raw `&[u8]` — decode/transcode through the helpers in `src/encoding/` (`detect.rs` /
+  `transcode.rs`) so all text enters the rope as valid UTF-8.
 
 ## Workflow Shortcuts
 
-- **Build** — `make` builds the debug binary; `make release` builds the stripped release binary;
-  `make check` runs unit tests; `make ci-local` runs the full gate (format → lint → tests →
-  integration smoke).
-- **Run** — `./edit [file]` launches the editor. Set `EDIT_LOCALE=C.UTF-8` to override the
-  detected locale. Pass `--legacy-cp437` to enable CP437→UTF-8 transcoding on file open.
+- **Build** — `make` (`cargo build`) builds the debug binary; `make release` builds the stripped
+  release binary (LTO); `make static` builds the musl static binary; `make check` (`cargo test`)
+  runs unit + integration tests; `make ci-local` runs the full gate (`cargo fmt --check` → `cargo
+  clippy -D warnings` → `cargo test` → `make smoke` → `make perf-check`).
+- **Run** — `./target/debug/edit [file]` (or `./edit`) launches the editor. Pass `--locale C.UTF-8`
+  to override the detected locale, `--debug` to enable debug logging, and `--legacy-cp437` to enable
+  CP437→UTF-8 transcoding on file open.
 - **Debugging order:**
-  - Rendering glitch → set `EDIT_DEBUG_RENDER=1` and capture the ncurses trace (`NCURSES_TRACE`).
+  - Rendering glitch → run with `--debug` (and `RUST_LOG=debug`); inspect the log under
+    `$XDG_STATE_HOME/edit/logs/`. Rendering goes through `ratatui`/`crossterm` (`src/ui/`).
   - Encoding issue → run `file <path>` and `hexdump -C <path>` before touching the editor code.
-  - Key-binding regression → check `src/input/keymap.c` and the DOS scan-code mapping table.
-  - Crash/SIGSEGV → build with `make debug-asan` (AddressSanitizer enabled) and reproduce.
+  - Key-binding regression → check `src/input/keymap.rs` and the DOS scan-code mapping table.
+  - Crash/panic → set `RUST_BACKTRACE=1` and reproduce on the debug build; check the crash report
+    under `$XDG_STATE_HOME/edit/crash-<timestamp>.log`.
 - **Locale enforcement** — Integration tests always launch with `LC_ALL=C.UTF-8 LANG=C.UTF-8`.
-  Never hardcode `setlocale(LC_ALL, "")` without a fallback that logs the resolved locale.
+  Locale resolution must always fall back gracefully and log the resolved locale.
 
 ## Deep Reference
 
-For per-feature detail (ncurses rendering pipeline, UTF-8 buffer internals, CP437 transcoding
+For per-feature detail (`ratatui` rendering pipeline, UTF-8 rope-buffer internals, CP437 transcoding
 table, keybinding scan-code map, build flag matrix, integration test harness) see
 `docs/ai-context-reference.md` and the `specs/NNN-*/` directories it links. Open them on demand;
 they are intentionally not loaded into every turn.
