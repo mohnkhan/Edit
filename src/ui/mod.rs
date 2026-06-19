@@ -8,6 +8,7 @@
 pub mod dialog;
 pub mod editor;
 pub mod menubar;
+pub mod plugin_manager;
 pub mod statusbar;
 pub mod theme;
 pub mod wrap;
@@ -261,6 +262,56 @@ impl Ui {
                 theme: app.theme,
             };
             frame.render_widget(dialog, size);
+        }
+
+        // Feature 008 — Plugin consent dialog (exclusive modal; highest priority).
+        if let Some(plugin) = app.pending_plugin_consent.first() {
+            let body = crate::ui::plugin_manager::consent_body(plugin);
+            let dh = (crate::ui::plugin_manager::line_count(&body) + 2).min(size.height);
+            let dw = 64u16.min(size.width);
+            let dialog = ratatui::widgets::Paragraph::new(body)
+                .style(
+                    ratatui::style::Style::default()
+                        .fg(app.theme.menubar_fg)
+                        .bg(app.theme.menubar_bg),
+                )
+                .block(
+                    ratatui::widgets::Block::default()
+                        .title("Plugin Consent")
+                        .borders(ratatui::widgets::Borders::ALL),
+                );
+            let dx = size.x + size.width.saturating_sub(dw) / 2;
+            let dy = size.y + size.height.saturating_sub(dh) / 2;
+            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
+            frame.render_widget(ratatui::widgets::Clear, dialog_area);
+            frame.render_widget(dialog, dialog_area);
+            return;
+        }
+
+        // Feature 008 — Plugin manager dialog.
+        if app.pending_plugin_manager {
+            let body = crate::ui::plugin_manager::manager_body(
+                &app.plugin_host,
+                app.plugin_manager_cursor,
+            );
+            let dh = (crate::ui::plugin_manager::line_count(&body) + 2).min(size.height);
+            let dw = 70u16.min(size.width);
+            let dialog = ratatui::widgets::Paragraph::new(body)
+                .style(
+                    ratatui::style::Style::default()
+                        .fg(app.theme.menubar_fg)
+                        .bg(app.theme.menubar_bg),
+                )
+                .block(
+                    ratatui::widgets::Block::default()
+                        .title("Plugins")
+                        .borders(ratatui::widgets::Borders::ALL),
+                );
+            let dx = size.x + size.width.saturating_sub(dw) / 2;
+            let dy = size.y + size.height.saturating_sub(dh) / 2;
+            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
+            frame.render_widget(ratatui::widgets::Clear, dialog_area);
+            frame.render_widget(dialog, dialog_area);
         }
     }
 }

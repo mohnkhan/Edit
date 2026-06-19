@@ -11,6 +11,7 @@ mod diagnostics;
 mod encoding;
 mod highlight;
 mod input;
+mod plugin;
 mod search;
 mod security;
 mod session;
@@ -178,6 +179,12 @@ fn build_cli() -> Command {
                 .long("no-watch")
                 .action(ArgAction::SetTrue)
                 .help("Disable external file modification watching"),
+        )
+        .arg(
+            Arg::new("no-plugins")
+                .long("no-plugins")
+                .action(ArgAction::SetTrue)
+                .help("Disable all plugin loading for this session"),
         )
 }
 

@@ -1,0 +1,6 @@
+id = "bad-tokens"
+name = "Bad Tokens (test)"
+version = "1.0.0"
+host_api = "^1"
+types = ["highlighter"]
+extensions = [".lua"]

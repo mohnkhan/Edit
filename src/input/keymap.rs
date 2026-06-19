@@ -84,6 +84,12 @@ pub enum Action {
     ReloadFile,
     /// User chose to keep in-editor version after external modification.
     DismissExternalChange,
+
+    // Feature 008 — Plugin API
+    /// Open the Options > Plugins manager dialog.
+    OpenPluginManager,
+    /// Activate a plugin-contributed menu item: `(plugin_id, item_id)`.
+    PluginMenuActivated(String, String),
 }
 
 /// Maps canonical key-chord strings (e.g. `"Ctrl+S"`) to [`Action`] variants.
@@ -166,9 +172,71 @@ impl KeybindingMap {
         }
     }
 
+    /// Merge plugin-provided keybindings (Feature 008).
+    ///
+    /// Plugin bindings take precedence over built-ins (a conflict is logged at WARN),
+    /// EXCEPT safety-critical built-in bindings (Quit, Save) which a plugin may not steal —
+    /// such attempts are logged and discarded. Unknown action names are logged and skipped.
+    pub fn apply_plugin_bindings(&mut self, bindings: &[(String, String)]) {
+        for (key, action_str) in bindings {
+            match plugin_action_from_str(action_str) {
+                Some(action) => {
+                    if let Some(existing) = self.map.get(key.as_str()) {
+                        if is_safety_critical(existing) {
+                            log::warn!(
+                                "Plugin attempted to override safety-critical binding '{}' \
+                                 ({:?}); ignored.",
+                                key,
+                                existing
+                            );
+                            continue;
+                        }
+                        log::warn!("Plugin overrides built-in binding for '{}'.", key);
+                    }
+                    self.map.insert(key.clone(), action);
+                }
+                None => log::error!(
+                    "Unknown plugin action '{}' for key '{}'; skipping.",
+                    action_str,
+                    key
+                ),
+            }
+        }
+    }
+
     /// Look up the action bound to a canonical key-chord string.
     pub fn get_action(&self, key: &str) -> Option<&Action> {
         self.map.get(key)
+    }
+}
+
+/// Built-in actions a plugin must never be allowed to rebind.
+fn is_safety_critical(action: &Action) -> bool {
+    matches!(action, Action::Quit | Action::Save)
+}
+
+/// Resolve a plugin action name, accepting both PascalCase (config style) and the
+/// lowercase form used in plugin manifests (e.g. `"save"`).
+fn plugin_action_from_str(s: &str) -> Option<Action> {
+    if let Some(a) = action_from_str(s) {
+        return Some(a);
+    }
+    match s.to_ascii_lowercase().as_str() {
+        "save" => Some(Action::Save),
+        "saveas" => Some(Action::SaveAs),
+        "quit" => Some(Action::Quit),
+        "open" => Some(Action::Open),
+        "close" => Some(Action::Close),
+        "cut" => Some(Action::Cut),
+        "copy" => Some(Action::Copy),
+        "paste" => Some(Action::Paste),
+        "undo" => Some(Action::Undo),
+        "redo" => Some(Action::Redo),
+        "find" => Some(Action::Find),
+        "findnext" => Some(Action::FindNext),
+        "findprev" => Some(Action::FindPrev),
+        "selectall" => Some(Action::SelectAll),
+        _ => None,
     }
 }
 

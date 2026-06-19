@@ -138,10 +138,16 @@ static VIEW_MENU: &[MenuItem] = &[
 ];
 
 /// Options menu items.
-static OPTIONS_MENU: &[MenuItem] = &[MenuItem {
-    label: "Toggle Highlight",
-    action: Action::ToggleHighlight,
-}];
+static OPTIONS_MENU: &[MenuItem] = &[
+    MenuItem {
+        label: "Toggle Highlight",
+        action: Action::ToggleHighlight,
+    },
+    MenuItem {
+        label: "Plugins...",
+        action: Action::OpenPluginManager,
+    },
+];
 
 /// Help menu items.
 static HELP_MENU: &[MenuItem] = &[MenuItem {

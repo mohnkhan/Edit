@@ -110,6 +110,11 @@ pub struct Config {
     /// Default: `false`
     #[serde(default)]
     pub no_watch: bool,
+
+    /// Set by `--no-plugins` CLI flag; suppresses all plugin loading for the session.
+    /// Does not modify persisted per-plugin consent in `plugins.toml`.
+    #[serde(skip)]
+    pub no_plugins: bool,
 }
 
 impl Default for Config {
@@ -129,6 +134,7 @@ impl Default for Config {
             locale_override: None,
             no_session: false,
             no_watch: false,
+            no_plugins: false,
         }
     }
 }

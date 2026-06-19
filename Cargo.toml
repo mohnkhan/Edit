@@ -32,6 +32,8 @@ env_logger = "0.11"
 signal-hook = "0.3"
 arboard = "3"
 notify = "6"
+rhai = { version = "1", features = ["sync"] }
+semver = "1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -68,6 +70,10 @@ path = "tests/integration/soft_wrap.rs"
 [[test]]
 name = "file_watch"
 path = "tests/integration/file_watch.rs"
+
+[[test]]
+name = "plugin_api"
+path = "tests/integration/plugin_api.rs"
 
 [[bench]]
 name = "startup"

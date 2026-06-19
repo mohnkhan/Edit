@@ -1,0 +1,10 @@
+id = "custom-keys"
+name = "Custom Keys"
+version = "1.0.0"
+host_api = "^1"
+types = ["keybinding"]
+publisher = "edit reference plugins"
+description = "Adds an F9 = Save keybinding. Keybinding plugins are manifest-only (no script)."
+
+[keybindings]
+"F9" = "save"

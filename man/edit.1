@@ -33,6 +33,11 @@ Disable syntax highlighting.
 Skip the session restore prompt on startup. The editor opens a blank buffer even when
 a previous session file exists.
 .TP
+.BR \-\-no-plugins
+Disable all plugin loading for this session. Installed plugins are not scanned, loaded, or
+prompted for. Does not modify saved per-plugin consent in
+.IR $XDG_CONFIG_HOME/edit/plugins.toml .
+.TP
 .BR \-d ", " \-\-debug
 Enable verbose diagnostic logging.
 .TP

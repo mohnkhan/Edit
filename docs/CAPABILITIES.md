@@ -21,6 +21,7 @@ edit [OPTIONS] [FILE...]
 | `--no-autosave` | Disable auto-save and crash recovery |
 | `--no-session` | Skip the session restore prompt on startup; open a blank buffer |
 | `--no-watch` | Disable external file modification watching for this session |
+| `--no-plugins` | Disable all plugin loading for this session (does not change saved consent) |
 | `--readonly` | Open all files in read-only mode |
 | `--locale <LOC>` | Override locale detection (e.g. `C.UTF-8`) |
 | `--legacy-cp437` | Enable CP437→UTF-8 transcoding on file open |
@@ -149,6 +150,19 @@ edit [OPTIONS] [FILE...]
 - Line Numbers (toggle)
 - Syntax Highlighting (toggle)
 - Auto-save (toggle)
+- Plugins… (open the plugin manager dialog)
+
+### Plugins (Feature 008)
+- Plugins are installed in `$XDG_CONFIG_HOME/edit/plugins/<id>/` as a `plugin.toml` manifest
+  plus an optional `plugin.rhai` script (Rhai language).
+- Plugin types: syntax highlighters, custom keybindings, menu items.
+- First run of a newly-installed plugin shows a one-time consent dialog
+  (`Enter` allow / `Esc` deny); decisions are saved in `$XDG_CONFIG_HOME/edit/plugins.toml`.
+- Plugin manager: **Options > Plugins** lists installed plugins and toggles them on/off
+  (`Up`/`Down` navigate, `Space` toggle, `Esc` close).
+- Sandbox: plugins have no filesystem/process/network access except a permission-gated
+  `read_file`; each call is bounded to 50 ms; misbehaving plugins are disabled for the session.
+- `--no-plugins` disables all plugins for a session without changing saved consent.
 
 ### View
 - Split View
