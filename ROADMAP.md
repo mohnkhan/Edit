@@ -30,7 +30,7 @@
 - **Status**: Complete as of 2026-06-19
 - **Description**: Optional soft-wrap visual rendering (`»` continuation marker, Alt+Z / View menu,
   `soft_wrap` config key, `[WRAP]` status-bar indicator, visual-row-aware scrolling and mouse).
-- **Remaining follow-up**: Menu check-indicator (#13 — deferred from feature 005).
+- **Follow-up shipped**: Menu check-indicator (#13) — implemented in feature 006.
 
 ### UTF-16 Transcoding
 - **Issue**: #5 (closed — implemented in feature 002)
@@ -52,18 +52,11 @@
 - **Label**: `follow-up`
 
 ### Menu Item Checked-State Indicator
-- **Issue**: #13
-- **Status**: Deferred from feature 005
-- **Description**: The View > "Soft Wrap (ext)" menu item currently has no visual checked/unchecked
-  state indicator. FR-001 of feature 005 requires checked/unchecked feedback; the `[WRAP]` status
-  bar indicator serves as a workaround for v1.
-- **Why deferred**: The `MenuItem` struct in `src/ui/menubar.rs` has no `checked: bool` field or
-  checkmark rendering path. Adding it is a menu-bar-wide refactor (affects all toggleable menu items)
-  that exceeds the scope of feature 005.
-- **Suggested approach**: Add `checked: Option<bool>` field to `MenuItem`; render a `✓` prefix in
-  the dropdown for `Some(true)`. Wire `App` to pass checked state when building menu event data.
-- **Effort**: Small (~1 day)
-- **Label**: `follow-up`
+- **Issue**: #13 (closed — implemented in feature 006)
+- **Status**: Shipped 2026-06-19 (branch `006-menu-check-state-indicator`)
+- **Description**: View > "Soft Wrap (ext)" and any future toggleable menu items display a `✓`
+  (U+2713) prefix when active via `MenuBarWidget::toggle_states: &[(Action, bool)]`. Implemented
+  as a general mechanism (FR-007): no per-item bespoke code required for future toggleable items.
 
 ### Session Restore
 - **Issue**: #6

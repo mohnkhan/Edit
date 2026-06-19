@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — feature 006: Menu Check-State Indicator
+
+### Added
+
+- **Check-state indicator** (non-DOS extension): toggleable View menu items now display a `✓`
+  (U+2713) prefix when their associated toggle is active, and a 2-space filler when inactive,
+  maintaining consistent label alignment across all items in the dropdown.
+- `toggle_states: &'a [(Action, bool)]` field on `MenuBarWidget<'a>`: a zero-cost, zero-allocation
+  runtime mapping from action to checked/unchecked boolean, read fresh every render frame from
+  `App`'s authoritative state (never stale).
+- `lookup_checked()` private helper in `src/ui/menubar.rs`: O(n) slice scan to resolve check state
+  for a given action; n ≤ 8 items per dropdown.
+- `has_checkable` per-dropdown flag: when `true`, expands `content_width` by 2 and shifts all item
+  labels by 2 columns so the prefix column and label column are consistent across all items
+  (FR-008 alignment guarantee).
+- **"Soft Wrap (ext)"** in the View menu now reflects `App::soft_wrap` state: shows `✓ Soft Wrap
+  (ext)` when soft-wrap is ON, plain `Soft Wrap (ext)` when OFF.
+- General mechanism: any future toggleable item (in any menu) can participate by adding an entry to
+  the `toggle_states` slice at the `Ui::render()` call site in `src/ui/mod.rs` — no further changes
+  to `src/ui/menubar.rs` required (FR-007).
+- 7 unit tests in `src/ui/menubar.rs` covering: checked/unchecked rendering, non-toggleable menu
+  isolation, label alignment, action-agnostic generality (FR-007), empty-toggle-states regression,
+  and config-persisted initial state (US3).
+- Closes issue #13 (deferred from feature 005).
+
+### Changed
+
+- `MenuBarWidget::new()` signature: accepts a third `toggle_states: &'a [(Action, bool)]` argument.
+  Call site in `src/ui/mod.rs` updated to pass `&[(Action::ToggleSoftWrap, app.soft_wrap)]`.
+
+---
+
 ## [Unreleased] — feature 005: Soft-Wrap Mode
 
 ### Added

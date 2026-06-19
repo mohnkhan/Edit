@@ -155,6 +155,8 @@ edit [OPTIONS] [FILE...]
 - Prev Buffer
 - Toggle Line Nos
 - Soft Wrap (ext) (`Alt+Z`) — non-DOS extension; wraps long lines at terminal width
+  - Shows `✓ Soft Wrap (ext)` when soft-wrap is **ON** (check-state indicator, non-DOS extension)
+  - Shows `  Soft Wrap (ext)` (2-space indent) when **OFF**, maintaining label alignment
 
 ### Help
 - About

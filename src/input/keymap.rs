@@ -323,7 +323,10 @@ mod tests {
 
     #[test]
     fn test_save_as_encoding_round_trips_action_from_str() {
-        assert_eq!(action_from_str("SaveAsEncoding"), Some(Action::SaveAsEncoding));
+        assert_eq!(
+            action_from_str("SaveAsEncoding"),
+            Some(Action::SaveAsEncoding)
+        );
     }
 
     #[test]
@@ -334,6 +337,9 @@ mod tests {
 
     #[test]
     fn test_toggle_soft_wrap_round_trips_action_from_str() {
-        assert_eq!(action_from_str("ToggleSoftWrap"), Some(Action::ToggleSoftWrap));
+        assert_eq!(
+            action_from_str("ToggleSoftWrap"),
+            Some(Action::ToggleSoftWrap)
+        );
     }
 }

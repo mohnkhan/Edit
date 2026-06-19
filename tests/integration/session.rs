@@ -117,7 +117,10 @@ fn test_no_session_flag_skips_load() {
         } else {
             (None, None)
         };
-        assert!(session.is_none(), "session must be None when --no-session is set");
+        assert!(
+            session.is_none(),
+            "session must be None when --no-session is set"
+        );
         assert!(warning.is_none(), "no warning when --no-session is set");
     });
 }
@@ -140,7 +143,10 @@ fn test_explicit_files_bypass() {
         } else {
             (None, None)
         };
-        assert!(session.is_none(), "session must be None when explicit files provided");
+        assert!(
+            session.is_none(),
+            "session must be None when explicit files provided"
+        );
         assert!(warning.is_none());
     });
 }
@@ -186,7 +192,11 @@ fn test_partial_restore_skips_missing() {
         app.do_restore_session();
 
         // Only the surviving file should be in buffers.
-        assert_eq!(app.buffers.len(), 1, "only surviving file should be restored");
+        assert_eq!(
+            app.buffers.len(),
+            1,
+            "only surviving file should be restored"
+        );
         assert_eq!(app.active_idx, 0, "active_idx must be clamped to 0");
         let msg = app.status_message.as_deref().unwrap_or("");
         assert!(

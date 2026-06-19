@@ -1,7 +1,7 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.2.0 (dev — feature 005 complete)
+**Version**: 0.2.0 (dev — feature 006 complete)
 **Last updated**: 2026-06-19
 
 ## Implementation Status
@@ -14,6 +14,9 @@
 | F002-US2 | UTF-16 LE/BE decode/encode with full round-trip and surrogate-pair support | Complete |
 | F002-US3 | `--encoding utf-16-le/be` CLI aliases via `encoding_from_str()` | Complete |
 | F002-US4 | Save-As encoding selection UI (interactive dialog) | Deferred (#9) |
+| F006-US1 | View menu "Soft Wrap (ext)" shows `✓` prefix when soft-wrap is ON; no prefix when OFF | Complete |
+| F006-US2 | Check-state mechanism general: any action/bool pair in `toggle_states` shows `✓` | Complete |
+| F006-US3 | Check-state reflects config-persisted `soft_wrap=true` on first render (no toggle needed) | Complete |
 | F005-US1 | Soft-wrap visual rendering with `»` continuation marker; Alt+Z / View menu | Complete |
 | F005-US2 | Cursor, Home/End, mouse click work on logical lines in wrap mode | Complete |
 | F005-US3 | Soft-wrap setting persisted to `config.toml` via atomic write | Complete |
@@ -87,9 +90,6 @@ Runs in order:
 5. `make perf-check` — benchmarks (non-regressing, results logged)
 
 ## Known Limitations
-
-- Soft-wrap menu check-indicator (✓ next to "Soft Wrap (ext)" when active) not implemented; the
-  `[WRAP]` status-bar indicator serves as a workaround (deferred; see `ROADMAP.md`)
 - External file modification detection (`inotify`) not implemented (deferred; see `ROADMAP.md`)
 - Plugin API not implemented (deferred; see `ROADMAP.md`)
 - Mouse support requires a terminal emulator that reports mouse events in crossterm's supported protocol

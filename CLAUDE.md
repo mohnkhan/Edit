@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/005-soft-wrap-mode/plan.md`
+at specs/006-menu-check-state-indicator/plan.md
 <!-- SPECKIT END -->
 
 This is the always-loaded behavioral summary. Per-feature implementation detail and the rationale

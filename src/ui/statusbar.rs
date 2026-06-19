@@ -193,13 +193,19 @@ mod tests {
     #[test]
     fn flags_contains_wrap_when_enabled() {
         let sb = make_status_bar(true);
-        assert!(sb.flags().contains("[WRAP]"), "expected [WRAP] in flags when soft_wrap is true");
+        assert!(
+            sb.flags().contains("[WRAP]"),
+            "expected [WRAP] in flags when soft_wrap is true"
+        );
     }
 
     #[test]
     fn flags_no_wrap_when_disabled() {
         let sb = make_status_bar(false);
-        assert!(!sb.flags().contains("[WRAP]"), "[WRAP] must be absent when soft_wrap is false");
+        assert!(
+            !sb.flags().contains("[WRAP]"),
+            "[WRAP] must be absent when soft_wrap is false"
+        );
     }
 
     #[test]

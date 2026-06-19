@@ -594,7 +594,11 @@ impl App {
         let active_pane = match self.split_mode {
             crate::ui::SplitMode::Single => 0,
             crate::ui::SplitMode::Vertical => {
-                if self.active_idx > 0 { 1 } else { 0 }
+                if self.active_idx > 0 {
+                    1
+                } else {
+                    0
+                }
             }
         };
 
@@ -653,7 +657,9 @@ impl App {
                     let max_gcol = buf.rope.grapheme_count_on_line(clamped_line);
                     let clamped_gcol = target_gcol.min(max_gcol);
                     let vcol = crate::buffer::CursorPos::visual_col_from_grapheme_col(
-                        &buf.rope, clamped_line, clamped_gcol,
+                        &buf.rope,
+                        clamped_line,
+                        clamped_gcol,
                     );
                     buf.cursor = crate::buffer::CursorPos {
                         line: clamped_line,
@@ -1655,7 +1661,11 @@ impl App {
                         // Default: walk logical line to find byte=start_byte → grapheme col.
                         line_str
                             .graphemes(true)
-                            .scan(0usize, |b, g| { let c = *b; *b += g.len(); Some((c, g)) })
+                            .scan(0usize, |b, g| {
+                                let c = *b;
+                                *b += g.len();
+                                Some((c, g))
+                            })
                             .take_while(|(b, _)| *b < start_byte)
                             .count()
                     };
@@ -1874,13 +1884,7 @@ mod tests {
     use crate::encoding::EncodingId;
 
     fn make_app() -> App {
-        App::new(
-            Config::default(),
-            vec![],
-            EncodingId::Utf8,
-            None,
-            None,
-        )
+        App::new(Config::default(), vec![], EncodingId::Utf8, None, None)
     }
 
     fn make_app_with_encoding(enc: EncodingId) -> App {
@@ -1957,7 +1961,7 @@ mod tests {
         // Start with UTF-8 encoding.
         assert_eq!(app.buffers[0].encoding, EncodingId::Utf8);
         app.pending_encoding_select = Some(3); // e.g. CP437 selected
-        // Cancel via MenuClose.
+                                               // Cancel via MenuClose.
         app.handle_action(Action::MenuClose).unwrap();
         // Dialog closed.
         assert_eq!(app.pending_encoding_select, None);
@@ -1965,7 +1969,9 @@ mod tests {
         assert_eq!(app.buffers[0].encoding, EncodingId::Utf8);
         // No status message about encoding change.
         assert!(
-            app.status_message.as_deref().map_or(true, |m| !m.starts_with("Saved as")),
+            app.status_message
+                .as_deref()
+                .map_or(true, |m| !m.starts_with("Saved as")),
             "cancel must not produce a 'Saved as' message"
         );
     }
@@ -1977,14 +1983,24 @@ mod tests {
         let path = std::env::temp_dir().join("edit_test_persist.txt");
         std::fs::write(&path, b"Hello").unwrap();
 
-        let mut app = App::new(Config::default(), vec![path.clone()], EncodingId::Utf8, None, None);
+        let mut app = App::new(
+            Config::default(),
+            vec![path.clone()],
+            EncodingId::Utf8,
+            None,
+            None,
+        );
         // Save as UTF-16 LE via do_save_as_encoding (Case A).
         app.do_save_as_encoding(EncodingId::Utf16Le);
         // Subsequent regular save must use the new encoding.
         app.buffers[0].save().unwrap();
         let bytes = std::fs::read(&path).unwrap();
         let _ = std::fs::remove_file(&path);
-        assert_eq!(bytes[0..2], [0xFF, 0xFE], "file must start with UTF-16 LE BOM");
+        assert_eq!(
+            bytes[0..2],
+            [0xFF, 0xFE],
+            "file must start with UTF-16 LE BOM"
+        );
     }
 
     // ── T019 — Dialog reopens with updated preselect ─────────────────────────
@@ -1994,7 +2010,13 @@ mod tests {
         let path = std::env::temp_dir().join("edit_test_preselect.txt");
         std::fs::write(&path, b"Hello").unwrap();
 
-        let mut app = App::new(Config::default(), vec![path.clone()], EncodingId::Utf8, None, None);
+        let mut app = App::new(
+            Config::default(),
+            vec![path.clone()],
+            EncodingId::Utf8,
+            None,
+            None,
+        );
         app.do_save_as_encoding(EncodingId::Utf16Be);
         let _ = std::fs::remove_file(&path);
         // Re-open dialog — must pre-select UTF-16 BE (index 2).
@@ -2025,7 +2047,10 @@ mod tests {
         // The write may fail (no actual FS write in make_app), but the
         // encoding assignment happens before the write. We care that
         // pending_save_as_encoding was consumed and the buffer encoding set.
-        assert_eq!(app.pending_save_as_encoding, None, "pending must be cleared");
+        assert_eq!(
+            app.pending_save_as_encoding, None,
+            "pending must be cleared"
+        );
         assert_eq!(
             app.active_buffer().encoding,
             EncodingId::Utf16Le,
@@ -2058,7 +2083,10 @@ mod tests {
         // Toggle on.
         app.handle_action(Action::ToggleSoftWrap).unwrap();
         assert!(app.soft_wrap, "soft_wrap must be true after toggle");
-        assert!(app.wrap_cache.is_some(), "wrap_cache must be Some after enabling");
+        assert!(
+            app.wrap_cache.is_some(),
+            "wrap_cache must be Some after enabling"
+        );
     }
 
     #[test]
@@ -2069,9 +2097,18 @@ mod tests {
         app.handle_action(Action::ToggleSoftWrap).unwrap();
         app.buffers[0].scroll_offset.1 = 10; // simulate horizontal scroll while on
         app.handle_action(Action::ToggleSoftWrap).unwrap();
-        assert!(!app.soft_wrap, "soft_wrap must be false after second toggle");
-        assert!(app.wrap_cache.is_none(), "wrap_cache must be None after disabling");
-        assert_eq!(app.buffers[0].scroll_offset.1, 0, "h-scroll must be reset on disable");
+        assert!(
+            !app.soft_wrap,
+            "soft_wrap must be false after second toggle"
+        );
+        assert!(
+            app.wrap_cache.is_none(),
+            "wrap_cache must be None after disabling"
+        );
+        assert_eq!(
+            app.buffers[0].scroll_offset.1, 0,
+            "h-scroll must be reset on disable"
+        );
     }
 
     #[test]
@@ -2079,15 +2116,23 @@ mod tests {
         let mut app = make_app_with_long_line();
         app.terminal_size = (40, 24);
         // Move cursor to col 5.
-        for _ in 0..5 { app.move_cursor(Direction::Right); }
+        for _ in 0..5 {
+            app.move_cursor(Direction::Right);
+        }
         let cursor_before = app.buffers[0].cursor;
         // Enable wrap.
         app.handle_action(Action::ToggleSoftWrap).unwrap();
         // Disable wrap.
         app.handle_action(Action::ToggleSoftWrap).unwrap();
         let cursor_after = app.buffers[0].cursor;
-        assert_eq!(cursor_before.line, cursor_after.line, "line must be unchanged");
-        assert_eq!(cursor_before.grapheme_col, cursor_after.grapheme_col, "gcol must be unchanged");
+        assert_eq!(
+            cursor_before.line, cursor_after.line,
+            "line must be unchanged"
+        );
+        assert_eq!(
+            cursor_before.grapheme_col, cursor_after.grapheme_col,
+            "gcol must be unchanged"
+        );
     }
 
     #[test]
@@ -2100,12 +2145,17 @@ mod tests {
         app.buffers[0].modified = true;
         app.wrap_text_gen += 1;
         // Move cursor to middle.
-        for _ in 0..25 { app.move_cursor(Direction::Right); }
+        for _ in 0..25 {
+            app.move_cursor(Direction::Right);
+        }
         // Enable wrap.
         app.handle_action(Action::ToggleSoftWrap).unwrap();
         // Home should go to grapheme_col 0 of the logical line.
         app.move_line_start();
-        assert_eq!(app.buffers[0].cursor.grapheme_col, 0, "Home must go to col 0 of logical line");
+        assert_eq!(
+            app.buffers[0].cursor.grapheme_col, 0,
+            "Home must go to col 0 of logical line"
+        );
         assert_eq!(app.buffers[0].cursor.line, 0, "line must remain 0");
     }
 
@@ -2120,7 +2170,10 @@ mod tests {
         app.handle_action(Action::ToggleSoftWrap).unwrap();
         app.move_line_end();
         assert_eq!(app.buffers[0].cursor.line, 0, "line must remain 0");
-        assert_eq!(app.buffers[0].cursor.grapheme_col, 50, "End must go to col 50");
+        assert_eq!(
+            app.buffers[0].cursor.grapheme_col, 50,
+            "End must go to col 50"
+        );
     }
 
     #[test]
@@ -2137,7 +2190,10 @@ mod tests {
         assert_eq!(app.buffers[0].cursor.line, 0);
         // Down should go to line 1 (the logical next line).
         app.move_cursor(Direction::Down);
-        assert_eq!(app.buffers[0].cursor.line, 1, "Down must go to logical line 1");
+        assert_eq!(
+            app.buffers[0].cursor.line, 1,
+            "Down must go to logical line 1"
+        );
     }
 
     #[test]
@@ -2163,7 +2219,10 @@ mod tests {
 
         let saved = std::fs::read_to_string(&path).unwrap();
         let _ = std::fs::remove_file(&path);
-        assert_eq!(saved, content, "saved bytes must be identical to original content");
+        assert_eq!(
+            saved, content,
+            "saved bytes must be identical to original content"
+        );
     }
 }
 

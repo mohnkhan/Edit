@@ -64,7 +64,9 @@ impl WrapCache {
     /// Map a visual row index to (logical_line, start_byte_offset).
     /// Returns None if visual_row is out of range.
     pub fn visual_to_logical(&self, visual_row: usize) -> Option<(usize, u32)> {
-        self.visual_line_map.get(visual_row).map(|&(l, b)| (l as usize, b))
+        self.visual_line_map
+            .get(visual_row)
+            .map(|&(l, b)| (l as usize, b))
     }
 
     /// Total number of visual rows across all logical lines.
@@ -74,7 +76,10 @@ impl WrapCache {
 
     /// Number of visual rows for a single logical line.
     pub fn visual_row_count(&self, logical_line: usize) -> usize {
-        self.visual_starts.get(logical_line).map(|v| v.len()).unwrap_or(0)
+        self.visual_starts
+            .get(logical_line)
+            .map(|v| v.len())
+            .unwrap_or(0)
     }
 }
 
@@ -123,7 +128,7 @@ fn compute_line_wrap_starts(line: &str, viewport_width: u16) -> Vec<u32> {
                 let fragment = &line[break_at..byte_off];
                 col_after = fragment
                     .graphemes(true)
-                    .map(|g2| UnicodeWidthStr::width(g2))
+                    .map(UnicodeWidthStr::width)
                     .sum::<usize>();
             } else {
                 // Hard break at the current grapheme boundary (before current grapheme)

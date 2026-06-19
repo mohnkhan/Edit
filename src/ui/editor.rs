@@ -113,7 +113,11 @@ impl<'a> Widget for EditorWidget<'a> {
         // ── Soft-wrap rendering branch (Feature 005) ─────────────────────────
         if self.soft_wrap {
             if let Some(wrap_starts) = self.wrap_starts {
-                let gutter_cols = if self.show_line_numbers { Self::GUTTER_WIDTH } else { 0 };
+                let gutter_cols = if self.show_line_numbers {
+                    Self::GUTTER_WIDTH
+                } else {
+                    0
+                };
                 let content_width = area.width.saturating_sub(gutter_cols) as usize;
                 let content_x_start = area.left() + gutter_cols;
                 let scroll_visual_row = self.buffer.scroll_offset.0;
@@ -125,18 +129,27 @@ impl<'a> Widget for EditorWidget<'a> {
                 let mut screen_row: usize = 0;
 
                 'wrap_outer: for (logical_line, starts) in wrap_starts.iter().enumerate() {
-                    if logical_line >= total_lines { break; }
+                    if logical_line >= total_lines {
+                        break;
+                    }
                     let line_str = self.buffer.rope.line_slice(logical_line);
 
                     // Pre-compute cursor byte offset for this logical line.
                     let cursor_byte: Option<usize> = if cursor.line == logical_line {
-                        let b: usize = line_str.graphemes(true).take(cursor.grapheme_col).map(|g| g.len()).sum();
+                        let b: usize = line_str
+                            .graphemes(true)
+                            .take(cursor.grapheme_col)
+                            .map(|g| g.len())
+                            .sum();
                         Some(b)
                     } else {
                         None
                     };
 
-                    let hl_spans: Vec<Span> = self.buffer.syntax.as_ref()
+                    let hl_spans: Vec<Span> = self
+                        .buffer
+                        .syntax
+                        .as_ref()
                         .map(|h| h.highlight(&line_str))
                         .unwrap_or_default();
 
@@ -152,14 +165,18 @@ impl<'a> Widget for EditorWidget<'a> {
                             global_visual_row += 1;
                             continue;
                         }
-                        if screen_row >= visible_rows { break 'wrap_outer; }
+                        if screen_row >= visible_rows {
+                            break 'wrap_outer;
+                        }
 
                         let screen_y = area.top() + screen_row as u16;
                         screen_row += 1;
 
                         // Gutter.
                         if self.show_line_numbers {
-                            let gs = Style::default().fg(Color::DarkGray).bg(self.theme.background);
+                            let gs = Style::default()
+                                .fg(Color::DarkGray)
+                                .bg(self.theme.background);
                             let gt = if seg_idx == 0 {
                                 format!("{:3}|", logical_line + 1)
                             } else {
@@ -167,7 +184,9 @@ impl<'a> Widget for EditorWidget<'a> {
                             };
                             for (i, ch) in gt.chars().enumerate() {
                                 let gx = area.left() + i as u16;
-                                if gx >= content_x_start { break; }
+                                if gx >= content_x_start {
+                                    break;
+                                }
                                 buf.get_mut(gx, screen_y).set_style(gs).set_char(ch);
                             }
                         }
@@ -175,7 +194,9 @@ impl<'a> Widget for EditorWidget<'a> {
                         // Continuation marker '»'.
                         let text_offset = if seg_idx > 0 {
                             if content_width > 0 {
-                                buf.get_mut(content_x_start, screen_y).set_style(normal_style).set_symbol("»");
+                                buf.get_mut(content_x_start, screen_y)
+                                    .set_style(normal_style)
+                                    .set_symbol("»");
                             }
                             1usize
                         } else {
@@ -192,7 +213,9 @@ impl<'a> Widget for EditorWidget<'a> {
                             let gbytes = grapheme.len();
                             let abs_byte = seg_start + byte_in_seg;
 
-                            if screen_col + gw > content_width { break; }
+                            if screen_col + gw > content_width {
+                                break;
+                            }
 
                             let is_cursor = cursor_byte == Some(abs_byte);
                             let base_style = if is_cursor {
@@ -207,7 +230,9 @@ impl<'a> Widget for EditorWidget<'a> {
                             };
 
                             let px = content_x_start + screen_col as u16;
-                            buf.get_mut(px, screen_y).set_style(style).set_symbol(grapheme);
+                            buf.get_mut(px, screen_y)
+                                .set_style(style)
+                                .set_symbol(grapheme);
                             screen_col += gw;
                             byte_in_seg += gbytes;
                         }
@@ -217,7 +242,9 @@ impl<'a> Widget for EditorWidget<'a> {
                             if let Some(cb) = cursor_byte {
                                 if cb >= line_str.len() && screen_col < content_width {
                                     let px = content_x_start + screen_col as u16;
-                                    buf.get_mut(px, screen_y).set_style(cursor_style).set_char(' ');
+                                    buf.get_mut(px, screen_y)
+                                        .set_style(cursor_style)
+                                        .set_char(' ');
                                 }
                             }
                         }
