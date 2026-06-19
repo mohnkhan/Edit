@@ -17,7 +17,7 @@
 | F002-US1 | UTF-16 LE/BE auto-detect (BOM sniffing) | Complete |
 | F002-US2 | UTF-16 LE/BE decode/encode with full round-trip and surrogate-pair support | Complete |
 | F002-US3 | `--encoding utf-16-le/be` CLI aliases via `encoding_from_str()` | Complete |
-| F002-US4 | Save-As encoding selection UI (interactive dialog) | Deferred (#9) |
+| F002-US4 | Save-As encoding selection UI (interactive dialog) | Complete (feat 004) |
 | F006-US1 | View menu "Soft Wrap (ext)" shows `✓` prefix when soft-wrap is ON; no prefix when OFF | Complete |
 | F006-US2 | Check-state mechanism general: any action/bool pair in `toggle_states` shows `✓` | Complete |
 | F006-US3 | Check-state reflects config-persisted `soft_wrap=true` on first render (no toggle needed) | Complete |
