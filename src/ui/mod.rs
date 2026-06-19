@@ -386,7 +386,12 @@ fn render_help_overlay(frame: &mut Frame, app: &App, screen: HelpScreen, size: R
                 "A UTF-8 native, DOS-faithful EDIT.COM for the modern terminal.".into(),
                 "Runs on Linux, FreeBSD, macOS, and MyOS.".into(),
                 "".into(),
-                "© 2026 MyOS project — Licensed under MPL-2.0.".into(),
+                format!("Author: {}", env!("CARGO_PKG_AUTHORS")),
+                format!(
+                    "© 2026 {} — Licensed under MPL-2.0.",
+                    env!("CARGO_PKG_AUTHORS")
+                ),
+                "Created as the built-in editor for the MyOS project.".into(),
                 "".into(),
                 "Press Esc to close.".into(),
             ],
