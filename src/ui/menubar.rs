@@ -42,7 +42,7 @@ pub struct MenuItem {
 static FILE_MENU: &[MenuItem] = &[
     MenuItem {
         label: "New",
-        action: Action::Noop,
+        action: Action::New,
     },
     MenuItem {
         label: "Open",
@@ -151,10 +151,16 @@ static OPTIONS_MENU: &[MenuItem] = &[
 ];
 
 /// Help menu items.
-static HELP_MENU: &[MenuItem] = &[MenuItem {
-    label: "Help",
-    action: Action::Help,
-}];
+static HELP_MENU: &[MenuItem] = &[
+    MenuItem {
+        label: "Help",
+        action: Action::Help,
+    },
+    MenuItem {
+        label: "About",
+        action: Action::About,
+    },
+];
 
 /// All six menus in display order. Index matches `MenuBarState::open_menu(idx)`.
 static ALL_MENUS: &[&[MenuItem]] = &[
@@ -562,7 +568,7 @@ impl<'a> MenuBarWidget<'a> {
 /// When the resolved set is exactly the built-in menus (no plugin menus), the
 /// exact historical columns are reproduced (FR-011 / SC-003 parity). Otherwise
 /// labels are laid out sequentially with a 2-space gap.
-fn bar_label_columns(menus: &[ResolvedMenu]) -> Vec<u16> {
+pub fn bar_label_columns(menus: &[ResolvedMenu]) -> Vec<u16> {
     let is_builtin_only = menus.len() == BAR_LABELS.len()
         && menus
             .iter()
@@ -578,6 +584,113 @@ fn bar_label_columns(menus: &[ResolvedMenu]) -> Vec<u16> {
         next += m.label.chars().count() as u16 + 2;
     }
     cols
+}
+
+/// Geometry of an open dropdown, shared by the renderer and mouse hit-testing
+/// so the drawn box and the clickable region can never drift apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DropdownLayout {
+    /// 0-based column where the dropdown box starts (clamped to the terminal).
+    pub start_col: u16,
+    /// Total width of the dropdown box (background fill width).
+    pub content_width: u16,
+    /// Column offset from the box edge at which item labels begin.
+    pub label_offset: u16,
+    /// Whether this dropdown reserves a check-mark prefix column.
+    pub has_checkable: bool,
+}
+
+/// Compute the [`DropdownLayout`] for the menu opened at `drop_col`.
+///
+/// `term_width` is the full terminal width (used to clamp the box so it never
+/// overflows the right edge). This mirrors the geometry the renderer applies.
+pub fn dropdown_layout(
+    menu: &ResolvedMenu,
+    drop_col: u16,
+    toggle_states: &[(Action, bool)],
+    term_width: u16,
+) -> DropdownLayout {
+    let has_checkable = menu
+        .items
+        .iter()
+        .any(|item| lookup_checked(toggle_states, &item.action).is_some());
+
+    let content_width: u16 = menu
+        .items
+        .iter()
+        .map(|it| it.label.len() as u16)
+        .max()
+        .unwrap_or(4)
+        + if has_checkable { 6 } else { 4 };
+
+    let label_offset: u16 = if has_checkable { 3 } else { 1 };
+    let start_col: u16 = drop_col.min(term_width.saturating_sub(content_width));
+
+    DropdownLayout {
+        start_col,
+        content_width,
+        label_offset,
+        has_checkable,
+    }
+}
+
+/// The result of hit-testing a mouse click against the menu bar and any open
+/// dropdown. Coordinates are 0-based terminal cells; the menu bar is row 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuHit {
+    /// A top-level menu label on row 0 was clicked.
+    TopLevel(usize),
+    /// A dropdown item was clicked.
+    Item { top_idx: usize, item_idx: usize },
+    /// The click landed outside any menu label or open dropdown.
+    Outside,
+}
+
+/// Hit-test a click at (`col`, `row`) against the resolved menus and current
+/// `state`, using the same geometry the widget renders with.
+pub fn hit_test_menu(
+    menus: &[ResolvedMenu],
+    state: &MenuState,
+    toggle_states: &[(Action, bool)],
+    term_width: u16,
+    col: u16,
+    row: u16,
+) -> MenuHit {
+    let columns = bar_label_columns(menus);
+
+    // Row 0: the top-level menu bar.
+    if row == 0 {
+        for (idx, menu) in menus.iter().enumerate() {
+            let start = columns.get(idx).copied().unwrap_or(0);
+            let width = menu.label.chars().count() as u16;
+            if col >= start && col < start + width {
+                return MenuHit::TopLevel(idx);
+            }
+        }
+        return MenuHit::Outside;
+    }
+
+    // Rows 1+: an open dropdown, if any.
+    if let MenuState::DropDown { top_idx, .. } = state {
+        if let Some(menu) = menus.get(*top_idx) {
+            let drop_col = columns.get(*top_idx).copied().unwrap_or(0);
+            let layout = dropdown_layout(menu, drop_col, toggle_states, term_width);
+            let item_count = menu.items.len() as u16;
+            // Items render on rows 1..=item_count (drop starts at row 1).
+            if row >= 1
+                && row <= item_count
+                && col >= layout.start_col
+                && col < layout.start_col + layout.content_width
+            {
+                return MenuHit::Item {
+                    top_idx: *top_idx,
+                    item_idx: (row - 1) as usize,
+                };
+            }
+        }
+    }
+
+    MenuHit::Outside
 }
 
 /// Return `Some(true)` if `action` is in `toggle_states` and checked,
@@ -650,34 +763,24 @@ impl<'a> Widget for MenuBarWidget<'a> {
                 None => return,
             };
 
-            // Compute the dropdown column: align with the bar label's start col,
-            // clamping so the dropdown doesn't run off the right edge.
+            // Compute the dropdown column: align with the bar label's start col.
             let drop_col: u16 = columns.get(top_idx).copied().unwrap_or(0);
 
-            // T005: Is this a checkable-aware dropdown?
-            // True when at least one item's action appears in toggle_states.
-            let has_checkable = menu_items
-                .iter()
-                .any(|item| lookup_checked(self.toggle_states, &item.action).is_some());
-
-            // T006: Dropdown width — add 2 extra chars when checkable to
-            // reserve the prefix column (✓ or space + space).
-            let content_width: u16 = menu_items
-                .iter()
-                .map(|it| it.label.len() as u16)
-                .max()
-                .unwrap_or(4)
-                + if has_checkable { 6 } else { 4 };
-
-            // T007: Label starts 1 col from dropdown edge normally,
-            // or 3 cols when checkable (1 border space + 2-char prefix).
-            let label_offset: u16 = if has_checkable { 3 } else { 1 };
+            // Shared geometry — identical to what mouse hit-testing uses, so the
+            // drawn box and the clickable region always agree (T005–T007).
+            let menu = match self.menus.get(top_idx) {
+                Some(m) => m,
+                None => return,
+            };
+            let DropdownLayout {
+                start_col,
+                content_width,
+                label_offset,
+                has_checkable,
+            } = dropdown_layout(menu, drop_col, self.toggle_states, area.width);
 
             // Height of the dropdown (one row per item + 2 for top/bottom border).
             let drop_height: u16 = menu_items.len() as u16 + 2;
-
-            // Clamp dropdown horizontally so it doesn't overflow the terminal.
-            let start_col: u16 = drop_col.min(area.width.saturating_sub(content_width));
 
             // The dropdown starts on row 1 (row 0 is the menu bar itself),
             // but only if there are rows below the bar area.
@@ -1298,5 +1401,85 @@ mod tests {
         let tools_at = row.find("Tools").expect("Tools rendered");
         let help_at = row.find("Help").expect("Help rendered");
         assert!(tools_at < help_at, "Tools must render left of Help");
+    }
+
+    // ── Feature 011 — mouse hit-testing ──────────────────────────────────────
+
+    #[test]
+    fn hit_test_top_level_each_builtin_menu() {
+        let menus = resolve_menus(&[]);
+        let st = MenuState::Inactive;
+        // File col 1, Edit col 7, Search col 13, View col 21, Options 28, Help 37.
+        for (col, idx) in [(1u16, 0usize), (7, 1), (13, 2), (21, 3), (28, 4), (37, 5)] {
+            assert_eq!(
+                hit_test_menu(&menus, &st, &[], 80, col, 0),
+                MenuHit::TopLevel(idx),
+                "col {col} should hit menu {idx}"
+            );
+        }
+    }
+
+    #[test]
+    fn hit_test_top_level_gap_is_outside() {
+        let menus = resolve_menus(&[]);
+        // Column 5 is between "File" (1-4) and "Edit" (7-10).
+        assert_eq!(
+            hit_test_menu(&menus, &MenuState::Inactive, &[], 80, 5, 0),
+            MenuHit::Outside
+        );
+    }
+
+    #[test]
+    fn hit_test_dropdown_item_rows() {
+        let menus = resolve_menus(&[]);
+        let st = MenuState::DropDown {
+            top_idx: 0,
+            item_idx: 0,
+        };
+        // File dropdown: row 1 = New (item 0), row 2 = Open (item 1).
+        assert_eq!(
+            hit_test_menu(&menus, &st, &[], 80, 2, 1),
+            MenuHit::Item {
+                top_idx: 0,
+                item_idx: 0
+            }
+        );
+        assert_eq!(
+            hit_test_menu(&menus, &st, &[], 80, 2, 2),
+            MenuHit::Item {
+                top_idx: 0,
+                item_idx: 1
+            }
+        );
+        // A row past the last File item is Outside.
+        let past = menus[0].items.len() as u16 + 1;
+        assert_eq!(
+            hit_test_menu(&menus, &st, &[], 80, 2, past),
+            MenuHit::Outside
+        );
+    }
+
+    #[test]
+    fn hit_test_dropdown_outside_columns() {
+        let menus = resolve_menus(&[]);
+        let st = MenuState::DropDown {
+            top_idx: 0,
+            item_idx: 0,
+        };
+        // Far-right column is outside the File dropdown box.
+        assert_eq!(hit_test_menu(&menus, &st, &[], 80, 70, 1), MenuHit::Outside);
+    }
+
+    #[test]
+    fn dropdown_layout_reserves_checkable_width() {
+        let menus = resolve_menus(&[]);
+        // View (index 3) contains the checkable "Soft Wrap (ext)" item.
+        let view = &menus[3];
+        let plain = dropdown_layout(view, 21, &[], 80);
+        let checkable = dropdown_layout(view, 21, &[(Action::ToggleSoftWrap, true)], 80);
+        assert!(!plain.has_checkable);
+        assert!(checkable.has_checkable);
+        assert_eq!(checkable.content_width, plain.content_width + 2);
+        assert_eq!(checkable.label_offset, 3);
     }
 }

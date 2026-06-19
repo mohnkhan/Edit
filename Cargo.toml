@@ -2,7 +2,7 @@
 name = "edit"
 version = "0.3.0"
 edition = "2021"
-description = "Linux-compatible reimplementation of MS-DOS EDIT.COM"
+description = "Cross-platform reimplementation of MS-DOS EDIT.COM (Linux, BSD, macOS, MyOS)"
 license = "MPL-2.0"
 
 [lib]

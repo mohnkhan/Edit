@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 011: Mouse-operable menus and working menu actions
+
+#### Added
+
+- **Mouse menu interaction.** Clicking a top-level menu title opens (or toggles) its
+  dropdown, and **clicking a dropdown item now activates it** — previously only the top row
+  was hit-tested and dropdown items could only be reached with the arrow keys. Hit-testing
+  shares the exact geometry the menu bar renders with (`hit_test_menu` / `dropdown_layout` in
+  `ui/menubar.rs`), so it is correct for built-in *and* plugin menus and for the checkable
+  View items. Clicking outside an open menu closes it; clicking in the editor repositions the
+  cursor.
+- **Help ▸ About** screen showing the program name, version, description, and copyright.
+- **Help ▸ Help** screen with a key-binding cheat sheet.
+- **`Ctrl+N` / File ▸ New** creates a fresh empty buffer.
+- **File ▸ Save As** opens a path-entry dialog and writes the active buffer to the new path.
+
+#### Fixed
+
+- **Most Edit/View/File menu items (and their keyboard shortcuts) were no-ops.** `Undo, Redo,
+  Cut, Copy, Paste, Select All, Save As, Toggle Line Nos` and `New` dispatched actions that
+  had no arm in `handle_action`, so they fell through to a debug-log catch-all and did
+  nothing — this also killed the bound `Ctrl+Z/Y/X/C/V/A` shortcuts. All are now wired to the
+  existing buffer/undo/clipboard support. (Help did nothing for the same reason.)
+- **Mouse clicks on menus past "File" / on dropdown items did nothing**, because mouse events
+  were flattened to an action with no coordinates or menu state before the app saw them.
+  Mouse events are now routed to `App::handle_mouse_event` with full state.
+
+---
+
 ### feature 010: Working Escape key and File ▸ Open
 
 #### Added

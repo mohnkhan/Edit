@@ -19,10 +19,10 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 pub fn dispatch_event(event: Event, keymap: &KeybindingMap) -> Option<Action> {
     match event {
         Event::Key(key_event) => dispatch_key(key_event, keymap),
-        Event::Mouse(mouse_event) => {
-            let normalized = mouse::normalize_mouse(mouse_event)?;
-            mouse::handle_mouse(normalized, 0)
-        }
+        // Mouse events are handled directly by the app (App::handle_mouse_event),
+        // which has the cursor coordinates and live menu state needed to hit-test
+        // dropdown items. dispatch_event therefore ignores them.
+        Event::Mouse(_) => None,
         Event::Resize(w, h) => Some(handle_resize(w, h)),
         Event::FocusGained | Event::FocusLost | Event::Paste(_) => None,
     }
