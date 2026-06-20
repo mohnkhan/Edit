@@ -187,6 +187,22 @@ The scrollbars are also **clickable and draggable** (Feature 024): click the tra
 to page by one viewport, or drag the thumb to scroll proportionally. In the editor this scrolls the
 viewport only (the cursor stays put); a press that starts on a scrollbar never selects text.
 
+### Keyboard navigation in dialogs & overlays (Feature 028)
+
+Every dialog and overlay is fully operable from the keyboard:
+
+| Context | Keys | Action |
+|---|---|---|
+| Any multi-button dialog | `←` / `→` (and `↑` / `↓`) | Move focus between buttons (wraps), same as `Tab`/`Shift+Tab` |
+| Save-As / interactive dialogs | (on open) | Focus starts on the input field, so typing works and the caret shows |
+| Help / About | `↑` `↓` `PgUp` `PgDn` `Home` `End` | Scroll the overlay (clamped); `Esc`/`Enter` close |
+| File browser / encoding / plugin lists | `PgUp` / `PgDn` | Page through the list (clamped) |
+| Editor | `Home` / `End` | Move the cursor to the start / end of the line |
+
+The editor and any open buffer are also crash-safe: restoring a session or switching buffers with
+soft-wrap on never crashes, and if the editor ever does panic it restores the terminal so your shell
+stays usable.
+
 Built-in accelerators follow DOS/standard convention — File: **N**ew, **O**pen, **S**ave, Save **A**s,
 Save As **E**ncoding, e**X**it; Edit: **U**ndo, **R**edo, **C**ut, C**o**py, **P**aste, **S**elect All;
 Search: **F**ind, Find **N**ext, Find **P**rev, Find **R**eplace, **G**o to Line; View: **S**plit View, **N**ext Buffer,

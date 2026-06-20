@@ -14,6 +14,13 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crossterm::{
+    cursor::Show,
+    event::DisableMouseCapture,
+    execute,
+    terminal::{disable_raw_mode, LeaveAlternateScreen},
+};
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 /// Returns the crash-report directory.
@@ -84,6 +91,19 @@ fn write_report(dest: &mut dyn std::io::Write, header: &str, detail: &str) {
     let _ = writeln!(dest, "=== end of report ===");
 }
 
+/// Best-effort restore of the terminal to a usable state (Feature 028).
+///
+/// Mirrors the teardown `App::run` performs on a clean exit: leave the alternate
+/// screen, disable mouse capture, show the cursor, and disable raw mode. Every
+/// step ignores errors — this runs from the panic hook, must never itself panic,
+/// and may run when the terminal was never put into raw mode (e.g. headless
+/// tests or a panic before UI init), in which case the calls are harmless no-ops.
+pub fn restore_terminal_best_effort() {
+    let mut out = std::io::stdout();
+    let _ = execute!(out, LeaveAlternateScreen, DisableMouseCapture, Show);
+    let _ = disable_raw_mode();
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /// Installs a custom Rust panic hook that writes a structured crash report.
@@ -97,6 +117,12 @@ fn write_report(dest: &mut dyn std::io::Write, header: &str, detail: &str) {
 /// This function itself will not panic.
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
+        // ── Restore the terminal FIRST (Feature 028) ──────────────────────
+        // Otherwise the process exits with raw mode + the alternate screen still
+        // active, leaving the user's terminal garbled/"hung" and the report below
+        // unreadable. Best-effort; never panics.
+        restore_terminal_best_effort();
+
         // ── Compose the detail string ─────────────────────────────────────
         // `PanicInfo::message()` (stable since 1.73) gives the formatted
         // message; fall back to the `Display` impl when not available.
@@ -163,6 +189,14 @@ mod tests {
     #[test]
     fn unix_ts_is_nonzero() {
         assert!(unix_ts() > 0);
+    }
+
+    // T009 (Feature 028): the terminal-restore path must run best-effort without
+    // panicking even when no terminal/raw-mode is active (headless test runner).
+    #[test]
+    fn restore_terminal_best_effort_does_not_panic() {
+        restore_terminal_best_effort();
+        restore_terminal_best_effort(); // idempotent
     }
 
     #[test]

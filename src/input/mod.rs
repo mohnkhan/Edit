@@ -128,6 +128,30 @@ mod tests {
         }
     }
 
+    // T019 (Feature 028): Home/End map to line-start/line-end; PageUp/PageDown to
+    // the page actions (regression guard for the keyboard-nav contract).
+    #[test]
+    fn home_end_pageup_pagedown_map_to_movement_actions() {
+        let km = KeybindingMap::default_map();
+        let press = |c| key(c, KeyModifiers::NONE, KeyEventKind::Press);
+        assert_eq!(
+            dispatch_key(press(KeyCode::Home), &km),
+            Some(Action::MoveLineStart)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::End), &km),
+            Some(Action::MoveLineEnd)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::PageUp), &km),
+            Some(Action::MovePageUp)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::PageDown), &km),
+            Some(Action::MovePageDown)
+        );
+    }
+
     // T022 (feature 013): a lone Alt key press activates the menu bar (like F10).
     #[test]
     fn lone_alt_press_maps_to_menu() {

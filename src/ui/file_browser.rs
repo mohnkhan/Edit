@@ -233,6 +233,21 @@ impl FileBrowser {
         self.ensure_visible(visible_rows);
     }
 
+    /// Feature 028: move the selection up by ~one page, clamped to the top.
+    pub fn page_up(&mut self, visible_rows: usize) {
+        let step = visible_rows.max(1);
+        self.selected = self.selected.saturating_sub(step);
+        self.ensure_visible(visible_rows);
+    }
+
+    /// Feature 028: move the selection down by ~one page, clamped to the bottom.
+    pub fn page_down(&mut self, visible_rows: usize) {
+        let step = visible_rows.max(1);
+        let last = self.entries.len().saturating_sub(1);
+        self.selected = (self.selected + step).min(last);
+        self.ensure_visible(visible_rows);
+    }
+
     /// Keep `selected` within the `[scroll, scroll+visible_rows)` window.
     pub fn ensure_visible(&mut self, visible_rows: usize) {
         if visible_rows == 0 {
@@ -241,7 +256,8 @@ impl FileBrowser {
         if self.selected < self.scroll {
             self.scroll = self.selected;
         } else if self.selected >= self.scroll + visible_rows {
-            self.scroll = self.selected + 1 - visible_rows;
+            // Feature 028: saturating to avoid any underflow if the guard changes.
+            self.scroll = (self.selected + 1).saturating_sub(visible_rows);
         }
     }
 
@@ -916,6 +932,30 @@ mod tests {
         fs::write(base.join("alpha.txt"), b"alpha\n").unwrap();
         fs::write(base.join(".hidden"), b"h\n").unwrap();
         base
+    }
+
+    // T019 (Feature 028): PageUp/PageDown move by a page and clamp; no underflow.
+    #[test]
+    fn page_down_up_move_by_page_and_clamp() {
+        let base = temp_tree("paging");
+        let mut b = FileBrowser::open(base, BrowseMode::Open);
+        let n = b.entries.len();
+        assert!(n >= 3, "fixture should yield several entries");
+        b.selected = 0;
+        let vis = 2;
+        b.page_down(vis);
+        assert_eq!(b.selected, 2.min(n - 1), "page down moves by ~one page");
+        // Repeated page-downs clamp to the last entry, never overrun.
+        for _ in 0..10 {
+            b.page_down(vis);
+        }
+        assert_eq!(b.selected, n - 1);
+        // Page up clamps to the top with no underflow.
+        for _ in 0..10 {
+            b.page_up(vis);
+        }
+        assert_eq!(b.selected, 0);
+        assert_eq!(b.scroll, 0);
     }
 
     // Feature 018: the editable field renders as a labeled, bordered box with a
