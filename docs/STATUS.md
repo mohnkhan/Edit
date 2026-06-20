@@ -8,6 +8,8 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F022-US1 | File dialog: live glob/substring filtering (case-insensitive); dirs/`..` always kept; absolute path still jumps | Complete |
+| F022-US2 | File dialog: per-entry size + modified-date columns (`<DIR>` for folders), aligned, name truncates | Complete |
 | F021-US1 | Scrollbars on overflow: editor (vertical + horizontal), file browser, Help/About, encoding/plugin | Complete |
 | F021-US2 | Help and About show a clickable, bordered Close button (mouse-dismissable; Esc still works) | Complete |
 | F021-US3 | Every dialog button label advertises its activating key (no behavioral change) | Complete |
