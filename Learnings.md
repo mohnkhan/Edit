@@ -150,6 +150,14 @@ intact for when no modal is open (add a regression test asserting the global beh
 
 ---
 
+## Testing gotchas
+
+- **`render()` bails out below the minimum terminal size.** The editor draws a "Terminal too small"
+  message and returns early when the frame is `< 80×24` (`MIN_WIDTH`/`MIN_HEIGHT`). A `TestBackend`
+  render test sized smaller than that renders nothing real — assertions on cell content/styles will
+  fail confusingly. Size render-test backends at **≥ 80×24** (feat 016/017 render tests). The
+  `terminal_size`-sync test is the exception (it only checks the synced field, not drawn content).
+
 ## Weird behaviors & environment gotchas
 
 These are not code bugs in `edit` but cost real time; know them before debugging.

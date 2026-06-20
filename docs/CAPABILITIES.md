@@ -70,10 +70,16 @@ edit [OPTIONS] [FILE...]
 
 ### Selection
 
-| Key | Action |
+Selected text is shown highlighted (reverse video). Copy/Cut act on the selection; typing or pasting
+replaces it; `Backspace`/`Delete` delete it; moving without Shift (or a single click) clears it.
+
+| Key / action | Action |
 |---|---|
-| `Shift+Arrow` | Extend selection |
+| `Shift+Arrow` | Extend selection by a character / line |
+| `Shift+Home` / `Shift+End` | Extend selection to line start / end |
 | `Ctrl+A` | Select all |
+| Mouse press-drag-release | Select the dragged range |
+| Single click | Move cursor, clear selection |
 
 ### Search and Replace
 

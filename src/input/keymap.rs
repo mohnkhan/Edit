@@ -80,6 +80,14 @@ pub enum Action {
     MoveDocStart,
     MoveDocEnd,
 
+    // Feature 017: Shift+navigation — extend the selection while moving.
+    SelectLeft,
+    SelectRight,
+    SelectUp,
+    SelectDown,
+    SelectLineStart,
+    SelectLineEnd,
+
     // Text input / deletion
     InsertChar(char),
     Backspace,
@@ -147,6 +155,14 @@ impl KeybindingMap {
         map.insert("Tab".to_string(), Action::FocusNextField);
         map.insert("BackTab".to_string(), Action::FocusPrevField);
         map.insert("Shift+Tab".to_string(), Action::FocusPrevField);
+
+        // Feature 017: Shift+navigation extends the selection.
+        map.insert("Shift+Left".to_string(), Action::SelectLeft);
+        map.insert("Shift+Right".to_string(), Action::SelectRight);
+        map.insert("Shift+Up".to_string(), Action::SelectUp);
+        map.insert("Shift+Down".to_string(), Action::SelectDown);
+        map.insert("Shift+Home".to_string(), Action::SelectLineStart);
+        map.insert("Shift+End".to_string(), Action::SelectLineEnd);
 
         // Help / menu
         map.insert("F1".to_string(), Action::Help);

@@ -178,6 +178,11 @@ pub struct App {
     /// (so focus defaults to the safe button once, then the user can move it).
     pub dialog_focus_init: bool,
 
+    // ── Feature 017: mouse drag selection ─────────────────────────────────────
+    /// Anchor (cursor position at the left-button press in the editor) for a
+    /// drag selection; `Some` between press and the drags that follow.
+    pub drag_anchor: Option<CursorPos>,
+
     // ── Feature 008: plugin subsystem ────────────────────────────────────────
     /// The Rhai plugin host owning the engine and registry for this session.
     pub plugin_host: crate::plugin::PluginHost,
@@ -367,6 +372,7 @@ impl App {
             pending_find_replace: None,
             dialog_focus: 0,
             dialog_focus_init: false,
+            drag_anchor: None,
             plugin_host,
             pending_plugin_consent,
             pending_plugin_manager: false,
@@ -924,6 +930,14 @@ impl App {
             Action::MoveDocStart => self.move_doc_start(),
             Action::MoveDocEnd => self.move_doc_end(),
 
+            // Feature 017: Shift+navigation — extend the selection while moving.
+            Action::SelectLeft => self.move_cursor_selecting(Direction::Left),
+            Action::SelectRight => self.move_cursor_selecting(Direction::Right),
+            Action::SelectUp => self.move_cursor_selecting(Direction::Up),
+            Action::SelectDown => self.move_cursor_selecting(Direction::Down),
+            Action::SelectLineStart => self.select_line_start(),
+            Action::SelectLineEnd => self.select_line_end(),
+
             // Text insertion — T026
             Action::InsertChar(c) => self.insert_char(c),
             Action::InsertNewline => self.insert_newline(),
@@ -1468,12 +1482,12 @@ impl App {
 
     /// Move the cursor one step in `dir`, clamping to valid positions and
     /// updating `scroll_offset` as necessary.
-    pub fn move_cursor(&mut self, dir: Direction) {
+    /// Compute the cursor position one step in `dir` (no mutation, no selection).
+    fn next_cursor_pos(&self, dir: Direction) -> (usize, usize) {
         let buf = &self.buffers[self.active_idx];
         let line_count = buf.rope.line_count();
         let cur = buf.cursor;
-
-        let (new_line, new_gcol) = match dir {
+        match dir {
             Direction::Up => {
                 if cur.line == 0 {
                     (0, cur.grapheme_col)
@@ -1515,26 +1529,62 @@ impl App {
                     (cur.line, cur.grapheme_col)
                 }
             }
-        };
+        }
+    }
 
-        let new_vcol = CursorPos::visual_col_from_grapheme_col(
+    /// Set the cursor to `(line, gcol)` (computing its visual column) and clamp
+    /// the viewport. Does not touch the selection.
+    fn set_cursor_lc(&mut self, line: usize, gcol: usize) {
+        let vcol = CursorPos::visual_col_from_grapheme_col(
             &self.buffers[self.active_idx].rope,
-            new_line,
-            new_gcol,
+            line,
+            gcol,
         );
-
-        let buf = &mut self.buffers[self.active_idx];
-        buf.cursor = CursorPos {
-            line: new_line,
-            grapheme_col: new_gcol,
-            visual_col: new_vcol,
+        self.buffers[self.active_idx].cursor = CursorPos {
+            line,
+            grapheme_col: gcol,
+            visual_col: vcol,
         };
-
         self.clamp_scroll();
+    }
+
+    pub fn move_cursor(&mut self, dir: Direction) {
+        let (new_line, new_gcol) = self.next_cursor_pos(dir);
+        // Feature 017: a plain (non-shift) move clears any selection.
+        self.buffers[self.active_idx].selection = None;
+        self.set_cursor_lc(new_line, new_gcol);
+    }
+
+    /// Feature 017: move the cursor one step in `dir` while extending the
+    /// selection from its anchor (Shift+Arrow).
+    pub fn move_cursor_selecting(&mut self, dir: Direction) {
+        let anchor = self.selection_anchor_or_cursor();
+        let (new_line, new_gcol) = self.next_cursor_pos(dir);
+        self.set_cursor_lc(new_line, new_gcol);
+        self.update_selection_to_cursor(anchor);
+    }
+
+    /// The current selection's anchor, or the cursor position if there is none.
+    fn selection_anchor_or_cursor(&self) -> CursorPos {
+        let buf = &self.buffers[self.active_idx];
+        buf.selection.map(|s| s.anchor).unwrap_or(buf.cursor)
+    }
+
+    /// Set `selection` to span `anchor`→cursor, or `None` if empty (Feature 017).
+    fn update_selection_to_cursor(&mut self, anchor: CursorPos) {
+        let buf = &mut self.buffers[self.active_idx];
+        let active = buf.cursor;
+        buf.selection = if active.line == anchor.line && active.grapheme_col == anchor.grapheme_col
+        {
+            None
+        } else {
+            Some(Selection { anchor, active })
+        };
     }
 
     /// Move the cursor to column 0 of the current line.
     pub fn move_line_start(&mut self) {
+        self.buffers[self.active_idx].selection = None; // Feature 017: plain move clears
         let buf = &mut self.buffers[self.active_idx];
         buf.cursor.grapheme_col = 0;
         buf.cursor.visual_col = 0;
@@ -1543,19 +1593,31 @@ impl App {
 
     /// Move the cursor to the last grapheme of the current line.
     pub fn move_line_end(&mut self) {
-        let (line, rope) = {
-            let buf = &self.buffers[self.active_idx];
-            (buf.cursor.line, &buf.rope as *const _)
-        };
-        // SAFETY: we borrow the rope immutably and the buffer mutably in sequence.
-        let rope: &crate::buffer::rope::EditorRope = unsafe { &*rope };
-        let gcol = rope.grapheme_count_on_line(line);
-        let vcol = CursorPos::visual_col_from_grapheme_col(rope, line, gcol);
+        self.buffers[self.active_idx].selection = None; // Feature 017: plain move clears
+        self.cursor_to_line_end();
+    }
 
-        let buf = &mut self.buffers[self.active_idx];
-        buf.cursor.grapheme_col = gcol;
-        buf.cursor.visual_col = vcol;
-        self.clamp_scroll();
+    /// Place the cursor at the end of its line (no selection change).
+    fn cursor_to_line_end(&mut self) {
+        let line = self.buffers[self.active_idx].cursor.line;
+        let gcol = self.buffers[self.active_idx]
+            .rope
+            .grapheme_count_on_line(line);
+        self.set_cursor_lc(line, gcol);
+    }
+
+    /// Feature 017: extend the selection to the start of the current line.
+    pub fn select_line_start(&mut self) {
+        let anchor = self.selection_anchor_or_cursor();
+        self.set_cursor_lc(self.buffers[self.active_idx].cursor.line, 0);
+        self.update_selection_to_cursor(anchor);
+    }
+
+    /// Feature 017: extend the selection to the end of the current line.
+    pub fn select_line_end(&mut self) {
+        let anchor = self.selection_anchor_or_cursor();
+        self.cursor_to_line_end();
+        self.update_selection_to_cursor(anchor);
     }
 
     /// Move the cursor up by one viewport page.
@@ -1679,6 +1741,10 @@ impl App {
         if self.buffers[self.active_idx].readonly {
             return;
         }
+        // Feature 017: typing replaces the current selection.
+        if self.buffers[self.active_idx].selection.is_some() {
+            self.delete_selection();
+        }
 
         let char_idx = self.cursor_char_idx();
         let s = c.to_string();
@@ -1703,6 +1769,9 @@ impl App {
     pub fn insert_newline(&mut self) {
         if self.buffers[self.active_idx].readonly {
             return;
+        }
+        if self.buffers[self.active_idx].selection.is_some() {
+            self.delete_selection(); // Feature 017: Enter replaces a selection
         }
 
         let char_idx = self.cursor_char_idx();
@@ -1732,6 +1801,11 @@ impl App {
     /// No-op at the start of the buffer or when read-only.
     pub fn delete_backward(&mut self) {
         if self.buffers[self.active_idx].readonly {
+            return;
+        }
+        // Feature 017: Backspace with a selection deletes the selection.
+        if self.buffers[self.active_idx].selection.is_some() {
+            self.delete_selection();
             return;
         }
 
@@ -1801,6 +1875,11 @@ impl App {
     /// No-op at the end of the buffer or when read-only.
     pub fn delete_forward(&mut self) {
         if self.buffers[self.active_idx].readonly {
+            return;
+        }
+        // Feature 017: Delete with a selection deletes the selection.
+        if self.buffers[self.active_idx].selection.is_some() {
+            self.delete_selection();
             return;
         }
 
@@ -1888,6 +1967,10 @@ impl App {
     pub fn paste_clipboard(&mut self) {
         if self.buffers[self.active_idx].readonly {
             return;
+        }
+        // Feature 017: paste replaces the current selection.
+        if self.buffers[self.active_idx].selection.is_some() {
+            self.delete_selection();
         }
         let text = match arboard::Clipboard::new() {
             Ok(mut cb) => match cb.get_text() {
@@ -2895,6 +2978,19 @@ impl App {
         let Some(ev) = normalize_mouse(me) else {
             return Ok(());
         };
+
+        // Feature 017: a left-drag in the editor extends the selection from the
+        // anchor set on the preceding press (only when no modal/menu is active).
+        if ev.kind == NormalizedMouseKind::Drag && ev.button == MouseButton::Left {
+            if let Some(anchor) = self.drag_anchor {
+                if !self.menu_bar.is_active() {
+                    self.handle_mouse_click(ev.col, ev.row);
+                    self.update_selection_to_cursor(anchor);
+                }
+            }
+            return Ok(());
+        }
+
         // Only left-button presses drive the menu / cursor for now.
         if ev.kind != NormalizedMouseKind::Press || ev.button != MouseButton::Left {
             return Ok(());
@@ -3011,7 +3107,11 @@ impl App {
                 if self.menu_bar.is_active() {
                     self.menu_bar.close_menu();
                 } else {
+                    // Editor click: move the cursor, clear any selection, and set
+                    // the drag anchor so a following drag selects (Feature 017).
                     self.handle_mouse_click(ev.col, ev.row);
+                    self.buffers[self.active_idx].selection = None;
+                    self.drag_anchor = Some(self.buffers[self.active_idx].cursor);
                 }
             }
         }
@@ -3395,6 +3495,43 @@ mod tests {
 
     fn make_app() -> App {
         App::new(Config::default(), vec![], EncodingId::Utf8, None, None)
+    }
+
+    // Feature 017: Select All renders the selected text with reverse-video.
+    #[test]
+    fn select_all_renders_reverse_highlight() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = make_app();
+        for c in "hello".chars() {
+            app.handle_action(Action::InsertChar(c)).unwrap();
+        }
+        app.handle_action(Action::SelectAll).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer();
+        // Editor content starts at row 1 (row 0 is the menu bar); no gutter.
+        let cell = buf.get(0, 1);
+        assert_eq!(cell.symbol(), "h");
+        assert!(
+            cell.style()
+                .add_modifier
+                .contains(ratatui::style::Modifier::REVERSED),
+            "selected cell rendered with reverse video"
+        );
+        // A clean buffer (no selection) has no reversed content cell.
+        let mut app2 = make_app();
+        app2.handle_action(Action::InsertChar('h')).unwrap();
+        let mut t2 = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        t2.draw(|f| app2.render(f)).unwrap();
+        assert!(
+            !t2.backend()
+                .buffer()
+                .get(0, 1)
+                .style()
+                .add_modifier
+                .contains(ratatui::style::Modifier::REVERSED),
+            "no selection → no reverse highlight"
+        );
     }
 
     // Regression (Feature 012 follow-up): render must sync `terminal_size` to the
