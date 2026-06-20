@@ -1,7 +1,7 @@
 # Roadmap
 
 This page summarizes `ROADMAP.md`. Notably, every feature that was once deferred has now **shipped**
-as of v0.3.0 (2026-06-19) — the roadmap is currently a record of completed work with pointers to the
+as of v0.4.0 (2026-06-21) — the roadmap is currently a record of completed work with pointers to the
 issues that tracked each item. New work is added per the [Development](Development.md) deferral
 process (GitHub issue + a `ROADMAP.md` row).
 

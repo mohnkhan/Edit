@@ -7,7 +7,7 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](Cargo.toml)
 [![MSRV](https://img.shields.io/badge/MSRV-1.74-blue?logo=rust)](docs/STATUS.md)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.0-informational)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-informational)](CHANGELOG.md)
 
 <p align="center">
   <img src="assets/demo.gif"

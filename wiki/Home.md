@@ -6,7 +6,7 @@ the status line — while being fully **UTF-8 / Unicode native** under the hood.
 **Rust** using the [`ratatui`](https://ratatui.rs) + [`crossterm`](https://docs.rs/crossterm)
 terminal stack.
 
-**Current version: 0.3.0.**
+**Current version: 0.4.0.**
 
 ## Where `edit` is headed: the MyOS text editor
 
