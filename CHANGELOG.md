@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 012: Navigable file browser for Open / Save dialogs
+
+#### Added
+
+- **File browser** replaces the blind path-text Open and Save As dialogs. Both now show the current
+  directory's folders and files in a navigable list: arrow keys move the selection, Enter enters a
+  folder or picks a file, `←`/`Backspace` go to the parent, and the current-directory path is shown
+  at the top. With the mouse, a single click selects a row and a double-click activates it (enters
+  the folder / opens the file) — so double-clicking a folder browses into it instead of immediately
+  opening a file underneath the cursor. Long listings scroll to keep the selection visible;
+  folder/file names render UTF-8-correct and truncate (with `…`) without splitting multi-byte
+  characters.
+- **Save browser** includes an editable filename field; in Open mode an absolute path may be typed to
+  jump straight to it. `Ctrl+S` on an unnamed (new) buffer now opens the Save browser to choose a
+  destination, instead of silently failing.
+- Built via the full Spec Kit pipeline; spec/plan/tasks/checklists under
+  `specs/012-file-browser-dialogs/`.
+
+#### Changed
+
+- Removed the superseded single-line `OpenFileDialog` / `SaveAsFileDialog` widgets and the
+  `pending_open` / `pending_save_as` state in favour of one `FileBrowser` model that drives both
+  rendering and mouse hit-testing (so clicks always land on what is drawn). All chosen paths are
+  validated through the existing path sanitizer before any read/write; unreadable directories surface
+  a notice instead of crashing.
+
+---
+
 ### feature 011: Mouse-operable menus and working menu actions
 
 #### Added

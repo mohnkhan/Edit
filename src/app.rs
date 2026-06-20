@@ -24,6 +24,7 @@ use crate::{
     input::mouse::{normalize_mouse, MouseButton, NormalizedMouseKind},
     input::{dispatch_event, Action, KeybindingMap},
     search::{SearchEngine, SearchState},
+    ui::file_browser::{BrowseMode, BrowserHit, FileBrowser, Outcome as BrowseOutcome},
     ui::menubar::{hit_test_menu, resolve_menus, MenuBarState, MenuHit, MenuState, ResolvedMenu},
     ui::theme::{theme_by_name, Theme},
 };
@@ -65,6 +66,10 @@ const MIN_HEIGHT: u16 = 24;
 
 /// Tick interval for autosave and status-bar refresh.
 const TICK_MS: u64 = 500;
+
+/// Max gap between two clicks on the same file-browser row to count as a
+/// double-click (which activates the entry). Feature 012.
+const DOUBLE_CLICK_MS: u64 = 400;
 
 // ── Direction enum ────────────────────────────────────────────────────────────
 
@@ -114,10 +119,12 @@ pub struct App {
     pub default_encoding: EncodingId,
     /// Index into ENCODING_OPTIONS of the highlighted row; `Some` = dialog is open.
     pub pending_encoding_select: Option<usize>,
-    /// Path being typed in the Open-file dialog; `Some` = dialog is open (Feature 010).
-    pub pending_open: Option<String>,
-    /// Path being typed in the Save-As dialog; `Some` = dialog is open (Feature 011).
-    pub pending_save_as: Option<String>,
+    /// The navigable file browser (Open/Save); `Some` = a file dialog is open (Feature 012).
+    pub file_browser: Option<FileBrowser>,
+    /// Last file-browser entry click (index + time) for double-click detection.
+    /// A single click selects the row; a second click on the same row within
+    /// [`DOUBLE_CLICK_MS`] activates it (enter folder / open file) — Feature 012.
+    pub last_browser_click: Option<(usize, Instant)>,
     /// Which Help overlay is open, if any (Feature 011).
     pub pending_help: Option<HelpScreen>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
@@ -313,8 +320,8 @@ impl App {
             pending_session_restore: session,
             default_encoding,
             pending_encoding_select: None,
-            pending_open: None,
-            pending_save_as: None,
+            file_browser: None,
+            last_browser_click: None,
             pending_help: None,
             pending_save_as_encoding: None,
             soft_wrap: soft_wrap_initial,
@@ -592,60 +599,37 @@ impl App {
             return Ok(());
         }
 
-        // Feature 010 — Open-file dialog intercept: typing edits the path,
-        // Enter opens it, Esc/MenuClose cancels. All other actions are consumed
-        // so the dialog stays modal over the buffer.
-        if let Some(mut input) = self.pending_open.take() {
-            match &action {
-                Action::InsertChar(c) => {
-                    input.push(*c);
-                    self.pending_open = Some(input);
-                }
-                Action::Backspace => {
-                    input.pop();
-                    self.pending_open = Some(input);
-                }
-                Action::InsertNewline => {
-                    let trimmed = input.trim();
-                    if !trimmed.is_empty() {
-                        self.handle_open_file(PathBuf::from(trimmed));
+        // Feature 012 — File browser intercept (Open/Save). Arrow keys move,
+        // Enter/Right activate, Left/Backspace go to parent, printable chars edit
+        // the filename/path field, Esc cancels. All other actions are consumed so
+        // the browser stays modal over the buffer.
+        if self.file_browser.is_some() {
+            let vis = {
+                let (w, h) = self.terminal_size;
+                self.file_browser
+                    .as_ref()
+                    .unwrap()
+                    .visible_rows(ratatui::layout::Rect::new(0, 0, w, h))
+            };
+            let mut outcome: Option<BrowseOutcome> = None;
+            {
+                let fb = self.file_browser.as_mut().unwrap();
+                match &action {
+                    Action::MoveUp => fb.move_up(vis),
+                    Action::MoveDown => fb.move_down(vis),
+                    Action::MoveLeft => fb.enter_parent(),
+                    Action::MoveRight | Action::InsertNewline => outcome = Some(fb.activate()),
+                    Action::Backspace => fb.backspace(),
+                    Action::InsertChar(c) => fb.push_char(*c),
+                    Action::MenuClose => {
+                        self.file_browser = None;
+                        return Ok(());
                     }
-                    // Dialog closes whether or not a path was entered;
-                    // handle_open_file logs and leaves state intact on failure.
-                }
-                Action::MenuClose => {
-                    // Cancelled — dialog already taken, leave it closed.
-                }
-                // Any other action keeps the dialog open, unchanged.
-                _ => {
-                    self.pending_open = Some(input);
+                    _ => {}
                 }
             }
-            return Ok(());
-        }
-
-        // Feature 011 — Save-As dialog intercept: typing edits the path,
-        // Enter saves the active buffer there, Esc/MenuClose cancels.
-        if let Some(mut input) = self.pending_save_as.take() {
-            match &action {
-                Action::InsertChar(c) => {
-                    input.push(*c);
-                    self.pending_save_as = Some(input);
-                }
-                Action::Backspace => {
-                    input.pop();
-                    self.pending_save_as = Some(input);
-                }
-                Action::InsertNewline => {
-                    let trimmed = input.trim().to_string();
-                    if !trimmed.is_empty() {
-                        self.do_save_as(PathBuf::from(trimmed));
-                    }
-                }
-                Action::MenuClose => {}
-                _ => {
-                    self.pending_save_as = Some(input);
-                }
+            if let Some(outcome) = outcome {
+                self.apply_browse_outcome(outcome);
             }
             return Ok(());
         }
@@ -767,13 +751,22 @@ impl App {
             Action::Backspace => self.delete_backward(),
             Action::Delete => self.delete_forward(),
 
-            // Open-file dialog (Feature 010). Selecting File ▸ Open shows a
-            // modal path prompt handled by the pending_open intercept above.
-            Action::Open => self.pending_open = Some(String::new()),
+            // File browser (Feature 012). Open/Save As show the navigable browser.
+            Action::Open => {
+                self.file_browser = Some(FileBrowser::open(
+                    self.browser_start_dir(),
+                    BrowseMode::Open,
+                ));
+            }
+            Action::SaveAs => {
+                self.file_browser = Some(FileBrowser::open(
+                    self.browser_start_dir(),
+                    BrowseMode::Save,
+                ));
+            }
 
             // File operations (Feature 011).
             Action::New => self.new_buffer(),
-            Action::SaveAs => self.pending_save_as = Some(String::new()),
             Action::Close => self.close_active_buffer(),
 
             // Edit operations (Feature 011) — previously unhandled, so both the
@@ -1112,6 +1105,15 @@ impl App {
 
     /// Handle an explicit Save action (Ctrl+S / F5).
     pub fn handle_save_action(&mut self) {
+        // Feature 012: an unnamed buffer has no path to save to — open the Save
+        // browser so the user can choose a destination.
+        if self.active_buffer().path.is_none() {
+            self.file_browser = Some(FileBrowser::open(
+                self.browser_start_dir(),
+                BrowseMode::Save,
+            ));
+            return;
+        }
         match self.active_buffer().save() {
             Ok(()) => {
                 self.active_buffer_mut().modified = false;
@@ -2088,6 +2090,38 @@ impl App {
         }
     }
 
+    // ── Feature 012 — File browser ─────────────────────────────────────────────
+
+    /// Directory the file browser should open at: the active buffer's parent
+    /// directory if it has a path, else the process current directory.
+    pub fn browser_start_dir(&self) -> PathBuf {
+        if let Some(parent) = self
+            .buffers
+            .get(self.active_idx)
+            .and_then(|b| b.path.as_ref())
+            .and_then(|p| p.parent())
+        {
+            return parent.to_path_buf();
+        }
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    }
+
+    /// Apply the result of a browser activation: open/save the chosen file and
+    /// close the browser, or leave it open to keep navigating.
+    pub fn apply_browse_outcome(&mut self, outcome: BrowseOutcome) {
+        match outcome {
+            BrowseOutcome::Navigated | BrowseOutcome::None => {}
+            BrowseOutcome::OpenFile(path) => {
+                self.file_browser = None;
+                self.handle_open_file(path);
+            }
+            BrowseOutcome::SaveFile(path) => {
+                self.file_browser = None;
+                self.do_save_as(path);
+            }
+        }
+    }
+
     // ── Feature 011 — File / Edit menu actions ────────────────────────────────
 
     /// Open a fresh empty buffer and make it active (File ▸ New / Ctrl+N).
@@ -2247,12 +2281,50 @@ impl App {
             return Ok(());
         }
 
+        // Feature 012 — file browser: a single click selects the row; a second
+        // click on the same row (within DOUBLE_CLICK_MS) activates it (enter
+        // folder / open file). This matches file-dialog convention and avoids a
+        // double-click on a folder navigating in and then immediately opening
+        // whatever file lands under the cursor in the new listing. A click
+        // outside the box cancels.
+        if self.file_browser.is_some() {
+            let (w, h) = self.terminal_size;
+            let area = ratatui::layout::Rect::new(0, 0, w, h);
+            let hit = self
+                .file_browser
+                .as_ref()
+                .unwrap()
+                .hit_test(area, ev.col, ev.row);
+            match hit {
+                BrowserHit::Entry(idx) => {
+                    let now = Instant::now();
+                    let double = self.last_browser_click.is_some_and(|(prev, t)| {
+                        prev == idx
+                            && now.duration_since(t) <= Duration::from_millis(DOUBLE_CLICK_MS)
+                    });
+                    if double {
+                        self.last_browser_click = None;
+                        let outcome = self.file_browser.as_mut().unwrap().activate_index(idx);
+                        self.apply_browse_outcome(outcome);
+                    } else {
+                        // First click: just move the highlight to the row.
+                        self.last_browser_click = Some((idx, now));
+                        self.file_browser.as_mut().unwrap().selected = idx;
+                    }
+                }
+                BrowserHit::Outside => {
+                    self.last_browser_click = None;
+                    self.file_browser = None;
+                }
+                BrowserHit::Inside => self.last_browser_click = None,
+            }
+            return Ok(());
+        }
+
         // Modal dialogs win: ignore menu/editor mouse while one is open.
         if self.pending_save_prompt
             || self.pending_session_restore.is_some()
             || self.pending_encoding_select.is_some()
-            || self.pending_open.is_some()
-            || self.pending_save_as.is_some()
             || self.pending_help.is_some()
             || self.pending_external_change.is_some()
             || !self.pending_plugin_consent.is_empty()
@@ -2745,53 +2817,55 @@ mod tests {
         assert_eq!(app.buffers[0].cursor.grapheme_col, gcol_before);
     }
 
-    // ── Feature 010 — Open-file dialog ──────────────────────────────────────
+    // ── Feature 012 — File browser (Open) ───────────────────────────────────
 
     #[test]
-    fn test_open_action_opens_dialog() {
+    fn test_open_action_opens_browser() {
         let mut app = make_app();
-        assert_eq!(app.pending_open, None);
+        assert!(app.file_browser.is_none());
         app.handle_action(Action::Open).unwrap();
-        assert_eq!(app.pending_open.as_deref(), Some(""));
+        let fb = app.file_browser.as_ref().expect("browser open");
+        assert_eq!(fb.mode, BrowseMode::Open);
     }
 
     #[test]
-    fn test_open_dialog_typing_builds_path() {
+    fn test_browser_typing_edits_field() {
         let mut app = make_app();
         app.handle_action(Action::Open).unwrap();
         for c in "ab".chars() {
             app.handle_action(Action::InsertChar(c)).unwrap();
         }
-        assert_eq!(app.pending_open.as_deref(), Some("ab"));
+        assert_eq!(app.file_browser.as_ref().unwrap().filename, "ab");
         app.handle_action(Action::Backspace).unwrap();
-        assert_eq!(app.pending_open.as_deref(), Some("a"));
+        assert_eq!(app.file_browser.as_ref().unwrap().filename, "a");
     }
 
     #[test]
-    fn test_open_dialog_escape_cancels_without_opening() {
+    fn test_browser_escape_cancels_without_opening() {
         let mut app = make_app();
         let n_before = app.buffers.len();
         app.handle_action(Action::Open).unwrap();
         app.handle_action(Action::MenuClose).unwrap();
-        assert_eq!(app.pending_open, None);
+        assert!(app.file_browser.is_none());
         assert_eq!(app.buffers.len(), n_before, "cancel must not open a buffer");
     }
 
     #[test]
-    fn test_open_dialog_other_action_keeps_dialog_open() {
+    fn test_browser_inert_action_keeps_open() {
         let mut app = make_app();
         app.handle_action(Action::Open).unwrap();
         let gcol_before = app.buffers[0].cursor.grapheme_col;
-        app.handle_action(Action::MoveLeft).unwrap();
-        // Dialog stays open and the buffer cursor must not move.
-        assert_eq!(app.pending_open.as_deref(), Some(""));
+        // ToggleHighlight is consumed by the browser intercept (no effect).
+        app.handle_action(Action::ToggleHighlight).unwrap();
+        assert!(app.file_browser.is_some());
         assert_eq!(app.buffers[0].cursor.grapheme_col, gcol_before);
     }
 
     #[test]
-    fn test_open_dialog_enter_loads_file_into_buffer() {
+    fn test_browser_typed_path_opens_file() {
+        // Open mode: typing an absolute file path + Enter loads it (FR-006a).
         let mut path = std::env::temp_dir();
-        path.push("edit_open_dialog_test_010.txt");
+        path.push("edit_browser_open_test_012.txt");
         std::fs::write(&path, "hello from disk\n").expect("write temp file");
 
         let mut app = make_app();
@@ -2802,15 +2876,13 @@ mod tests {
         }
         app.handle_action(Action::InsertNewline).unwrap();
 
-        assert_eq!(app.pending_open, None, "dialog closes after opening");
+        assert!(app.file_browser.is_none(), "browser closes after opening");
         assert_eq!(app.buffers.len(), n_before + 1, "a new buffer is added");
-        assert!(
-            app.active_buffer()
-                .rope
-                .to_string()
-                .contains("hello from disk"),
-            "active buffer holds the opened file's content"
-        );
+        assert!(app
+            .active_buffer()
+            .rope
+            .to_string()
+            .contains("hello from disk"));
 
         let _ = std::fs::remove_file(&path);
     }
@@ -2887,25 +2959,37 @@ mod tests {
     }
 
     #[test]
-    fn test_save_as_dialog_writes_file() {
-        let mut path = std::env::temp_dir();
-        path.push("edit_saveas_test_011.txt");
+    fn test_save_browser_writes_file() {
+        let dir = std::env::temp_dir().join("edit_saveas_test_012");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("saved.txt");
         let _ = std::fs::remove_file(&path);
 
         let mut app = make_app();
         app.insert_char('h');
         app.insert_char('i');
         app.handle_action(Action::SaveAs).unwrap();
-        assert_eq!(app.pending_save_as.as_deref(), Some(""));
-        for c in path.to_string_lossy().chars() {
+        assert_eq!(app.file_browser.as_ref().unwrap().mode, BrowseMode::Save);
+        // Point the browser at the temp dir, type a filename, confirm.
+        app.file_browser = Some(FileBrowser::open(dir.clone(), BrowseMode::Save));
+        for c in "saved.txt".chars() {
             app.handle_action(Action::InsertChar(c)).unwrap();
         }
         app.handle_action(Action::InsertNewline).unwrap();
 
-        assert_eq!(app.pending_save_as, None, "dialog closes after save");
+        assert!(app.file_browser.is_none(), "browser closes after save");
         let written = std::fs::read_to_string(&path).expect("file written");
         assert!(written.contains("hi"));
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_save_unnamed_buffer_opens_save_browser() {
+        let mut app = make_app(); // make_app starts with an unnamed buffer
+        assert!(app.active_buffer().path.is_none());
+        app.handle_action(Action::Save).unwrap();
+        let fb = app.file_browser.as_ref().expect("save browser opened");
+        assert_eq!(fb.mode, BrowseMode::Save);
     }
 
     // ── Feature 011 — mouse menu interaction ─────────────────────────────────
@@ -2936,8 +3020,8 @@ mod tests {
         // Open File menu, then click the "Open" item (row 2).
         app.handle_mouse_event(mouse_press(1, 0)).unwrap();
         app.handle_mouse_event(mouse_press(3, 2)).unwrap();
-        // "Open" → Action::Open → opens the Open-file dialog and closes the menu.
-        assert_eq!(app.pending_open.as_deref(), Some(""));
+        // "Open" → Action::Open → opens the file browser and closes the menu.
+        assert!(app.file_browser.is_some());
         assert!(!app.menu_bar.is_active());
     }
 
