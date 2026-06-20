@@ -206,6 +206,53 @@ mod tests {
         );
     }
 
+    // T005 (Feature 032): word-wise keys map to the new actions; existing bindings
+    // unchanged.
+    #[test]
+    fn word_wise_keys_bound() {
+        let km = KeybindingMap::default_map();
+        let p = |c, m| key(c, m, KeyEventKind::Press);
+        assert_eq!(
+            dispatch_key(p(KeyCode::Left, KeyModifiers::CONTROL), &km),
+            Some(Action::MoveWordLeft)
+        );
+        assert_eq!(
+            dispatch_key(p(KeyCode::Right, KeyModifiers::CONTROL), &km),
+            Some(Action::MoveWordRight)
+        );
+        assert_eq!(
+            dispatch_key(
+                p(KeyCode::Left, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+                &km
+            ),
+            Some(Action::SelectWordLeft)
+        );
+        assert_eq!(
+            dispatch_key(
+                p(KeyCode::Right, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+                &km
+            ),
+            Some(Action::SelectWordRight)
+        );
+        assert_eq!(
+            dispatch_key(p(KeyCode::Backspace, KeyModifiers::CONTROL), &km),
+            Some(Action::DeleteWordLeft)
+        );
+        assert_eq!(
+            dispatch_key(p(KeyCode::Delete, KeyModifiers::CONTROL), &km),
+            Some(Action::DeleteWordRight)
+        );
+        // Plain arrows still per-character.
+        assert_eq!(
+            dispatch_key(p(KeyCode::Left, KeyModifiers::NONE), &km),
+            Some(Action::MoveLeft)
+        );
+        assert_eq!(
+            dispatch_key(p(KeyCode::Backspace, KeyModifiers::NONE), &km),
+            Some(Action::Backspace)
+        );
+    }
+
     // T029 (Feature 029): Ctrl+W closes the current buffer (was unbound despite the
     // docs claiming it).
     #[test]

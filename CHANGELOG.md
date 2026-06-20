@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 032: Word-wise navigation, selection, and deletion
+
+#### Added
+
+- **Word-wise editing keys** — `Ctrl+Left`/`Ctrl+Right` move the cursor by a whole word (crossing line
+  boundaries), `Ctrl+Shift+Left`/`Ctrl+Shift+Right` extend the selection by a word, and
+  `Ctrl+Backspace`/`Ctrl+Delete` delete the previous/next word as a single undo step. Word boundaries use
+  the same classification as double-click selection (Unicode alphanumeric + `_` runs, with whitespace and
+  symbol runs as their own classes), so behavior is consistent and multibyte-safe.
+
+#### Notes
+
+- Additive accelerators — every existing binding (including the per-character arrows/Backspace/Delete) is
+  unchanged. Word deletion respects the read-only guard. Terminals that don't report Ctrl+Arrow
+  distinctly simply don't get the accelerator (the per-character keys still work). No new dependencies;
+  each story has unit + integration tests.
+
 ### feature 031: Caret-on-click in dialog text fields
 
 Closes #58 (the deferred remainder of #53).
