@@ -489,8 +489,15 @@ impl App {
 
     // ── Rendering ────────────────────────────────────────────────────────────
 
-    fn render(&self, frame: &mut ratatui::Frame) {
+    fn render(&mut self, frame: &mut ratatui::Frame) {
         let size = frame.size();
+        // Keep terminal_size in sync with the actual frame so mouse hit-testing
+        // (file browser, menus, cursor) uses the same geometry that is drawn.
+        // Previously this was only updated on a Resize event, so on any terminal
+        // that was not exactly 80x24 at startup, clicks were mapped against stale
+        // geometry — e.g. a click inside the visible file-browser box read as
+        // "outside" and closed the dialog (Feature 012 follow-up).
+        self.terminal_size = (size.width, size.height);
 
         // Enforce minimum terminal size
         if size.width < MIN_WIDTH || size.height < MIN_HEIGHT {
@@ -2787,6 +2794,24 @@ mod tests {
 
     fn make_app() -> App {
         App::new(Config::default(), vec![], EncodingId::Utf8, None, None)
+    }
+
+    // Regression (Feature 012 follow-up): render must sync `terminal_size` to the
+    // real frame so mouse hit-testing uses the same geometry that is drawn. When
+    // it was stale, clicks inside the visible file-browser box on a non-80x24
+    // terminal mapped to "outside" and closed the dialog.
+    #[test]
+    fn render_syncs_terminal_size_to_frame() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = make_app();
+        app.terminal_size = (80, 24); // stale default
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        assert_eq!(
+            app.terminal_size,
+            (120, 40),
+            "terminal_size must follow the actual frame size"
+        );
     }
 
     fn make_app_with_encoding(enc: EncodingId) -> App {

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mouse clicks in the file browser (and menus) on non-80×24 terminals.** `terminal_size` was only
+  refreshed on a resize event, so on startup it stayed at the default 80×24 while the UI was drawn
+  for the real frame size. Mouse hit-testing used the stale geometry, so a click inside the visible
+  Open/Save browser box could map to "outside" and close the dialog. The render path now syncs
+  `terminal_size` to the actual frame every frame, so clicks land on what is drawn at any size.
+
 ### feature 013: DOS-style menu mnemonic accelerators
 
 #### Added
