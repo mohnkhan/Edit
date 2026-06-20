@@ -483,9 +483,13 @@ impl App {
             .unwrap_or("unknown")
     }
 
-    /// Viewport height in lines (terminal rows minus menubar and statusbar).
+    /// Viewport height in lines (terminal rows minus menubar and statusbar, and —
+    /// Feature 021 — minus the editor's bottom horizontal-scrollbar row in
+    /// non-wrap mode). Single source of truth shared with the editor render and
+    /// mouse mapping so scrolling/paging/cursor-visibility match what is drawn.
     fn viewport_height(&self) -> usize {
-        (self.terminal_size.1 as usize).saturating_sub(2)
+        let hbar = if self.soft_wrap { 0 } else { 1 };
+        (self.terminal_size.1 as usize).saturating_sub(2 + hbar)
     }
 
     // ── Event loop ───────────────────────────────────────────────────────────
@@ -2758,12 +2762,14 @@ impl App {
 
     /// Ordered button labels for the open confirm/dismiss dialog (tab order).
     pub fn dialog_button_labels(&self) -> Vec<&'static str> {
+        // Feature 021: each label carries its activating key. Dispatch
+        // (`activate_dialog_button`) keys on the button index, never this text.
         match self.open_button_dialog() {
-            Some(ButtonDialog::SessionRestore) => vec!["Restore", "Decline"],
-            Some(ButtonDialog::SavePrompt) => vec!["Save", "Discard", "Cancel"],
-            Some(ButtonDialog::ExternalChange) => vec!["Reload", "Keep"],
-            Some(ButtonDialog::RevertConfirm) => vec!["Revert", "Cancel"],
-            Some(ButtonDialog::PluginConsent) => vec!["Allow", "Deny"],
+            Some(ButtonDialog::SessionRestore) => vec!["Restore (Enter)", "Decline (Esc)"],
+            Some(ButtonDialog::SavePrompt) => vec!["Save (S)", "Discard (D)", "Cancel (Esc)"],
+            Some(ButtonDialog::ExternalChange) => vec!["Reload (Enter)", "Keep (Esc)"],
+            Some(ButtonDialog::RevertConfirm) => vec!["Revert (Enter)", "Cancel (Esc)"],
+            Some(ButtonDialog::PluginConsent) => vec!["Allow (Enter)", "Deny (Esc)"],
             None => vec![],
         }
     }
@@ -2977,18 +2983,20 @@ impl App {
     /// after the primary control). Mode-aware for Find/Replace and the file
     /// browser.
     pub fn interactive_button_labels(&self) -> Vec<&'static str> {
+        // Feature 021: labels carry their activating key; dispatch
+        // (`activate_interactive_button`) keys on index + mode, not this text.
         match self.interactive_dialog() {
-            Some(InteractiveDialog::EncodingSelect) => vec!["OK", "Cancel"],
-            Some(InteractiveDialog::PluginManager) => vec!["Close"],
+            Some(InteractiveDialog::EncodingSelect) => vec!["OK (Enter)", "Cancel (Esc)"],
+            Some(InteractiveDialog::PluginManager) => vec!["Close (Esc)"],
             Some(InteractiveDialog::FileBrowser) => {
                 let save = matches!(
                     self.file_browser.as_ref().map(|b| b.mode),
                     Some(crate::ui::file_browser::BrowseMode::Save)
                 );
                 if save {
-                    vec!["Save", "Cancel"]
+                    vec!["Save (Enter)", "Cancel (Esc)"]
                 } else {
-                    vec!["Open", "Cancel"]
+                    vec!["Open (Enter)", "Cancel (Esc)"]
                 }
             }
             Some(InteractiveDialog::FindReplace) => {
@@ -2997,9 +3005,14 @@ impl App {
                     Some(DialogMode::Replace)
                 );
                 if replace {
-                    vec!["Find", "Replace", "Replace All", "Close"]
+                    vec![
+                        "Find (Enter)",
+                        "Replace",
+                        "Replace All (Ctrl+A)",
+                        "Close (Esc)",
+                    ]
                 } else {
-                    vec!["Find", "Close"]
+                    vec!["Find (Enter)", "Close (Esc)"]
                 }
             }
             None => vec![],
@@ -3092,13 +3105,25 @@ impl App {
                 }
             }
             Some(InteractiveDialog::FindReplace) => {
-                let labels = self.interactive_button_labels();
-                match labels.get(idx).copied() {
-                    Some("Find") => self.run_find_from_dialog(),
-                    Some("Replace") => self.replace_current_from_dialog(),
-                    Some("Replace All") => self.replace_all_from_dialog(),
-                    Some("Close") => self.close_find_replace(),
-                    _ => {}
+                // Dispatch on (mode, index), not label text (labels carry key hints).
+                // Find mode ring buttons: [Find, Close]; Replace mode:
+                // [Find, Replace, Replace All, Close].
+                let replace = matches!(
+                    self.pending_find_replace.as_ref().map(|d| d.mode),
+                    Some(DialogMode::Replace)
+                );
+                if replace {
+                    match idx {
+                        0 => self.run_find_from_dialog(),
+                        1 => self.replace_current_from_dialog(),
+                        2 => self.replace_all_from_dialog(),
+                        _ => self.close_find_replace(),
+                    }
+                } else {
+                    match idx {
+                        0 => self.run_find_from_dialog(),
+                        _ => self.close_find_replace(),
+                    }
                 }
             }
             None => {}
@@ -3276,6 +3301,17 @@ impl App {
             return Ok(());
         }
 
+        // Feature 021 — Help/About overlay: a click on the boxed Close button
+        // dismisses it (same effect as Esc). Other clicks are inert (modal).
+        if self.pending_help.is_some() {
+            let (w, h) = self.terminal_size;
+            let rects = crate::ui::help_close_button_rects(ratatui::layout::Rect::new(0, 0, w, h));
+            if crate::ui::buttons::hit_test_buttons(&rects, ev.col, ev.row).is_some() {
+                self.pending_help = None;
+            }
+            return Ok(());
+        }
+
         // Feature 020 — interactive/list dialog buttons: a click on a boxed
         // button activates it directly (buttons win over the list/entry hit-test
         // that follows). Uses the same geometry the renderer drew with.
@@ -3422,9 +3458,18 @@ impl App {
     /// `col` and `row` are 0-based terminal coordinates.  Row 0 is the menu bar
     /// and the last row is the status bar, so editor rows are `1..terminal_rows-1`.
     pub fn handle_mouse_click(&mut self, col: u16, row: u16) {
-        let (_, term_rows) = self.terminal_size;
+        let (term_cols, term_rows) = self.terminal_size;
 
         if row == 0 || row >= term_rows.saturating_sub(1) {
+            return;
+        }
+        // Feature 021: the editor reserves its rightmost column for the vertical
+        // scrollbar and (non-wrap) its bottom row for the horizontal scrollbar;
+        // clicks on those reserved cells must not move the cursor.
+        if col >= term_cols.saturating_sub(1) {
+            return;
+        }
+        if !self.soft_wrap && row == term_rows.saturating_sub(2) {
             return;
         }
 
@@ -3651,10 +3696,14 @@ impl App {
 
     // ── Feature 005 — Soft-wrap helpers ──────────────────────────────────────
 
-    /// Viewport content width: terminal columns minus the gutter (if line numbers on).
+    /// Viewport content width: terminal columns minus the gutter (if line numbers
+    /// on) and minus the editor's rightmost vertical-scrollbar column (Feature 021).
     fn content_width(&self) -> u16 {
         let gutter: u16 = if self.config.line_numbers { 4 } else { 0 };
-        self.terminal_size.0.saturating_sub(gutter)
+        self.terminal_size
+            .0
+            .saturating_sub(gutter)
+            .saturating_sub(1)
     }
 
     /// Compute the global visual row index for the cursor position (using wrap cache).
@@ -3916,6 +3965,83 @@ mod tests {
                 "exactly one focused button rendered (setup {setup})"
             );
         }
+    }
+
+    // ── Feature 021 — editor scrollbar geometry ──────────────────────────────
+
+    // T019: the editor renders its scrollbars (overflowing buffer) with line
+    // numbers on, in split view, and across a range of sizes without panicking,
+    // and a scrollbar thumb/track glyph is present.
+    #[test]
+    fn editor_scrollbars_render_with_gutter_split_and_resize() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let bar_glyphs = ['█', '░', '▲', '▼', '◄', '►'];
+        let render_has_bar = |app: &mut App, w: u16, h: u16| -> bool {
+            let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+            t.draw(|f| app.render(f)).unwrap();
+            t.backend().buffer().content().iter().any(|c| {
+                c.symbol()
+                    .chars()
+                    .next()
+                    .is_some_and(|g| bar_glyphs.contains(&g))
+            })
+        };
+        for (w, h) in [(80u16, 24u16), (100, 40), (80, 24)] {
+            let mut a = make_app();
+            a.terminal_size = (w, h);
+            a.config.line_numbers = true;
+            // A buffer taller than the viewport → vertical scrollbar.
+            for _ in 0..(h as usize + 20) {
+                a.handle_action(Action::InsertNewline).unwrap();
+            }
+            assert!(render_has_bar(&mut a, w, h), "single view: scrollbar drawn");
+            // Split view renders bars in each pane without panic.
+            a.split_mode = crate::ui::SplitMode::Vertical;
+            assert!(render_has_bar(&mut a, w, h), "split view: scrollbar drawn");
+        }
+    }
+
+    // T007: viewport_height accounts for the reserved horizontal-scrollbar row in
+    // non-wrap mode, but not in soft-wrap (no horizontal bar there).
+    #[test]
+    fn viewport_height_reserves_hbar_row_in_nonwrap_only() {
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        a.soft_wrap = false;
+        assert_eq!(a.viewport_height(), 21, "24 - menu - status - hbar row");
+        a.soft_wrap = true;
+        assert_eq!(a.viewport_height(), 22, "soft-wrap: no horizontal bar row");
+    }
+
+    // T007: content_width reserves the rightmost vertical-scrollbar column.
+    #[test]
+    fn content_width_reserves_vbar_column() {
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        a.config.line_numbers = false;
+        assert_eq!(a.content_width(), 79, "80 - vbar column");
+        a.config.line_numbers = true;
+        assert_eq!(a.content_width(), 75, "80 - gutter(4) - vbar column");
+    }
+
+    // T007: a click on the reserved scrollbar cells does not move the cursor.
+    #[test]
+    fn click_on_reserved_scrollbar_cells_is_inert() {
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        a.soft_wrap = false;
+        for _ in 0..3 {
+            a.handle_action(Action::InsertNewline).unwrap();
+        }
+        a.buffers[0].cursor.line = 1;
+        a.buffers[0].cursor.grapheme_col = 0;
+        let before = a.buffers[0].cursor;
+        // Rightmost column = vertical scrollbar.
+        a.handle_mouse_click(79, 3);
+        assert_eq!(a.buffers[0].cursor, before, "vbar-column click ignored");
+        // Bottom editor row (row 22 = terminal rows - 2) = horizontal scrollbar.
+        a.handle_mouse_click(5, 22);
+        assert_eq!(a.buffers[0].cursor, before, "hbar-row click ignored");
     }
 
     // Feature 018: Help renders a grouped Key|Action table and scrolls.

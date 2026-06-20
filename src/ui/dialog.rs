@@ -260,6 +260,23 @@ impl Widget for EncodingSelectDialog {
 
         paragraph.render(dialog_area, buf);
 
+        // Feature 021: vertical scrollbar when the option list cannot fit (only on
+        // a terminal too short for all entries — the box otherwise fits all 7).
+        let body_rows = (dialog_area.height as usize).saturating_sub(2 + 4);
+        crate::ui::scrollbar::render_vertical(
+            buf,
+            Rect::new(
+                dialog_area.x + 1,
+                dialog_area.y + 1,
+                dialog_area.width.saturating_sub(2),
+                body_rows as u16,
+            ),
+            ENCODING_OPTIONS.len(),
+            body_rows,
+            self.cursor_idx,
+            self.theme,
+        );
+
         // Feature 020: boxed OK / Cancel buttons in the bottom interior rows.
         // `usize::MAX` highlights none (used when the list, not a button, is focused).
         let labels = ["OK", "Cancel"];

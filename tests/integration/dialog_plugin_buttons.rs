@@ -33,7 +33,7 @@ fn click(app: &mut App, col: u16, row: u16) {
 #[test]
 fn ring_is_list_close_and_wraps() {
     let mut a = app();
-    assert_eq!(a.interactive_button_labels(), vec!["Close"]);
+    assert_eq!(a.interactive_button_labels(), vec!["Close (Esc)"]);
     a.handle_action(Action::FocusNextField).unwrap(); // 0 (list) -> 1 (Close)
     assert_eq!(a.dialog_focus, 1);
     assert_eq!(a.interactive_focus_is_button(), Some(0));

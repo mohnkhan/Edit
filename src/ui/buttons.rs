@@ -19,6 +19,9 @@ use crate::ui::theme::Theme;
 /// Horizontal padding inside each button box (one space each side).
 const PAD: u16 = 1;
 
+/// Feature 021: label for the Help/About Close button (key hint on the label).
+pub const HELP_CLOSE_LABEL: &str = "Close (Esc)";
+
 /// Width of a button box for `label`: borders (2) + padding (2) + label width.
 fn button_width(label: &str) -> u16 {
     2 + 2 * PAD + UnicodeWidthStr::width(label) as u16

@@ -120,6 +120,14 @@ path = "tests/integration/dialog_browser_buttons.rs"
 name = "dialog_findreplace_buttons"
 path = "tests/integration/dialog_findreplace_buttons.rs"
 
+[[test]]
+name = "help_close_button"
+path = "tests/integration/help_close_button.rs"
+
+[[test]]
+name = "dialog_key_hints"
+path = "tests/integration/dialog_key_hints.rs"
+
 [[bench]]
 name = "startup"
 harness = false
