@@ -50,6 +50,9 @@ enum ButtonDialog {
     ExternalChange,
     RevertConfirm,
     PluginConsent,
+    /// Feature 027: closing a modified buffer via its tab `[x]`. Acts on the
+    /// stored buffer index (`pending_close_confirm`), not necessarily the active.
+    CloseConfirm,
 }
 
 /// Interactive/list dialogs that carry a combined primary-control + boxed-button
@@ -219,6 +222,11 @@ pub struct App {
     /// Set to the buffer index awaiting a Revert confirmation (buffer is modified);
     /// `Some` shows a modal confirm dialog. Cleared on confirm/cancel.
     pub pending_revert_confirm: Option<usize>,
+
+    // ── Feature 027: tab `[x]` close confirmation ─────────────────────────────
+    /// Set to the buffer index awaiting a close confirmation (the clicked tab's
+    /// buffer is modified). `Some` shows the [`ButtonDialog::CloseConfirm`] modal.
+    pub pending_close_confirm: Option<usize>,
 
     // ── Feature 015: interactive Find / Replace dialog ────────────────────────
     /// `Some` while an interactive Find/Replace dialog is open (modal).
@@ -437,6 +445,7 @@ impl App {
             pending_external_change: None,
             watcher_notice,
             pending_revert_confirm: None,
+            pending_close_confirm: None,
             pending_find_replace: None,
             pending_goto_line: None,
             dialog_focus: 0,
@@ -537,13 +546,27 @@ impl App {
             .unwrap_or("unknown")
     }
 
-    /// Viewport height in lines (terminal rows minus menubar and statusbar, and —
-    /// Feature 021 — minus the editor's bottom horizontal-scrollbar row in
-    /// non-wrap mode). Single source of truth shared with the editor render and
-    /// mouse mapping so scrolling/paging/cursor-visibility match what is drawn.
+    /// Feature 027: whether the buffer tab bar is shown (only with 2+ buffers).
+    pub fn tab_bar_visible(&self) -> bool {
+        self.buffers.len() > 1
+    }
+
+    /// Feature 027: first terminal row of the editor area — below the menu bar
+    /// (row 0) and, when shown, the tab bar (row 1). Single source of truth so
+    /// the render, scroll math, and mouse mapping all agree.
+    pub fn editor_top(&self) -> u16 {
+        1 + if self.tab_bar_visible() { 1 } else { 0 }
+    }
+
+    /// Viewport height in lines (terminal rows minus menubar, statusbar, the
+    /// Feature-027 tab-bar row when shown, and — Feature 021 — the editor's bottom
+    /// horizontal-scrollbar row in non-wrap mode). Single source of truth shared
+    /// with the editor render and mouse mapping so scrolling/paging/cursor-
+    /// visibility match what is drawn.
     fn viewport_height(&self) -> usize {
         let hbar = if self.soft_wrap { 0 } else { 1 };
-        (self.terminal_size.1 as usize).saturating_sub(2 + hbar)
+        // editor_top accounts for the menu bar (+ tab bar); -1 for the status bar.
+        (self.terminal_size.1 as usize).saturating_sub(self.editor_top() as usize + 1 + hbar)
     }
 
     /// Feature 023: scroll the editor pane `buf_idx` by `step` rows (viewport
@@ -639,8 +662,10 @@ impl App {
         } else if self.pending_find_replace.is_some() || self.pending_goto_line.is_some() {
             // Find/Replace and Go-to-Line have no scrollable content.
         } else {
-            // Editor — the pane under the cursor column.
-            let editor_area = Rect::new(0, 1, w, h.saturating_sub(2));
+            // Editor — the pane under the cursor column. Feature 027: the editor
+            // starts below the tab bar when shown.
+            let top = self.editor_top();
+            let editor_area = Rect::new(0, top, w, h.saturating_sub(top + 1));
             let (pane, buf_idx) = if matches!(self.split_mode, crate::ui::SplitMode::Vertical) {
                 let half = editor_area.width / 2;
                 if col >= editor_area.x + half {
@@ -982,6 +1007,29 @@ impl App {
                 }
                 Action::MenuClose | Action::Quit => {
                     self.pending_revert_confirm = None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        // Feature 027 — tab `[x]` close confirmation intercept: only S (save +
+        // close), D (discard + close), C/Esc (cancel) are valid; all other input
+        // is dropped so the modal stays visible. Mirrors the save-before-quit
+        // prompt so the `(S)`/`(D)` label hints are accurate.
+        if self.pending_close_confirm.is_some() {
+            match &action {
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'S') => {
+                    self.activate_dialog_button(0);
+                }
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'D') => {
+                    self.activate_dialog_button(1);
+                }
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'C') => {
+                    self.activate_dialog_button(2);
+                }
+                Action::MenuClose | Action::Quit => {
+                    self.activate_dialog_button(2);
                 }
                 _ => {}
             }
@@ -3004,14 +3052,43 @@ impl App {
     /// Close the active buffer (File ▸ Close). The sole buffer is replaced by a
     /// fresh empty one so the editor always has something to edit.
     pub fn close_active_buffer(&mut self) {
-        if self.buffers.len() <= 1 {
-            self.buffers[self.active_idx] = Buffer::new_empty();
-            self.active_idx = 0;
+        self.close_buffer_at(self.active_idx);
+    }
+
+    /// Close the buffer at `idx`, adjusting `active_idx` so the same logical
+    /// buffer stays active where possible (Feature 027). Closing the last
+    /// remaining buffer replaces it with an empty scratch buffer. No prompt — the
+    /// caller is responsible for any unsaved-changes confirmation.
+    pub fn close_buffer_at(&mut self, idx: usize) {
+        if idx >= self.buffers.len() {
             return;
         }
-        self.buffers.remove(self.active_idx);
-        if self.active_idx >= self.buffers.len() {
+        if self.buffers.len() <= 1 {
+            self.buffers[0] = Buffer::new_empty();
+            self.active_idx = 0;
+            self.clamp_scroll();
+            return;
+        }
+        self.buffers.remove(idx);
+        if self.active_idx > idx {
+            self.active_idx -= 1;
+        } else if self.active_idx >= self.buffers.len() {
             self.active_idx = self.buffers.len() - 1;
+        }
+        self.clamp_scroll();
+    }
+
+    /// Feature 027: a tab's `[x]` was clicked. A clean buffer closes immediately;
+    /// a modified one opens the [`ButtonDialog::CloseConfirm`] modal (no silent
+    /// data loss).
+    pub fn tab_close_clicked(&mut self, idx: usize) {
+        if idx >= self.buffers.len() {
+            return;
+        }
+        if self.buffers[idx].modified {
+            self.pending_close_confirm = Some(idx);
+        } else {
+            self.close_buffer_at(idx);
         }
     }
 
@@ -3043,6 +3120,8 @@ impl App {
             Some(ButtonDialog::ExternalChange)
         } else if self.pending_revert_confirm.is_some() {
             Some(ButtonDialog::RevertConfirm)
+        } else if self.pending_close_confirm.is_some() {
+            Some(ButtonDialog::CloseConfirm)
         } else if !self.pending_plugin_consent.is_empty() {
             Some(ButtonDialog::PluginConsent)
         } else {
@@ -3060,6 +3139,7 @@ impl App {
             Some(ButtonDialog::ExternalChange) => vec!["Reload (Enter)", "Keep (Esc)"],
             Some(ButtonDialog::RevertConfirm) => vec!["Revert (Enter)", "Cancel (Esc)"],
             Some(ButtonDialog::PluginConsent) => vec!["Allow (Enter)", "Deny (Esc)"],
+            Some(ButtonDialog::CloseConfirm) => vec!["Save (S)", "Discard (D)", "Cancel (Esc)"],
             None => vec![],
         }
     }
@@ -3071,6 +3151,7 @@ impl App {
             Some(ButtonDialog::ExternalChange) => 1, // Keep
             Some(ButtonDialog::RevertConfirm) => 1,  // Cancel
             Some(ButtonDialog::PluginConsent) => 1,  // Deny
+            Some(ButtonDialog::CloseConfirm) => 2,   // Cancel
             _ => 0,
         }
     }
@@ -3089,6 +3170,7 @@ impl App {
             ButtonDialog::ExternalChange => Some(1), // Keep
             ButtonDialog::RevertConfirm => Some(1),  // Cancel
             ButtonDialog::PluginConsent => Some(1),  // Deny
+            ButtonDialog::CloseConfirm => Some(2),   // Cancel
         }
     }
 
@@ -3126,6 +3208,31 @@ impl App {
                 }
             }
             Some(ButtonDialog::PluginConsent) => self.consent_decide(idx == 0),
+            Some(ButtonDialog::CloseConfirm) => {
+                // Feature 027: operate on the stored (clicked) index, not the
+                // active buffer (M1). Save → save then close; Discard → close;
+                // Cancel → dismiss, nothing closes. A failed save keeps the
+                // dialog open so no changes are silently lost (Principle VII).
+                if let Some(bidx) = self.pending_close_confirm.take() {
+                    match idx {
+                        0 => match self.buffers.get(bidx).map(|b| b.save()) {
+                            Some(Ok(())) => {
+                                if let Some(path) = self.buffers[bidx].path.clone() {
+                                    self.self_write_times.insert(path, Instant::now());
+                                }
+                                self.close_buffer_at(bidx);
+                            }
+                            Some(Err(e)) => {
+                                log::error!("Save failed on tab close: {}", e);
+                                self.pending_close_confirm = Some(bidx); // keep open
+                            }
+                            None => {}
+                        },
+                        1 => self.close_buffer_at(bidx),
+                        _ => {} // Cancel — already cleared by take()
+                    }
+                }
+            }
             None => {}
         }
     }
@@ -3176,6 +3283,20 @@ impl App {
                 (
                     "Plugin Consent",
                     vec![format!("Allow plugin '{}' to run?", name)],
+                )
+            }
+            ButtonDialog::CloseConfirm => {
+                // Name the buffer being closed (the stored index, not active).
+                let name = self
+                    .pending_close_confirm
+                    .and_then(|i| self.buffers.get(i))
+                    .and_then(|b| b.path.as_ref())
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "[No Name]".to_string());
+                (
+                    "Unsaved Changes",
+                    vec![format!("Save changes to {} before closing?", name)],
                 )
             }
         };
@@ -3658,9 +3779,10 @@ impl App {
             } else if self.pending_find_replace.is_some() || self.pending_goto_line.is_some() {
                 // Find/Replace and Go-to-Line have no scrollable content — ignore.
             } else {
-                // Editor: ignore the menu-bar row (0) and status-bar row (last).
+                // Editor: ignore the menu/tab rows (above editor_top) and the
+                // status-bar row (last).
                 let (w, term_rows) = self.terminal_size;
-                if ev.row >= 1 && ev.row + 1 < term_rows {
+                if ev.row >= self.editor_top() && ev.row + 1 < term_rows {
                     let buf_idx = if matches!(self.split_mode, crate::ui::SplitMode::Vertical) {
                         if ev.col >= w / 2 && self.buffers.len() > 1 {
                             self.active_idx.max(1)
@@ -3832,7 +3954,28 @@ impl App {
             || self.pending_revert_confirm.is_some()
             || self.pending_find_replace.is_some()
             || self.pending_goto_line.is_some()
+            || self.pending_close_confirm.is_some()
         {
+            return Ok(());
+        }
+
+        // Feature 027 — tab bar: a click on the tab row switches buffers (label)
+        // or closes one (`[x]`), and never reaches the editor (FR-008). Uses the
+        // same geometry as the renderer. A click on the row outside any tab is a
+        // no-op. Reached only when no modal is open (guarded above).
+        if self.tab_bar_visible() && ev.row + 1 == self.editor_top() {
+            let area = ratatui::layout::Rect::new(0, ev.row, self.terminal_size.0, 1);
+            for r in crate::ui::tabbar::tab_hit_regions(area, &self.buffers, self.active_idx) {
+                if ev.col == r.close_rect.x {
+                    self.tab_close_clicked(r.idx);
+                    return Ok(());
+                }
+                if ev.col >= r.label_rect.x && ev.col < r.label_rect.x + r.label_rect.width {
+                    self.active_idx = r.idx;
+                    self.clamp_scroll();
+                    return Ok(());
+                }
+            }
             return Ok(());
         }
 
@@ -3888,7 +4031,10 @@ impl App {
     pub fn handle_mouse_click(&mut self, col: u16, row: u16) {
         let (term_cols, term_rows) = self.terminal_size;
 
-        if row == 0 || row >= term_rows.saturating_sub(1) {
+        // Feature 027: the editor starts at `editor_top()` (below the menu bar and,
+        // when shown, the tab bar). Rows above it and the status row are not editor.
+        let top = self.editor_top();
+        if row < top || row >= term_rows.saturating_sub(1) {
             return;
         }
         // Feature 021: the editor reserves its rightmost column for the vertical
@@ -3901,7 +4047,7 @@ impl App {
             return;
         }
 
-        let clicked_row = row as usize - 1; // 0-based editor row
+        let clicked_row = (row - top) as usize; // 0-based editor row
 
         // Soft-wrap mode: map (visual_row, visual_col) → (logical_line, grapheme_col).
         if self.soft_wrap {
@@ -4393,6 +4539,95 @@ mod tests {
                 "exactly one focused button rendered (setup {setup})"
             );
         }
+    }
+
+    // ── Feature 027 — tab-bar-aware editor geometry ──────────────────────────
+
+    // T003: editor_top()/viewport_height reflect the tab-bar row only with 2+ buffers.
+    #[test]
+    fn editor_top_and_viewport_height_track_tab_bar() {
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        a.soft_wrap = false;
+        // One buffer → no tab bar; editor at row 1; height = 24-2-hbar(1) = 21.
+        assert!(!a.tab_bar_visible());
+        assert_eq!(a.editor_top(), 1);
+        assert_eq!(a.viewport_height(), 21);
+        // Two buffers → tab bar row; editor at row 2; height drops by 1 → 20.
+        a.buffers.push(crate::buffer::Buffer::new_empty());
+        assert!(a.tab_bar_visible());
+        assert_eq!(a.editor_top(), 2);
+        assert_eq!(a.viewport_height(), 20);
+        // Soft-wrap (no hbar): one buffer 22, two buffers 21.
+        a.soft_wrap = true;
+        assert_eq!(a.viewport_height(), 21);
+    }
+
+    // T010: close_buffer_at removes the buffer and keeps the right buffer active.
+    #[test]
+    fn close_buffer_at_adjusts_active_index() {
+        let mut a = make_app();
+        // Four buffers A,B,C,D; active = C (idx 2).
+        a.buffers = vec![
+            crate::buffer::Buffer::new_empty(),
+            crate::buffer::Buffer::new_empty(),
+            crate::buffer::Buffer::new_empty(),
+            crate::buffer::Buffer::new_empty(),
+        ];
+        for (i, b) in a.buffers.iter_mut().enumerate() {
+            b.path = Some(std::path::PathBuf::from(format!("f{i}.txt")));
+        }
+        a.active_idx = 2;
+        // Close before active → active shifts down to stay on the same buffer.
+        a.close_buffer_at(0); // [f1,f2,f3], active was f2 → idx 1
+        assert_eq!(a.buffers.len(), 3);
+        assert_eq!(a.active_idx, 1);
+        assert_eq!(
+            a.buffers[a.active_idx].path.as_ref().unwrap().to_str(),
+            Some("f2.txt")
+        );
+        // Close after active → active index unchanged.
+        a.close_buffer_at(2); // remove f3 → [f1,f2], active still f2 (idx 1)
+        assert_eq!(a.active_idx, 1);
+        assert_eq!(
+            a.buffers[a.active_idx].path.as_ref().unwrap().to_str(),
+            Some("f2.txt")
+        );
+        // Close the active (last) → previous becomes active.
+        a.close_buffer_at(1); // remove f2 → [f1], active clamps to 0
+        assert_eq!(a.buffers.len(), 1);
+        assert_eq!(a.active_idx, 0);
+        // Closing the final buffer replaces it with an empty scratch buffer.
+        a.close_buffer_at(0);
+        assert_eq!(a.buffers.len(), 1);
+        assert_eq!(a.active_idx, 0);
+        assert!(a.buffers[0].path.is_none());
+    }
+
+    // T010: tab_close_clicked prompts for a modified buffer, closes a clean one.
+    #[test]
+    fn tab_close_clicked_prompts_only_when_modified() {
+        let mut a = make_app();
+        a.buffers = vec![
+            crate::buffer::Buffer::new_empty(),
+            crate::buffer::Buffer::new_empty(),
+        ];
+        a.buffers[1].modified = true;
+        a.active_idx = 0;
+        // Clean buffer (idx 0) closes immediately, no prompt.
+        a.tab_close_clicked(0);
+        assert_eq!(a.buffers.len(), 1);
+        assert!(a.pending_close_confirm.is_none());
+        // Re-create a modified second buffer; its [x] opens the confirm.
+        a.buffers.push(crate::buffer::Buffer::new_empty());
+        a.buffers[1].modified = true;
+        a.tab_close_clicked(1);
+        assert_eq!(a.buffers.len(), 2, "nothing closed yet");
+        assert_eq!(a.pending_close_confirm, Some(1));
+        // Discard (button 1) closes it.
+        a.activate_dialog_button(1);
+        assert_eq!(a.buffers.len(), 1);
+        assert!(a.pending_close_confirm.is_none());
     }
 
     // ── Feature 025 — Go-to-Line prompt render ────────────────────────────────
