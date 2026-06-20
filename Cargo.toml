@@ -160,6 +160,10 @@ path = "tests/integration/ux_round2.rs"
 name = "interaction"
 path = "tests/integration/interaction.rs"
 
+[[test]]
+name = "field_caret"
+path = "tests/integration/field_caret.rs"
+
 [[bench]]
 name = "startup"
 harness = false

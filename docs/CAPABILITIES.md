@@ -87,6 +87,11 @@ replaces it; `Backspace`/`Delete` delete it; moving without Shift (or a single c
 In dialogs, clicking a list row (encoding select, plugin manager) selects it (Feature 030). The
 right-click context menu is operable by mouse or keyboard (`↑`/`↓`, `Enter`/`Space`, `Esc`).
 
+In dialog text fields — the Find/Replace query & replacement, the file-browser Name/path, and the
+Go-to-Line input — clicking positions the caret at the clicked character, and the caret can be moved with
+`←`/`→`/`Home`/`End` with insert/delete acting at the caret (Feature 031). In the file browser these edit
+keys act while a filename is being typed; with an empty field, `←`/`→` keep their navigation meaning.
+
 ### Search and Replace
 
 | Key | Action |

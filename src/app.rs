@@ -247,6 +247,9 @@ pub struct App {
     /// `Some(digits)` while the Go-to-Line prompt is open (modal); holds the
     /// in-progress 1-based line number being typed.
     pub pending_goto_line: Option<String>,
+    /// Feature 031: caret position (index into the digit string) for the
+    /// Go-to-Line input — supports mid-string edit and click-to-position.
+    pub pending_goto_line_caret: usize,
 
     // ── Feature 016: focused dialog button ────────────────────────────────────
     /// Index of the focused button in the currently open confirm/dismiss dialog.
@@ -475,6 +478,7 @@ impl App {
             pending_context_menu: None,
             pending_find_replace: None,
             pending_goto_line: None,
+            pending_goto_line_caret: 0,
             dialog_focus: 0,
             dialog_focus_init: false,
             drag_anchor: None,
@@ -1208,12 +1212,33 @@ impl App {
         // Enter jumps (clamped) to the line start, Esc cancels; everything else is
         // consumed so the buffer is never modified while the prompt is open.
         if self.pending_goto_line.is_some() {
+            // Feature 031: caret-aware digit editing. The value is ASCII digits, so
+            // the caret index equals a byte offset.
             match &action {
                 Action::InsertChar(c) if c.is_ascii_digit() => {
-                    self.pending_goto_line.as_mut().unwrap().push(*c);
+                    let entry = self.pending_goto_line.as_mut().unwrap();
+                    let caret = self.pending_goto_line_caret.min(entry.len());
+                    entry.insert(caret, *c);
+                    self.pending_goto_line_caret = caret + 1;
                 }
                 Action::Backspace => {
-                    self.pending_goto_line.as_mut().unwrap().pop();
+                    let entry = self.pending_goto_line.as_mut().unwrap();
+                    let caret = self.pending_goto_line_caret.min(entry.len());
+                    if caret > 0 {
+                        entry.remove(caret - 1);
+                        self.pending_goto_line_caret = caret - 1;
+                    }
+                }
+                Action::MoveLeft => {
+                    self.pending_goto_line_caret = self.pending_goto_line_caret.saturating_sub(1);
+                }
+                Action::MoveRight => {
+                    let len = self.pending_goto_line.as_ref().unwrap().len();
+                    self.pending_goto_line_caret = (self.pending_goto_line_caret + 1).min(len);
+                }
+                Action::MoveLineStart => self.pending_goto_line_caret = 0,
+                Action::MoveLineEnd => {
+                    self.pending_goto_line_caret = self.pending_goto_line.as_ref().unwrap().len();
                 }
                 Action::InsertNewline => {
                     let entry = self.pending_goto_line.take().unwrap_or_default();
@@ -1303,11 +1328,19 @@ impl App {
             let mut outcome: Option<BrowseOutcome> = None;
             {
                 let fb = self.file_browser.as_mut().unwrap();
+                // Feature 031: while a filename is being typed, Left/Right/Home/End
+                // edit the field caret; with an empty field they keep the list
+                // navigation semantics (← parent, → activate).
+                let editing = !fb.filename.is_empty();
                 match &action {
                     Action::MoveUp => fb.move_up(vis),
                     Action::MoveDown => fb.move_down(vis),
                     Action::MovePageUp => fb.page_up(vis),
                     Action::MovePageDown => fb.page_down(vis),
+                    Action::MoveLeft if editing => fb.caret_left(),
+                    Action::MoveRight if editing => fb.caret_right(),
+                    Action::MoveLineStart if editing => fb.caret_home(),
+                    Action::MoveLineEnd if editing => fb.caret_end(),
                     Action::MoveLeft => fb.enter_parent(),
                     Action::MoveRight | Action::InsertNewline => outcome = Some(fb.activate()),
                     Action::Backspace => fb.backspace(),
@@ -1565,6 +1598,7 @@ impl App {
                 // Feature 029: don't open over a menu
                 {
                     self.pending_goto_line = Some(String::new());
+                    self.pending_goto_line_caret = 0; // Feature 031
                 }
             }
             // Search-option toggles and Tab focus are only meaningful inside an
@@ -4230,6 +4264,25 @@ impl App {
             return Ok(());
         }
 
+        // Feature 031 (#58) — Go-to-Line: a click in the digit field positions the
+        // caret. Geometry mirrors the render: a centered box of width
+        // `(19 + digits.len()).clamp(20, w)`; the digits start after the border +
+        // the "Go to line: " (12-col) prefix.
+        if let Some(entry) = self.pending_goto_line.clone() {
+            let (w, h) = self.terminal_size;
+            let dw = ((19 + entry.len()) as u16).clamp(20, w.max(1));
+            let dh = 3u16.min(h.max(1));
+            let dx = w.saturating_sub(dw) / 2;
+            let dy = h.saturating_sub(dh) / 2;
+            let value_x = dx + 1 + "Go to line: ".len() as u16;
+            let field_w = dw.saturating_sub(2 + 12);
+            if ev.row == dy + 1 && ev.col >= value_x && ev.col < value_x + field_w {
+                self.pending_goto_line_caret =
+                    crate::ui::width::field_caret_at(&entry, field_w, ev.col - value_x);
+            }
+            return Ok(());
+        }
+
         // Feature 020 — interactive/list dialog buttons: a click on a boxed
         // button activates it directly (buttons win over the list/entry hit-test
         // that follows). Uses the same geometry the renderer drew with.
@@ -4265,6 +4318,38 @@ impl App {
                             return Ok(());
                         }
                     }
+                    Some(InteractiveDialog::FindReplace) => {
+                        // Feature 031 (#58): a click in a field's text box moves the
+                        // caret to the clicked grapheme and focuses that field.
+                        let (w, h) = self.terminal_size;
+                        let full = ratatui::layout::Rect::new(0, 0, w, h);
+                        if let Some(d) = self.pending_find_replace.as_ref() {
+                            let fields = crate::ui::find_replace_field_rects(d, full);
+                            for (field, fr) in fields {
+                                if ev.row == fr.y && ev.col >= fr.x && ev.col < fr.x + fr.width {
+                                    let value = match field {
+                                        crate::ui::dialog::DialogField::Query => &d.query,
+                                        crate::ui::dialog::DialogField::Replacement => {
+                                            &d.replacement
+                                        }
+                                    };
+                                    let caret = crate::ui::width::field_caret_at(
+                                        value,
+                                        fr.width,
+                                        ev.col - fr.x,
+                                    );
+                                    let d = self.pending_find_replace.as_mut().unwrap();
+                                    d.set_focus(field);
+                                    d.caret = caret;
+                                    self.dialog_focus = match field {
+                                        crate::ui::dialog::DialogField::Query => 0,
+                                        crate::ui::dialog::DialogField::Replacement => 1,
+                                    };
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -4281,6 +4366,16 @@ impl App {
         if self.file_browser.is_some() {
             let (w, h) = self.terminal_size;
             let area = ratatui::layout::Rect::new(0, 0, w, h);
+            // Feature 031 (#58): a click inside the Name/path field box positions
+            // the caret there (checked before the list/outside hit-test).
+            {
+                let fb = self.file_browser.as_ref().unwrap();
+                let fr = fb.field_text_rect(area);
+                if ev.row == fr.y && ev.col >= fr.x && ev.col < fr.x + fr.width {
+                    self.file_browser.as_mut().unwrap().caret_click(fr, ev.col);
+                    return Ok(());
+                }
+            }
             let hit = self
                 .file_browser
                 .as_ref()
@@ -5023,6 +5118,39 @@ mod tests {
         a.buffers[0].scroll_offset.1 = 2;
         a.handle_mouse_click(5, 1);
         assert_eq!(a.buffers[0].cursor.grapheme_col, 3);
+    }
+
+    // T013 (Feature 031): Go-to-Line is a caret-aware digit input.
+    #[test]
+    fn goto_line_caret_editing() {
+        let mut a = make_app();
+        a.pending_goto_line = Some(String::new());
+        a.pending_goto_line_caret = 0;
+        for c in ['1', '2', '3'] {
+            a.handle_action(Action::InsertChar(c)).unwrap();
+        }
+        assert_eq!(a.pending_goto_line.as_deref(), Some("123"));
+        assert_eq!(a.pending_goto_line_caret, 3);
+        // Home, then insert mid-string.
+        a.handle_action(Action::MoveLineStart).unwrap();
+        assert_eq!(a.pending_goto_line_caret, 0);
+        a.handle_action(Action::InsertChar('9')).unwrap();
+        assert_eq!(a.pending_goto_line.as_deref(), Some("9123"));
+        assert_eq!(a.pending_goto_line_caret, 1);
+        // Non-digit rejected; caret unchanged.
+        a.handle_action(Action::InsertChar('x')).unwrap();
+        assert_eq!(a.pending_goto_line.as_deref(), Some("9123"));
+        // Right then Backspace removes the grapheme before the caret.
+        a.handle_action(Action::MoveRight).unwrap(); // caret 2
+        a.handle_action(Action::Backspace).unwrap(); // removes '1' → "923"
+        assert_eq!(a.pending_goto_line.as_deref(), Some("923"));
+        assert_eq!(a.pending_goto_line_caret, 1);
+        // End clamps; Left clamps at 0.
+        a.handle_action(Action::MoveLineEnd).unwrap();
+        assert_eq!(a.pending_goto_line_caret, 3);
+        a.handle_action(Action::MoveLineStart).unwrap();
+        a.handle_action(Action::MoveLeft).unwrap();
+        assert_eq!(a.pending_goto_line_caret, 0);
     }
 
     // T017 (Feature 029): the save-before-quit prompt cancels on Esc.

@@ -11,10 +11,10 @@
 
 ### Caret-on-click inside dialog text fields (follow-up to feature 030)
 - **Issue**: #58 (`follow-up`)
-- **Status**: Deferred 2026-06-20 (split from #53).
-- **Description**: Clicking inside the Find/Replace, Go-to-Line, and file-browser Name fields should move
-  the caret to the clicked grapheme. Needs a shared `field_caret_at` accounting for the right-anchored
-  visible text + embedded caret glyph, using `ui::width`.
+- **Status**: Complete as of 2026-06-21 (feature 031, branch `031-dialog-field-caret-click`).
+- **Description**: Clicking inside the Find/Replace, Go-to-Line, and file-browser Name fields now moves
+  the caret to the clicked grapheme (shared `ui::width::field_caret_at`); the Name and Go-to-Line inputs
+  also gained caret editing (Left/Right/Home/End, mid-string insert/delete).
 
 ### Double-click word / triple-click line selection (follow-up to feature 029)
 - **Issue**: #54 (`follow-up`)

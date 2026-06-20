@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F031-US1 | Click to position the caret in the Find/Replace query & replacement fields (#58) | Complete |
+| F031-US2 | File-browser Name field caret editing (Left/Right/Home/End, mid-string insert/delete) + click-to-position (#58) | Complete |
+| F031-US3 | Go-to-Line input caret editing + click-to-position (digits-only preserved) (#58) | Complete |
 | F030-US1 | Click a list row in the encoding/plugin dialogs to select it (closes #53 list-clicks; field caret → #58) | Complete |
 | F030-US2 | Double-click selects the word, triple-click the line (Unicode-aware, multibyte-safe) (#54) | Complete |
 | F030-US3 | Right-click context menu (Cut/Copy/Paste/Select All), mouse + keyboard, modal-aware (#55) | Complete |
