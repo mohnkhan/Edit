@@ -1,13 +1,14 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.4.0 (features 001–035 complete)
+**Version**: 0.4.0 (features 001–035 complete; 038 unreleased)
 **Last updated**: 2026-06-21
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F038 | Fix: first dropdown menu item is clickable when the tab bar is open (tab-bar click interception skipped while a dropdown overlays row 1) | Complete |
 | F035 | Animated demo GIF (`assets/demo.gif` via `examples/demo_cast.rs` + `make demo-gif`) + README revamp with corrected keybindings | Complete |
 | F034 | Crash-safe line access (cursor clamped before render; `line_slice` panic-safe) + always-on crash backtraces + `make debug-run` | Complete |
 | F033 | Fix: menu dropdown no longer hidden behind the tab bar (z-order) | Complete |

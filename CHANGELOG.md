@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 038: Fix first dropdown menu item unreachable by mouse with the tab bar open
+
+#### Fixed
+
+- **The first item of any menu could not be clicked when two or more buffers were open.** With a
+  multi-buffer tab bar on row 1, an open dropdown overlays that row (feature 033), so its first item
+  renders on row 1 — but the mouse handler treated every row-1 click as a tab-bar click and consumed
+  it before the menu hit-test ran. As a result, e.g. **Search ▸ Find** and **Help ▸ Help** could not
+  be invoked with the mouse (keyboard `Enter` was unaffected, which is why it worked). The tab-bar
+  click interception is now skipped while a dropdown is open, so the dropdown owns the rows it
+  overlays and its first item is clickable again.
+
 ## [0.4.0] - 2026-06-21
 
 Second major batch since 0.3.0 — 26 features (010–035) turning the keyboard-only menu prototype into a
