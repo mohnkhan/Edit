@@ -83,8 +83,10 @@ fn write_report(dest: &mut dyn std::io::Write, header: &str, detail: &str) {
     let _ = writeln!(dest, "{detail}");
     let _ = writeln!(dest);
 
-    // Backtrace — only available when `RUST_BACKTRACE=1` or `full`.
-    let bt = std::backtrace::Backtrace::capture();
+    // Backtrace — Feature 034: force-capture so the report ALWAYS pinpoints the
+    // crash site, even when `RUST_BACKTRACE` is unset (the common case for end
+    // users). This makes future crashes diagnosable from the report alone.
+    let bt = std::backtrace::Backtrace::force_capture();
     let bt_status = bt.status();
     let _ = writeln!(dest, "backtrace ({bt_status:?}):");
     let _ = writeln!(dest, "{bt}");

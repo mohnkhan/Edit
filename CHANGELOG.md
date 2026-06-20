@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 034: Crash-safe line access + crash diagnostics
+
+#### Fixed
+
+- **"line index out of range" panic** — a stale cursor (left pointing past a buffer's content, e.g. after
+  a session restore or switching tabs) made the renderer slice a non-existent line and crash, which the
+  panic handler then dumped over the screen ("display all over the place, menu missing, error below the
+  status line"). Two-layer fix: every buffer's cursor (and selection) is now **clamped into range before
+  each render**, and `EditorRope::line_slice` returns an empty string for an out-of-range line instead of
+  panicking. Release builds can no longer crash here; debug builds `debug_assert!` so the bug is caught at
+  its source.
+
+#### Added
+
+- **Always-on crash backtraces** — crash reports now `force_capture` a backtrace (previously only present
+  when `RUST_BACKTRACE` was set), so a crash report pinpoints the failing call site on its own.
+- **`make debug-run`** — runs the debug binary (debug-assertions + integer-overflow checks on) with
+  `RUST_BACKTRACE=full` and debug logging for easy crash reproduction/triage (`make debug-run FILE=path`).
+
+#### Notes
+
+- No new dependencies. Regression tests cover rendering with a stale cursor (clamped, no panic in debug)
+  and the panic-safe `line_slice` (empty in release).
+
 ### feature 033: Fix menu dropdown hidden behind the tab bar
 
 #### Fixed

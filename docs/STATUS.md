@@ -8,6 +8,8 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F034 | Crash-safe line access (cursor clamped before render; `line_slice` panic-safe) + always-on crash backtraces + `make debug-run` | Complete |
+| F033 | Fix: menu dropdown no longer hidden behind the tab bar (z-order) | Complete |
 | F032-US1 | Word-wise cursor movement (Ctrl+Left/Right), grapheme/word-boundary aware, crosses lines | Complete |
 | F032-US2 | Word-wise selection (Ctrl+Shift+Left/Right), usable by Copy/Cut | Complete |
 | F032-US3 | Word-wise deletion (Ctrl+Backspace/Delete), one undo step, read-only respected | Complete |

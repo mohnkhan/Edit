@@ -879,6 +879,12 @@ impl App {
         // "outside" and closed the dialog (Feature 012 follow-up).
         self.terminal_size = (size.width, size.height);
         self.ensure_dialog_focus();
+        // Feature 034: guarantee every buffer's cursor is in range before the
+        // renderer reads it. The renderer indexes lines by `cursor.line`; a stale
+        // cursor (past the content) would otherwise slice out of bounds. This is
+        // the belt to the rope's suspenders (`line_slice` also clamps) and keeps a
+        // crash from ever reaching the screen on session restore / buffer switch.
+        self.clamp_all_cursors();
 
         // Enforce minimum terminal size
         if size.width < MIN_WIDTH || size.height < MIN_HEIGHT {
@@ -2517,6 +2523,33 @@ impl App {
     }
 
     /// Adjust `scroll_offset` so that `cursor` is within the visible viewport.
+    /// Feature 034: clamp every buffer's cursor (and selection endpoints) into the
+    /// valid range for its current content, so a stale position left by any path
+    /// can never cause an out-of-range line access during render. Cheap (a handful
+    /// of buffers) and idempotent.
+    fn clamp_all_cursors(&mut self) {
+        for buf in &mut self.buffers {
+            let lc = buf.rope.line_count().max(1);
+            let clamp = |c: CursorPos, rope: &crate::buffer::rope::EditorRope| -> CursorPos {
+                let line = c.line.min(lc - 1);
+                let g = c.grapheme_col.min(rope.grapheme_count_on_line(line));
+                let visual_col = CursorPos::visual_col_from_grapheme_col(rope, line, g);
+                CursorPos {
+                    line,
+                    grapheme_col: g,
+                    visual_col,
+                }
+            };
+            buf.cursor = clamp(buf.cursor, &buf.rope);
+            if let Some(sel) = buf.selection {
+                buf.selection = Some(crate::buffer::Selection {
+                    anchor: clamp(sel.anchor, &buf.rope),
+                    active: clamp(sel.active, &buf.rope),
+                });
+            }
+        }
+    }
+
     fn clamp_scroll(&mut self) {
         // Clamp to at least 1 row: a tiny/zero terminal frame (possible now that
         // terminal_size follows the real frame, feature 012 follow-up) would make
@@ -6458,6 +6491,38 @@ mod tests {
         }
     }
 
+    // Feature 034: a stale cursor (line past the buffer's content) must NOT crash
+    // the renderer — it is clamped into range before any line is read. This is the
+    // root cause of the "line index out of range" panic seen on session restore /
+    // buffer switch (the renderer indexes lines by cursor.line).
+    #[test]
+    fn render_with_stale_cursor_line_is_clamped_not_panicking() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("hi");
+        // Park the cursor far past the single line (the stale-cursor condition).
+        a.buffers[0].cursor = crate::buffer::CursorPos {
+            line: 9,
+            grapheme_col: 9,
+            visual_col: 9,
+        };
+        let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        t.draw(|f| a.render(f)).unwrap(); // must not panic (even in debug)
+                                          // Cursor was clamped into range.
+        assert_eq!(a.buffers[0].cursor.line, 0);
+        assert!(a.buffers[0].cursor.grapheme_col <= 2);
+    }
+
+    // Feature 034: `line_slice` is panic-safe — an out-of-range line in a release
+    // build returns an empty string instead of crashing (debug builds assert).
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn line_slice_out_of_range_is_empty_in_release() {
+        let r = crate::buffer::rope::EditorRope::from_str("only one line");
+        assert_eq!(r.line_slice(7), "");
+    }
+
     // Feature 033: with the tab bar shown (2+ buffers), an open menu's dropdown
     // must overlay the tab-bar row — the first dropdown item used to be hidden
     // behind the tab bar (z-order bug).
@@ -6816,5 +6881,56 @@ mod f032_dbg2 {
         );
         a.delete_word(Direction::Left);
         eprintln!("DBG2 after={:?}", a.buffers[0].rope.line_slice(0));
+    }
+}
+
+#[cfg(test)]
+mod f034_repro2 {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn render(a: &mut App) {
+        let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        t.draw(|f| a.render(f)).unwrap();
+    }
+    fn build() -> App {
+        let mut a = App::new(Config::default(), vec![], EncodingId::Utf8, None, None);
+        a.terminal_size = (80, 24);
+        a.buffers.clear();
+        for content in ["x", "a\nb\nc", ""] {
+            let mut b = crate::buffer::Buffer::new_empty();
+            b.rope = crate::buffer::rope::EditorRope::from_str(content);
+            b.path = Some(std::path::PathBuf::from("f"));
+            a.buffers.push(b);
+        }
+        a.buffers[1].cursor = crate::buffer::CursorPos {
+            line: 2,
+            grapheme_col: 0,
+            visual_col: 0,
+        };
+        a.active_idx = 0;
+        let menus = a.resolved_menus();
+        a.menu_bar.open_menu(2, &menus);
+        a
+    }
+
+    #[test]
+    fn repro_menu_click_over_tabs() {
+        for row in 0..4u16 {
+            for col in 0..80u16 {
+                let mut a = build();
+                render(&mut a);
+                a.handle_mouse_event(crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Down(
+                        crossterm::event::MouseButton::Left,
+                    ),
+                    column: col,
+                    row,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                })
+                .unwrap();
+                render(&mut a);
+            }
+        }
     }
 }

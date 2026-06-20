@@ -1,5 +1,5 @@
 # Makefile for Linux EDIT.COM Clone
-# Targets: build release check smoke perf-check static package-deb package-rpm docs-gate
+# Targets: build debug-run release check smoke perf-check static package-deb package-rpm docs-gate
 #          stress-test ci-local tmpfs-setup tmpfs-status tmpfs-teardown help
 
 BINARY     := edit
@@ -12,11 +12,19 @@ TARGET_DIR := target
 EDIT_TMPFS_HASH := $(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-12)
 EDIT_TMPFS_ROOT := /tmp/edit/$(EDIT_TMPFS_HASH)
 
-.PHONY: build release check smoke perf-check static package-deb package-rpm docs-gate \
+.PHONY: build debug-run release check smoke perf-check static package-deb package-rpm docs-gate \
         stress-test ci-local tmpfs-setup tmpfs-status tmpfs-teardown help
 
 build:
 	$(CARGO) build
+
+# Run the debug build with full backtraces + debug logging — the most
+# diagnosable build for reproducing and triaging crashes (Feature 034). The debug
+# profile keeps debug-assertions and integer-overflow checks on, so out-of-range
+# accesses fail loudly at their source; the crash report also force-captures a
+# backtrace. Optional: `make debug-run FILE=path/to/file`.
+debug-run: build
+	RUST_BACKTRACE=full RUST_LOG=debug ./target/debug/edit --debug $(FILE)
 
 release:
 	$(CARGO) build --release
@@ -83,6 +91,7 @@ tmpfs-teardown:
 help:
 	@echo "Available targets:"
 	@echo "  build        Build debug binary"
+	@echo "  debug-run    Run the debug binary with full backtraces + debug logging (FILE=path optional)"
 	@echo "  release      Build release binary (stripped)"
 	@echo "  check        Run unit and integration tests"
 	@echo "  smoke        Run expect-based smoke tests (requires expect + tmux)"
