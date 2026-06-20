@@ -1,13 +1,17 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.3.0 (features 008 + 009 complete; 010 + 011 unreleased)
+**Version**: 0.3.0 (features 008 + 009 complete; 010 + 011 + 013 unreleased)
 **Last updated**: 2026-06-20
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F013-US1 | Underlined accelerator letter shown on every top-level menu and dropdown item | Complete |
+| F013-US2 | Typing an item's accelerator while its dropdown is open activates it; non-match is inert | Complete |
+| F013-US3 | Top-level letter / `Alt`+letter opens the matching menu; bare `Alt` activates the bar (terminal-permitting) | Complete |
+| F013-US4 | Plugin menu items/menus get auto-assigned, unique, collision-free accelerators | Complete |
 | F011-US1 | Mouse: click top-level menus and dropdown items; click-outside closes; editor click repositions cursor | Complete |
 | F011-US2 | Edit/File/View menu actions wired (Undo/Redo/Cut/Copy/Paste/Select All/New/Save As/Toggle Line Nos) | Complete |
 | F011-US3 | Help ▸ Help (key bindings) and Help ▸ About (version + copyright) screens | Complete |

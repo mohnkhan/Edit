@@ -32,37 +32,47 @@ pub struct MenuItem {
     pub label: &'static str,
     /// The editor action fired when this item is chosen.
     pub action: Action,
+    /// DOS-style accelerator letter (canonical lowercase), or `None`. The first
+    /// occurrence of this letter in `label` is underlined and activates the item
+    /// when typed while the dropdown is open (feature 013).
+    pub mnemonic: Option<char>,
 }
 
 // ---------------------------------------------------------------------------
 // Static menu definitions (T042–T047)
 // ---------------------------------------------------------------------------
 
-/// File menu items.
+/// File menu items. Accelerators follow DOS/standard convention (FR-005a / research R4).
 static FILE_MENU: &[MenuItem] = &[
     MenuItem {
         label: "New",
         action: Action::New,
+        mnemonic: Some('n'),
     },
     MenuItem {
         label: "Open",
         action: Action::Open,
+        mnemonic: Some('o'),
     },
     MenuItem {
         label: "Save",
         action: Action::Save,
+        mnemonic: Some('s'),
     },
     MenuItem {
         label: "Save As",
         action: Action::SaveAs,
+        mnemonic: Some('a'),
     },
     MenuItem {
         label: "Save As Encoding...",
         action: Action::SaveAsEncoding,
+        mnemonic: Some('e'),
     },
     MenuItem {
         label: "Exit",
         action: Action::Quit,
+        mnemonic: Some('x'),
     },
 ];
 
@@ -71,26 +81,32 @@ static EDIT_MENU: &[MenuItem] = &[
     MenuItem {
         label: "Undo",
         action: Action::Undo,
+        mnemonic: Some('u'),
     },
     MenuItem {
         label: "Redo",
         action: Action::Redo,
+        mnemonic: Some('r'),
     },
     MenuItem {
         label: "Cut",
         action: Action::Cut,
+        mnemonic: Some('c'),
     },
     MenuItem {
         label: "Copy",
         action: Action::Copy,
+        mnemonic: Some('o'),
     },
     MenuItem {
         label: "Paste",
         action: Action::Paste,
+        mnemonic: Some('p'),
     },
     MenuItem {
         label: "Select All",
         action: Action::SelectAll,
+        mnemonic: Some('s'),
     },
 ];
 
@@ -99,18 +115,22 @@ static SEARCH_MENU: &[MenuItem] = &[
     MenuItem {
         label: "Find",
         action: Action::Find,
+        mnemonic: Some('f'),
     },
     MenuItem {
         label: "Find Next",
         action: Action::FindNext,
+        mnemonic: Some('n'),
     },
     MenuItem {
         label: "Find Prev",
         action: Action::FindPrev,
+        mnemonic: Some('p'),
     },
     MenuItem {
         label: "Find Replace",
         action: Action::FindReplace,
+        mnemonic: Some('r'),
     },
 ];
 
@@ -119,22 +139,27 @@ static VIEW_MENU: &[MenuItem] = &[
     MenuItem {
         label: "Split View",
         action: Action::SplitView,
+        mnemonic: Some('s'),
     },
     MenuItem {
         label: "Next Buffer",
         action: Action::NextBuffer,
+        mnemonic: Some('n'),
     },
     MenuItem {
         label: "Prev Buffer",
         action: Action::PrevBuffer,
+        mnemonic: Some('p'),
     },
     MenuItem {
         label: "Toggle Line Nos",
         action: Action::ToggleLineNumbers,
+        mnemonic: Some('t'),
     },
     MenuItem {
         label: "Soft Wrap (ext)",
         action: Action::ToggleSoftWrap,
+        mnemonic: Some('w'),
     },
 ];
 
@@ -143,10 +168,12 @@ static OPTIONS_MENU: &[MenuItem] = &[
     MenuItem {
         label: "Toggle Highlight",
         action: Action::ToggleHighlight,
+        mnemonic: Some('h'),
     },
     MenuItem {
         label: "Plugins...",
         action: Action::OpenPluginManager,
+        mnemonic: Some('p'),
     },
 ];
 
@@ -155,10 +182,12 @@ static HELP_MENU: &[MenuItem] = &[
     MenuItem {
         label: "Help",
         action: Action::Help,
+        mnemonic: Some('h'),
     },
     MenuItem {
         label: "About",
         action: Action::About,
+        mnemonic: Some('a'),
     },
 ];
 
@@ -227,6 +256,9 @@ static BAR_LABELS: &[BarLabel] = &[
 pub struct ResolvedItem {
     pub label: String,
     pub action: Action,
+    /// Canonical lowercase accelerator letter, or `None` when the item has none
+    /// (feature 013). The first occurrence of this letter in `label` is underlined.
+    pub mnemonic: Option<char>,
 }
 
 /// A single resolved top-level menu as it appears in the bar.
@@ -234,6 +266,8 @@ pub struct ResolvedItem {
 pub struct ResolvedMenu {
     pub label: String,
     pub items: Vec<ResolvedItem>,
+    /// Canonical lowercase accelerator letter for the top-level title (feature 013).
+    pub mnemonic: Option<char>,
 }
 
 /// Build the ordered composite of top-level menus shown in the bar.
@@ -249,18 +283,53 @@ pub struct ResolvedMenu {
 ///
 /// `resolve_menus(&[])` returns exactly the built-in set (parity invariant for
 /// FR-011 / SC-003).
+/// Canonical lowercase form of a char (first scalar of its Unicode lowercase).
+fn lc(c: char) -> char {
+    c.to_lowercase().next().unwrap_or(c)
+}
+
+/// Pick a deterministic accelerator for `label`: the first alphanumeric character
+/// whose lowercase form is not already in `used`. Inserts the chosen letter into
+/// `used` and returns it, or `None` when no free letter exists (FR-006/FR-008).
+pub fn auto_mnemonic(label: &str, used: &mut std::collections::HashSet<char>) -> Option<char> {
+    for ch in label.chars() {
+        if ch.is_alphanumeric() {
+            let l = lc(ch);
+            if used.insert(l) {
+                return Some(l);
+            }
+        }
+    }
+    None
+}
+
+/// Column offset of the first char in `label` whose lowercase equals `mnemonic`,
+/// in the same char-indexed coordinate the menu renderer uses to place glyphs.
+/// `None` when there is no mnemonic or the letter is absent. UTF-8 safe — iterates
+/// by `char`, never splitting a multi-byte scalar (feature 013, FR-010).
+pub fn underline_col(label: &str, mnemonic: Option<char>) -> Option<u16> {
+    let target = mnemonic?;
+    label
+        .chars()
+        .position(|ch| lc(ch) == target)
+        .map(|i| i as u16)
+}
+
 pub fn resolve_menus(plugin_items: &[PluginMenuItem]) -> Vec<ResolvedMenu> {
-    // 1. Seed from built-ins.
+    // 1. Seed from built-ins. Top-level accelerator = first letter (f/e/s/v/o/h);
+    //    items copy their hand-authored DOS accelerator.
     let mut menus: Vec<ResolvedMenu> = BAR_LABELS
         .iter()
         .zip(ALL_MENUS.iter())
         .map(|(bl, items)| ResolvedMenu {
             label: bl.label.to_string(),
+            mnemonic: bl.label.chars().next().map(lc),
             items: items
                 .iter()
                 .map(|it| ResolvedItem {
                     label: it.label.to_string(),
                     action: it.action.clone(),
+                    mnemonic: it.mnemonic,
                 })
                 .collect(),
         })
@@ -282,6 +351,11 @@ pub fn resolve_menus(plugin_items: &[PluginMenuItem]) -> Vec<ResolvedMenu> {
         }
     }
 
+    // Top-level accelerators already in use (built-ins f/e/s/v/o/h plus any new
+    // plugin menus assigned below) so plugin top-level menus never collide.
+    let mut used_toplevel: std::collections::HashSet<char> =
+        menus.iter().filter_map(|m| m.mnemonic).collect();
+
     for (name, mut items) in groups {
         // Stable sort: items with `position` first (ascending), then load order.
         items.sort_by(|a, b| match (a.position, b.position) {
@@ -291,25 +365,39 @@ pub fn resolve_menus(plugin_items: &[PluginMenuItem]) -> Vec<ResolvedMenu> {
             (None, None) => std::cmp::Ordering::Equal,
         });
 
-        let resolved_items: Vec<ResolvedItem> = items
-            .iter()
-            .map(|pi| ResolvedItem {
-                label: pi.item.clone(),
-                action: Action::PluginMenuActivated(pi.plugin_id.clone(), pi.item_id.clone()),
-            })
-            .collect();
-
         if let Some(existing) = menus.iter_mut().find(|m| m.label == name) {
-            // Name collision with a built-in menu → merge items.
-            existing.items.extend(resolved_items);
+            // Name collision with a built-in menu → merge items, auto-assigning
+            // accelerators seeded with the menu's existing item letters (FR-009).
+            let mut used: std::collections::HashSet<char> =
+                existing.items.iter().filter_map(|i| i.mnemonic).collect();
+            for pi in &items {
+                existing.items.push(ResolvedItem {
+                    label: pi.item.clone(),
+                    action: Action::PluginMenuActivated(pi.plugin_id.clone(), pi.item_id.clone()),
+                    mnemonic: auto_mnemonic(&pi.item, &mut used),
+                });
+            }
         } else {
-            // New plugin menu → insert immediately before Help (current last).
+            // New plugin menu → its items get a fresh per-menu used-set; the menu
+            // title gets a top-level accelerator unique among the bar.
+            let mut used: std::collections::HashSet<char> = std::collections::HashSet::new();
+            let resolved_items: Vec<ResolvedItem> = items
+                .iter()
+                .map(|pi| ResolvedItem {
+                    label: pi.item.clone(),
+                    action: Action::PluginMenuActivated(pi.plugin_id.clone(), pi.item_id.clone()),
+                    mnemonic: auto_mnemonic(&pi.item, &mut used),
+                })
+                .collect();
+            let menu_mnemonic = auto_mnemonic(&name, &mut used_toplevel);
+            // Insert immediately before Help (current last).
             let insert_at = menus.len().saturating_sub(1);
             menus.insert(
                 insert_at,
                 ResolvedMenu {
                     label: name,
                     items: resolved_items,
+                    mnemonic: menu_mnemonic,
                 },
             );
         }
@@ -514,6 +602,50 @@ impl MenuBarState {
     /// Return `true` when any menu/dropdown is active.
     pub fn is_active(&self) -> bool {
         self.state != MenuState::Inactive
+    }
+
+    /// Feature 013: while the bar is active, open the top-level menu whose
+    /// accelerator matches `ch` (case-insensitive), showing its dropdown at item 0.
+    /// Returns `true` if a menu was matched and opened, `false` otherwise (state
+    /// unchanged on no match).
+    pub fn open_menu_by_mnemonic(&mut self, menus: &[ResolvedMenu], ch: char) -> bool {
+        if !self.is_active() {
+            return false;
+        }
+        let want = ch.to_lowercase().next();
+        if let Some(idx) = menus
+            .iter()
+            .position(|m| m.mnemonic.is_some() && m.mnemonic == want)
+        {
+            self.state = MenuState::DropDown {
+                top_idx: idx,
+                item_idx: 0,
+            };
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Feature 013: while a dropdown is open, activate the item whose accelerator
+    /// matches `ch` (case-insensitive). Returns the item's [`Action`] and closes
+    /// the menu on a match; returns `None` and leaves state unchanged otherwise.
+    pub fn select_item_by_mnemonic(&mut self, menus: &[ResolvedMenu], ch: char) -> Option<Action> {
+        if let MenuState::DropDown { top_idx, .. } = self.state {
+            let want = ch.to_lowercase().next();
+            let action = menus.get(top_idx).and_then(|menu| {
+                menu.items
+                    .iter()
+                    .find(|it| it.mnemonic.is_some() && it.mnemonic == want)
+                    .map(|it| it.action.clone())
+            });
+            if action.is_some() {
+                self.state = MenuState::Inactive;
+            }
+            action
+        } else {
+            None
+        }
     }
 }
 
@@ -743,12 +875,19 @@ impl<'a> Widget for MenuBarWidget<'a> {
                 bar_style
             };
 
+            // Feature 013: underline the accelerator (first matching letter).
+            let mut underlined = false;
             for (i, ch) in menu.label.chars().enumerate() {
                 let x = base_x + i as u16;
                 if x >= area.right() {
                     break;
                 }
-                buf.get_mut(x, y).set_style(style).set_char(ch);
+                let mut cell_style = style;
+                if !underlined && menu.mnemonic.is_some() && Some(lc(ch)) == menu.mnemonic {
+                    cell_style = cell_style.add_modifier(Modifier::UNDERLINED);
+                    underlined = true;
+                }
+                buf.get_mut(x, y).set_style(cell_style).set_char(ch);
             }
         }
 
@@ -845,13 +984,20 @@ impl<'a> Widget for MenuBarWidget<'a> {
                 }
 
                 // Write label text starting at label_offset from dropdown edge.
+                // Feature 013: underline the accelerator (first matching letter).
                 let label_x = area.left() + start_col + label_offset;
+                let mut underlined = false;
                 for (i, ch) in item.label.chars().enumerate() {
                     let cx = label_x + i as u16;
                     if cx >= area.right() {
                         break;
                     }
-                    buf.get_mut(cx, row_y).set_style(item_style).set_char(ch);
+                    let mut cell_style = item_style;
+                    if !underlined && item.mnemonic.is_some() && Some(lc(ch)) == item.mnemonic {
+                        cell_style = cell_style.add_modifier(Modifier::UNDERLINED);
+                        underlined = true;
+                    }
+                    buf.get_mut(cx, row_y).set_style(cell_style).set_char(ch);
                 }
             }
         }
@@ -1376,6 +1522,7 @@ mod tests {
         let empty = vec![ResolvedMenu {
             label: "Empty".into(),
             items: vec![],
+            mnemonic: Some('e'),
         }];
         let mut s = MenuBarState::new();
         s.state = MenuState::TopActive(0);
@@ -1481,5 +1628,244 @@ mod tests {
         assert!(checkable.has_checkable);
         assert_eq!(checkable.content_width, plain.content_width + 2);
         assert_eq!(checkable.label_offset, 3);
+    }
+
+    // ── Feature 013: mnemonic accelerators ───────────────────────────────────
+
+    use std::collections::HashSet;
+
+    // T003 — auto_mnemonic behavior.
+    #[test]
+    fn auto_mnemonic_picks_first_free_skips_used_and_exhausts() {
+        let mut used = HashSet::new();
+        assert_eq!(auto_mnemonic("Word Count", &mut used), Some('w'));
+        // 'w' now used → "Wide" yields 'i'.
+        assert_eq!(auto_mnemonic("Wide", &mut used), Some('i'));
+        // Determinism: same inputs, fresh set → same answer.
+        let mut used2 = HashSet::new();
+        assert_eq!(auto_mnemonic("Word Count", &mut used2), Some('w'));
+        // Exhausted: every letter already taken → None.
+        let mut full: HashSet<char> = "ab".chars().collect();
+        assert_eq!(auto_mnemonic("ba", &mut full), None);
+        // No alphanumerics → None.
+        let mut e = HashSet::new();
+        assert_eq!(auto_mnemonic("...", &mut e), None);
+    }
+
+    #[test]
+    fn auto_mnemonic_is_utf8_safe() {
+        let mut used = HashSet::new();
+        // Leading wide char is alphanumeric → chosen, lowercased, no panic.
+        let m = auto_mnemonic("文字数", &mut used);
+        assert!(m.is_some());
+        assert!(used.contains(&m.unwrap()));
+    }
+
+    // T004 — underline_col.
+    #[test]
+    fn underline_col_finds_first_match() {
+        assert_eq!(underline_col("New", Some('n')), Some(0));
+        assert_eq!(underline_col("Save As", Some('a')), Some(1)); // first 'a' (in "Save")
+        assert_eq!(underline_col("Exit", Some('x')), Some(1));
+        assert_eq!(underline_col("New", None), None);
+        assert_eq!(underline_col("New", Some('z')), None);
+        // Leading wide char counts as one char-column (renderer's coordinate).
+        assert_eq!(underline_col("文a", Some('a')), Some(1));
+    }
+
+    // T005 — built-in authored mnemonics: present, unique per menu, match R4.
+    #[test]
+    fn builtin_mnemonics_present_and_unique_per_menu() {
+        let menus = resolve_menus(&[]);
+        for menu in &menus {
+            let mut seen = HashSet::new();
+            for it in &menu.items {
+                let m = it.mnemonic.expect("every built-in item has a mnemonic");
+                assert!(
+                    seen.insert(m),
+                    "duplicate accelerator '{m}' in {} menu",
+                    menu.label
+                );
+            }
+        }
+        // Spot-check the DOS-faithful File letters (R4).
+        let file = &menus[0];
+        let got: Vec<(&str, Option<char>)> = file
+            .items
+            .iter()
+            .map(|i| (i.label.as_str(), i.mnemonic))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("New", Some('n')),
+                ("Open", Some('o')),
+                ("Save", Some('s')),
+                ("Save As", Some('a')),
+                ("Save As Encoding...", Some('e')),
+                ("Exit", Some('x')),
+            ]
+        );
+    }
+
+    // T022a — top-level mnemonic equals the letter of its Alt+<letter> opener.
+    #[test]
+    fn top_level_mnemonics_match_alt_bindings() {
+        use crate::input::keymap::Action as A;
+        use crate::input::KeybindingMap;
+        let menus = resolve_menus(&[]);
+        let km = KeybindingMap::default_map();
+        let expect = [
+            (0usize, A::MenuFile),
+            (1, A::MenuEdit),
+            (2, A::MenuSearch),
+            (3, A::MenuView),
+            (4, A::MenuOptions),
+            (5, A::MenuHelp),
+        ];
+        for (idx, action) in expect {
+            let m = menus[idx].mnemonic.expect("top-level mnemonic");
+            let key = format!("Alt+{}", m.to_uppercase());
+            assert_eq!(
+                km.get_action(&key),
+                Some(&action),
+                "{} mnemonic '{m}' must bind {key}",
+                menus[idx].label
+            );
+        }
+    }
+
+    // T012 — render underlines exactly the accelerator of each top-level title.
+    #[test]
+    fn render_underlines_top_level_accelerator() {
+        let buf = render_into(&MenuBarState::new(), &[], 60, 1);
+        let underlined = |x: u16| {
+            buf.get(x, 0)
+                .style()
+                .add_modifier
+                .contains(Modifier::UNDERLINED)
+        };
+        // File 'F' at col 1 underlined; 'i' at col 2 not.
+        assert_eq!(buf.get(1, 0).symbol(), "F");
+        assert!(underlined(1), "F of File must be underlined");
+        assert!(!underlined(2), "i of File must not be underlined");
+        // Edit 'E' at col 7 underlined.
+        assert_eq!(buf.get(7, 0).symbol(), "E");
+        assert!(underlined(7), "E of Edit must be underlined");
+    }
+
+    // T013 — render underlines the accelerator of dropdown items.
+    #[test]
+    fn render_underlines_dropdown_item_accelerator() {
+        let buf = render_into(&file_open(), &[], 40, 10);
+        let underlined = |x: u16, y: u16| {
+            buf.get(x, y)
+                .style()
+                .add_modifier
+                .contains(Modifier::UNDERLINED)
+        };
+        // File non-checkable: start_col=1, label_offset=1 → labels at col 2.
+        // Row 1 "New": N at col 2 underlined.
+        assert_eq!(buf.get(2, 1).symbol(), "N");
+        assert!(underlined(2, 1), "N of New must be underlined");
+        assert!(!underlined(3, 1), "e of New must not be underlined");
+        // Row 4 "Save As": mnemonic 'a' → first 'a' (in "Save") at col 3.
+        assert_eq!(buf.get(2, 4).symbol(), "S");
+        assert_eq!(buf.get(3, 4).symbol(), "a");
+        assert!(underlined(3, 4), "first 'a' of Save As must be underlined");
+    }
+
+    // T016 — select_item_by_mnemonic.
+    #[test]
+    fn select_item_by_mnemonic_activates_and_is_case_insensitive() {
+        let menus = resolve_menus(&[]);
+        let mut s = file_open();
+        // 'N'/'n' → New action; menu closes.
+        assert_eq!(s.select_item_by_mnemonic(&menus, 'N'), Some(Action::New));
+        assert_eq!(s.state, MenuState::Inactive);
+        // No match → None, state unchanged.
+        let mut s2 = file_open();
+        assert_eq!(s2.select_item_by_mnemonic(&menus, 'z'), None);
+        assert!(matches!(s2.state, MenuState::DropDown { top_idx: 0, .. }));
+        // Not in dropdown → None.
+        let mut s3 = MenuBarState::new();
+        s3.activate_bar();
+        assert_eq!(s3.select_item_by_mnemonic(&menus, 'n'), None);
+    }
+
+    // T020 — open_menu_by_mnemonic.
+    #[test]
+    fn open_menu_by_mnemonic_opens_matching_top_level() {
+        let menus = resolve_menus(&[]);
+        let mut s = MenuBarState::new();
+        s.activate_bar(); // TopActive(0)
+        assert!(s.open_menu_by_mnemonic(&menus, 'v'));
+        assert_eq!(
+            s.state,
+            MenuState::DropDown {
+                top_idx: 3,
+                item_idx: 0
+            }
+        );
+        // Non-match leaves state unchanged.
+        let mut s2 = MenuBarState::new();
+        s2.activate_bar();
+        assert!(!s2.open_menu_by_mnemonic(&menus, 'z'));
+        assert_eq!(s2.state, MenuState::TopActive(0));
+    }
+
+    // T025 — plugin auto-assignment uniqueness and edge cases.
+    #[test]
+    fn plugin_items_get_unique_auto_mnemonics() {
+        // Two items merged into Edit must avoid Edit's built-in letters (u,r,c,o,p,s).
+        let items = vec![
+            plugin_item("Edit", "Sort", "srt", "p"),
+            plugin_item("Edit", "Dedup", "dd", "p"),
+        ];
+        let menus = resolve_menus(&items);
+        let edit = menus.iter().find(|m| m.label == "Edit").unwrap();
+        let mut seen = HashSet::new();
+        for it in &edit.items {
+            if let Some(m) = it.mnemonic {
+                assert!(seen.insert(m), "duplicate '{m}' in merged Edit menu");
+            }
+        }
+        // "Sort": s,o,r,t all taken by built-ins → falls through to 't' (free).
+        let sort = edit.items.iter().find(|i| i.label == "Sort").unwrap();
+        assert_eq!(sort.mnemonic, Some('t'));
+    }
+
+    #[test]
+    fn plugin_top_level_menu_gets_unique_letter() {
+        let items = vec![plugin_item("Tools", "Word Count", "wc", "p")];
+        let menus = resolve_menus(&items);
+        let tools = menus.iter().find(|m| m.label == "Tools").unwrap();
+        let m = tools.mnemonic.expect("plugin top-level gets a letter");
+        assert!(
+            !"fesvoh".contains(m),
+            "plugin top-level letter '{m}' must not collide with built-ins"
+        );
+        assert_eq!(m, 't'); // first free letter of "Tools"
+        assert_eq!(tools.items[0].mnemonic, Some('w'));
+    }
+
+    #[test]
+    fn plugin_item_with_no_free_letter_gets_none() {
+        // A merged item whose only letter is already used resolves to None (FR-006).
+        let items = vec![plugin_item("Edit", "Sssss", "s5", "p")]; // only 's', taken by Select All
+        let menus = resolve_menus(&items);
+        let edit = menus.iter().find(|m| m.label == "Edit").unwrap();
+        let it = edit.items.iter().find(|i| i.label == "Sssss").unwrap();
+        assert_eq!(it.mnemonic, None);
+    }
+
+    #[test]
+    fn plugin_widechar_label_does_not_panic() {
+        let items = vec![plugin_item("ツール", "文字数", "wc", "jp")];
+        let menus = resolve_menus(&items);
+        let tools = menus.iter().find(|m| m.label == "ツール").unwrap();
+        // Whatever is chosen, it must render without panic and be Some or None.
+        let _ = tools.mnemonic;
+        let _ = tools.items[0].mnemonic;
     }
 }

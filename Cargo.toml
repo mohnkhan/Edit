@@ -80,6 +80,10 @@ path = "tests/integration/plugin_api.rs"
 name = "menu_activation"
 path = "tests/integration/menu_activation.rs"
 
+[[test]]
+name = "menu_mnemonics"
+path = "tests/integration/menu_mnemonics.rs"
+
 [[bench]]
 name = "startup"
 harness = false

@@ -104,20 +104,29 @@ edit [OPTIONS] [FILE...]
 | Key | Action |
 |---|---|
 | `F10` | Activate menu bar (highlight first menu, no dropdown) |
+| `Alt` (tapped alone) | Activate menu bar like `F10` — terminal-permitting (Feature 013) |
 | `Alt+F` | Open File menu (dropdown) |
 | `Alt+E` | Open Edit menu (dropdown) |
 | `Alt+S` | Open Search menu (dropdown) |
 | `Alt+V` | Open View menu (dropdown) |
 | `Alt+O` | Open Options menu (dropdown) |
 | `Alt+H` | Open Help menu (dropdown) |
+| accelerator letter | Each menu title and item shows one **underlined** accelerator letter (Feature 013). While the bar is active, the letter opens that top-level menu; while a dropdown is open, the letter activates that item (case-insensitive). A non-matching letter leaves the menu open. |
 | `←` / `→` | Move between top-level menus (wraps; opens the adjacent dropdown) |
 | `↑` / `↓` | Move between items within the open dropdown (wraps) |
 | `Enter` | Activate the highlighted menu item |
 | `Esc` | Close menu / cancel dialog |
 | Mouse (left-click) | Click a top-level menu title to open it; click a dropdown item to activate it; click outside to close (Feature 011) |
 
+Built-in accelerators follow DOS/standard convention — File: **N**ew, **O**pen, **S**ave, Save **A**s,
+Save As **E**ncoding, e**X**it; Edit: **U**ndo, **R**edo, **C**ut, C**o**py, **P**aste, **S**elect All;
+Search: **F**ind, Find **N**ext, Find **P**rev, Find **R**eplace; View: **S**plit View, **N**ext Buffer,
+**P**rev Buffer, **T**oggle Line Nos, Soft **W**rap; Options: Toggle **H**ighlight, **P**lugins;
+Help: **H**elp, **A**bout.
+
 Plugin-contributed top-level menus appear in the menu bar **between Options and Help** and are
-navigable/activatable with the same keys *and the mouse* (Features 009 / 011).
+navigable/activatable with the same keys *and the mouse* (Features 009 / 011); their accelerator
+letters are assigned automatically (Feature 013).
 
 ## Menu Structure
 

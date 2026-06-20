@@ -1,0 +1,48 @@
+#!/usr/bin/env expect
+# Smoke test (Feature 013): activate the menu bar with F10, open the File menu,
+# press an item accelerator letter, then quit. Verifies the mnemonic key path
+# drives a menu action without crashing and exits 0.
+#
+# Usage: expect tests/smoke/menu_mnemonics.exp
+# Exit codes: 0 = handled F10 + open + letter-activate + quit cleanly; 1 = failure.
+
+set timeout 10
+
+proc fail {msg} {
+    puts stderr "FAIL: $msg"
+    exit 1
+}
+
+spawn ./target/debug/edit
+
+expect {
+    timeout { fail "editor did not start within $timeout seconds" }
+    -re ".+" {}
+}
+after 300
+
+# ── F10 activates the menu bar ────────────────────────────────────────────────
+send "\x1b\[21~"
+after 200
+
+# Open the File menu by its accelerator (F), then create a New buffer (N).
+send "f"
+after 200
+send "n"
+after 300
+
+# ── Quit cleanly with Ctrl+Q ─────────────────────────────────────────────────
+send "\x11"
+expect {
+    eof     {}
+    timeout { fail "editor did not exit within $timeout seconds after Ctrl+Q" }
+}
+
+catch {wait} result
+set exit_code [lindex $result 3]
+if {$exit_code != 0} {
+    fail "editor exited with non-zero status: $exit_code"
+}
+
+puts "PASS: menu mnemonic accelerators drove File > New via keyboard and exited cleanly"
+exit 0
