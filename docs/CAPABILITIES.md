@@ -158,9 +158,11 @@ letters are assigned automatically (Feature 013).
 
 ### File
 - New (`Ctrl+N`)
-- Open… (`Ctrl+O`) — opens the **file browser** (navigate folders, pick a file)
+- Open… (`Ctrl+O`) — opens the **file browser** (navigate folders, pick a file, or type a path into the
+  bordered "Go to path:" field to jump there)
 - Save (`Ctrl+S`) — on an unnamed buffer, opens the Save file browser
-- Save As… — opens the Save **file browser** (navigate to a folder, type a name)
+- Save As… — opens the Save **file browser** (navigate to a folder, type a name in the bordered "Name:"
+  field)
 - Save As Encoding… (`F12`) — choose output encoding for this file
 - Revert — reload the buffer from its last saved version on disk, discarding changes (confirms when
   there are unsaved changes; no-op for a never-saved buffer). Menu-only, no keybinding.
@@ -237,7 +239,8 @@ UTF-8-correct and truncate without corruption. All chosen paths are validated by
   - Shows `  Soft Wrap (ext)` (2-space indent) when **OFF**, maintaining label alignment
 
 ### Help
-- Help — key-binding cheat sheet overlay (`Esc` closes)
+- Help — key-binding cheat sheet: a grouped, two-column **Key | Action** table (scroll with
+  ↑/↓/PgUp/PgDn; `Esc` closes)
 - About — program name, version, and copyright (`Esc` closes)
 
 ## File Formats

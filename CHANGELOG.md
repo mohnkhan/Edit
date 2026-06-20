@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 018: Editable-field affordance + Help redesign
+
+#### Added
+
+- **File-dialog input boxes** — the Open/Save file dialog now draws its editable field as a clearly
+  bordered, labeled box with a visible caret, so it's obvious you can type. The **Open-mode "Go to
+  path:" field is now visible** (previously the typeable jump-path field was not drawn at all).
+- **Redesigned Help screen** — the cheat sheet is now a grouped, aligned two-column **Key | Action**
+  table (File, Edit, Selection, Search, View, Menus, Dialogs) that fits the terminal and **scrolls**
+  (↑/↓/PgUp/PgDn) with a "▼ more" cue instead of truncating dense lines.
+
+#### Notes
+
+- Styling the Find/Replace fields as the same bordered boxes is a consistency follow-up (issue #41,
+  ROADMAP); they already show a label + caret.
+
 ### feature 017: Visible text selection (highlight, Shift-select, mouse-drag)
 
 #### Added

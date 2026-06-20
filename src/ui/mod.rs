@@ -340,59 +340,163 @@ impl Ui {
 }
 
 /// Render the Help / About overlay (Feature 011), centred over the editor.
+/// Feature 018: the Help cheat sheet as grouped (key, action) rows.
+const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "File",
+        &[
+            ("Ctrl+N", "New buffer"),
+            ("Ctrl+O", "Open (file browser)"),
+            ("Ctrl+S", "Save"),
+            ("F12", "Save As Encoding"),
+            ("(menu) Revert", "Reload last saved"),
+            ("Ctrl+Q", "Quit"),
+        ],
+    ),
+    (
+        "Edit",
+        &[
+            ("Ctrl+Z", "Undo"),
+            ("Ctrl+Y", "Redo"),
+            ("Ctrl+X", "Cut selection"),
+            ("Ctrl+C", "Copy selection"),
+            ("Ctrl+V", "Paste"),
+        ],
+    ),
+    (
+        "Selection",
+        &[
+            ("Ctrl+A", "Select all"),
+            ("Shift+Arrows", "Extend selection"),
+            ("Shift+Home/End", "Select to line start/end"),
+            ("Mouse drag", "Select a range"),
+        ],
+    ),
+    (
+        "Search",
+        &[
+            ("Ctrl+F", "Find"),
+            ("F3 / F2", "Find next / previous"),
+            ("Ctrl+H", "Find & Replace"),
+        ],
+    ),
+    (
+        "View",
+        &[
+            ("Alt+Z", "Toggle soft-wrap"),
+            ("Arrows / PgUp / PgDn", "Move / page"),
+            ("Home / End", "Line start / end"),
+        ],
+    ),
+    (
+        "Menus",
+        &[
+            ("F10 / Alt", "Activate menu bar"),
+            ("Alt+<letter>", "Open a menu (underlined key)"),
+            ("Arrows / Enter", "Navigate / select"),
+            ("Esc", "Close menu"),
+        ],
+    ),
+    (
+        "Dialogs",
+        &[
+            ("Tab / Shift+Tab", "Move between buttons"),
+            ("Enter / Space", "Activate focused button"),
+            ("Mouse click", "Click a button / outside to cancel"),
+            ("Esc", "Cancel / close"),
+        ],
+    ),
+];
+
 fn render_help_overlay(frame: &mut Frame, app: &App, screen: HelpScreen, size: Rect) {
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-    let (title, lines): (&str, Vec<String>) = match screen {
-        HelpScreen::Help => (
-            "Help",
-            vec![
-                "Menus:  F10 / Alt+<letter> open • arrows move • Enter select • Esc close".into(),
-                "        Mouse: click a menu title or a dropdown item".into(),
-                "".into(),
-                "File:   Ctrl+N new • Ctrl+O open • Ctrl+S save • F12 save-as-encoding".into(),
-                "Edit:   Ctrl+Z undo • Ctrl+Y redo • Ctrl+X/C/V cut/copy/paste • Ctrl+A all".into(),
-                "Search: Ctrl+F find • F3 next • F2 prev • Ctrl+H replace".into(),
-                "View:   Alt+Z soft-wrap".into(),
-                "Quit:   Ctrl+Q".into(),
-                "".into(),
-                "Press Esc to close.".into(),
-            ],
-        ),
+    let base = Style::default()
+        .fg(app.theme.menubar_fg)
+        .bg(app.theme.menubar_bg);
+
+    // About stays simple prose; Help is the grouped Key | Action table.
+    let (title, lines): (&str, Vec<Line>) = match screen {
         HelpScreen::About => (
             "About",
-            vec![
+            [
                 format!("edit {}", env!("CARGO_PKG_VERSION")),
                 env!("CARGO_PKG_DESCRIPTION").to_string(),
-                "".into(),
+                String::new(),
                 "A UTF-8 native, DOS-faithful EDIT.COM for the modern terminal.".into(),
                 "Runs on Linux, FreeBSD, macOS, and MyOS.".into(),
-                "".into(),
+                String::new(),
                 format!("Author: {}", env!("CARGO_PKG_AUTHORS")),
-                format!(
-                    "© 2026 {} — Licensed under MPL-2.0.",
-                    env!("CARGO_PKG_AUTHORS")
-                ),
-                "Created as the built-in editor for the MyOS project.".into(),
-                "".into(),
+                format!("© 2026 {} — MPL-2.0.", env!("CARGO_PKG_AUTHORS")),
+                String::new(),
                 "Press Esc to close.".into(),
-            ],
+            ]
+            .into_iter()
+            .map(Line::from)
+            .collect(),
         ),
+        HelpScreen::Help => {
+            // Key column width = widest key, clamped.
+            let key_w = HELP_SECTIONS
+                .iter()
+                .flat_map(|(_, rows)| rows.iter())
+                .map(|(k, _)| k.len())
+                .max()
+                .unwrap_or(8)
+                .min(22);
+            let mut out: Vec<Line> = Vec::new();
+            for (i, (section, rows)) in HELP_SECTIONS.iter().enumerate() {
+                if i > 0 {
+                    out.push(Line::from(""));
+                }
+                out.push(Line::from(Span::styled(
+                    section.to_string(),
+                    base.add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                )));
+                for (k, a) in rows.iter() {
+                    out.push(Line::from(format!("  {:<kw$}  {}", k, a, kw = key_w)));
+                }
+            }
+            ("Help", out)
+        }
     };
 
-    let text: Vec<ratatui::text::Line> = lines.into_iter().map(ratatui::text::Line::from).collect();
-    let dh = (text.len() as u16 + 2).min(size.height);
-    let dw = 72u16.min(size.width);
+    // Box geometry: fit the terminal, leave room for a border + a footer hint.
+    let dw = 64u16.min(size.width.max(1));
+    let dh = 20u16.min(size.height.max(1));
     let dx = size.x + size.width.saturating_sub(dw) / 2;
     let dy = size.y + size.height.saturating_sub(dh) / 2;
     let dialog_area = Rect::new(dx, dy, dw, dh);
 
-    let dialog = Paragraph::new(text)
-        .style(
-            ratatui::style::Style::default()
-                .fg(app.theme.menubar_fg)
-                .bg(app.theme.menubar_bg),
+    let inner_h = dh.saturating_sub(2) as usize; // borders
+    let body_rows = inner_h.saturating_sub(1); // reserve 1 row for the footer hint
+    let total = lines.len();
+    let max_scroll = total.saturating_sub(body_rows);
+    let scroll = app.help_scroll.min(max_scroll);
+
+    let mut shown: Vec<Line> = lines
+        .into_iter()
+        .skip(scroll)
+        .take(body_rows)
+        .collect::<Vec<_>>();
+    let more_below = scroll < max_scroll;
+    let footer = if total > body_rows {
+        format!(
+            "↑↓/PgUp/PgDn scroll{}  ·  Esc close",
+            if more_below { "  ▼ more" } else { "" }
         )
+    } else {
+        "Esc close".to_string()
+    };
+    shown.push(Line::from(Span::styled(
+        footer,
+        base.add_modifier(Modifier::DIM),
+    )));
+
+    let dialog = Paragraph::new(shown)
+        .style(base)
         .block(Block::default().title(title).borders(Borders::ALL));
 
     frame.render_widget(Clear, dialog_area);

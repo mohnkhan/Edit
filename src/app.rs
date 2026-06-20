@@ -183,6 +183,10 @@ pub struct App {
     /// drag selection; `Some` between press and the drags that follow.
     pub drag_anchor: Option<CursorPos>,
 
+    // ── Feature 018: Help scroll ──────────────────────────────────────────────
+    /// First visible row of the Help cheat-sheet (scroll offset); reset on open.
+    pub help_scroll: usize,
+
     // ── Feature 008: plugin subsystem ────────────────────────────────────────
     /// The Rhai plugin host owning the engine and registry for this session.
     pub plugin_host: crate::plugin::PluginHost,
@@ -373,6 +377,7 @@ impl App {
             dialog_focus: 0,
             dialog_focus_init: false,
             drag_anchor: None,
+            help_scroll: 0,
             plugin_host,
             pending_plugin_consent,
             pending_plugin_manager: false,
@@ -804,16 +809,20 @@ impl App {
             return Ok(());
         }
 
-        // Feature 011 — Help / About overlay: any dismissal key closes it; all
-        // other input is consumed so it stays modal.
+        // Feature 011/018 — Help / About overlay: arrows/PageUp-Down scroll the
+        // cheat sheet; Esc/Enter/Quit close; other input is consumed (modal).
         if self.pending_help.is_some() {
             match &action {
-                Action::MenuClose
-                | Action::InsertNewline
-                | Action::InsertChar(_)
-                | Action::Quit => {
+                Action::MoveDown => self.help_scroll = self.help_scroll.saturating_add(1),
+                Action::MoveUp => self.help_scroll = self.help_scroll.saturating_sub(1),
+                Action::MovePageDown => self.help_scroll = self.help_scroll.saturating_add(8),
+                Action::MovePageUp => self.help_scroll = self.help_scroll.saturating_sub(8),
+                Action::MenuClose | Action::InsertNewline | Action::Quit => {
                     self.pending_help = None;
                 }
+                // A printable key also dismisses (legacy behavior), except none
+                // that we use for scrolling above.
+                Action::InsertChar(_) => self.pending_help = None,
                 _ => {}
             }
             return Ok(());
@@ -980,8 +989,14 @@ impl App {
             }
 
             // Help menu (Feature 011).
-            Action::Help => self.pending_help = Some(HelpScreen::Help),
-            Action::About => self.pending_help = Some(HelpScreen::About),
+            Action::Help => {
+                self.help_scroll = 0;
+                self.pending_help = Some(HelpScreen::Help);
+            }
+            Action::About => {
+                self.help_scroll = 0;
+                self.pending_help = Some(HelpScreen::About);
+            }
 
             // Save prompt responses (T033)
             Action::Save => self.handle_save_action(),
@@ -3495,6 +3510,45 @@ mod tests {
 
     fn make_app() -> App {
         App::new(Config::default(), vec![], EncodingId::Utf8, None, None)
+    }
+
+    // Feature 018: Help renders a grouped Key|Action table and scrolls.
+    #[test]
+    fn help_renders_table_and_scrolls() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let render = |app: &mut App| -> String {
+            let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            t.draw(|f| app.render(f)).unwrap();
+            t.backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect()
+        };
+        let mut app = make_app();
+        app.handle_action(Action::Help).unwrap();
+        let top = render(&mut app);
+        assert!(top.contains("File"), "section heading shown");
+        assert!(top.contains("Ctrl+S"), "a key row shown");
+        assert!(
+            top.contains("scroll"),
+            "scroll hint shown when content overflows"
+        );
+        assert!(
+            !top.contains("Dialogs"),
+            "later section not visible before scrolling"
+        );
+
+        // Scroll down a lot; the last section becomes visible.
+        for _ in 0..40 {
+            app.handle_action(Action::MoveDown).unwrap();
+        }
+        let bottom = render(&mut app);
+        assert!(
+            bottom.contains("Dialogs"),
+            "scrolling reveals later sections"
+        );
     }
 
     // Feature 017: Select All renders the selected text with reverse-video.
