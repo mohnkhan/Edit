@@ -152,6 +152,60 @@ mod tests {
         );
     }
 
+    // T003 (Feature 030): DOS F-key accelerators are bound, and existing F-keys are
+    // unchanged (additive, no shadowing).
+    #[test]
+    fn dos_fkeys_bound_and_existing_unchanged() {
+        let km = KeybindingMap::default_map();
+        let press = |c, m| key(c, m, KeyEventKind::Press);
+        // New (Feature 030).
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(6), KeyModifiers::NONE), &km),
+            Some(Action::NextBuffer)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(6), KeyModifiers::SHIFT), &km),
+            Some(Action::PrevBuffer)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(8), KeyModifiers::NONE), &km),
+            Some(Action::Cut)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(9), KeyModifiers::NONE), &km),
+            Some(Action::Copy)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(11), KeyModifiers::NONE), &km),
+            Some(Action::Paste)
+        );
+        // Existing F-keys unchanged.
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(1), KeyModifiers::NONE), &km),
+            Some(Action::Help)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(2), KeyModifiers::NONE), &km),
+            Some(Action::FindPrev)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(3), KeyModifiers::NONE), &km),
+            Some(Action::FindNext)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(5), KeyModifiers::NONE), &km),
+            Some(Action::Save)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(10), KeyModifiers::NONE), &km),
+            Some(Action::Menu)
+        );
+        assert_eq!(
+            dispatch_key(press(KeyCode::F(12), KeyModifiers::NONE), &km),
+            Some(Action::SaveAsEncoding)
+        );
+    }
+
     // T029 (Feature 029): Ctrl+W closes the current buffer (was unbound despite the
     // docs claiming it).
     #[test]

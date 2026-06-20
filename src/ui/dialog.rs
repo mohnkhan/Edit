@@ -300,6 +300,26 @@ impl Widget for EncodingSelectDialog {
 /// and the app's mouse hit-testing so clicks land on the drawn buttons.
 /// Base box is 40×11 (7 options + blank + hint + 2 borders); +4 rows reserve a
 /// 1-row gap and a 3-row button box.
+/// Feature 030: map a click at `(col, row)` to an encoding-list index, or `None`
+/// if the click is outside the list rows. Mirrors the renderer: the option list is
+/// drawn inside the bordered dialog starting at `rect.y + 1`, one option per row.
+pub fn encoding_row_hit(rect: Rect, col: u16, row: u16) -> Option<usize> {
+    let first = rect.y + 1; // inside the top border
+                            // Must be within the dialog's horizontal interior.
+    if col <= rect.x || col + 1 >= rect.x + rect.width {
+        return None;
+    }
+    if row < first {
+        return None;
+    }
+    let idx = (row - first) as usize;
+    if idx < ENCODING_OPTIONS.len() {
+        Some(idx)
+    } else {
+        None
+    }
+}
+
 pub fn encoding_dialog_rect(area: Rect) -> Rect {
     centered_rect(ENCODING_DIALOG_W, ENCODING_DIALOG_H, area)
 }
@@ -333,6 +353,21 @@ mod tests {
     #[test]
     fn test_encoding_options_has_seven_entries() {
         assert_eq!(ENCODING_OPTIONS.len(), 7);
+    }
+
+    // T008 (Feature 030): encoding_row_hit maps a click row to the list index, and
+    // returns None outside the rows / past the entries.
+    #[test]
+    fn encoding_row_hit_maps_rows() {
+        let rect = Rect::new(10, 4, 40, 14); // x,y,w,h
+                                             // First option row is rect.y + 1 = 5.
+        assert_eq!(encoding_row_hit(rect, 20, 5), Some(0));
+        assert_eq!(encoding_row_hit(rect, 20, 6), Some(1));
+        assert_eq!(encoding_row_hit(rect, 20, 4), None, "title/border row");
+        // Past the 7 options (rows 5..12) → None.
+        assert_eq!(encoding_row_hit(rect, 20, 12), None);
+        // Outside the horizontal interior → None.
+        assert_eq!(encoding_row_hit(rect, 10, 5), None);
     }
 
     // ── Feature 015 — FindReplaceDialog field editing ──────────────────────────

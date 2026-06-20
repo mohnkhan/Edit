@@ -8,6 +8,10 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F030-US1 | Click a list row in the encoding/plugin dialogs to select it (closes #53 list-clicks; field caret → #58) | Complete |
+| F030-US2 | Double-click selects the word, triple-click the line (Unicode-aware, multibyte-safe) (#54) | Complete |
+| F030-US3 | Right-click context menu (Cut/Copy/Paste/Select All), mouse + keyboard, modal-aware (#55) | Complete |
+| F030-US4 | DOS F-keys: F6/Shift+F6 buffer switch, F8/F9/F11 cut/copy/paste (additive) (#56) | Complete |
 | F029-US1 | No-panic on real content: multibyte delete/cut, Unicode recovery path, byte→char, oversized-file guard | Complete |
 | F029-US2 | Saving never silently loses data: "Saved" on success, error + retained modified on failure; autosave-failure notice | Complete |
 | F029-US3 | Dialog consistency: save-before-quit prompt cancels on Esc; Go-to-Line respects modal precedence | Complete |

@@ -137,6 +137,14 @@ impl KeybindingMap {
         map.insert("Ctrl+W".to_string(), Action::Close); // Feature 029: close current buffer
         map.insert("Ctrl+Q".to_string(), Action::Quit);
 
+        // Feature 030: DOS-standard F-key accelerators (additive — the Ctrl
+        // bindings above remain). F6 cycles buffers; F8/F9/F11 = cut/copy/paste.
+        map.insert("F6".to_string(), Action::NextBuffer);
+        map.insert("Shift+F6".to_string(), Action::PrevBuffer);
+        map.insert("F8".to_string(), Action::Cut);
+        map.insert("F9".to_string(), Action::Copy);
+        map.insert("F11".to_string(), Action::Paste);
+
         // Edit
         map.insert("Ctrl+X".to_string(), Action::Cut);
         map.insert("Ctrl+C".to_string(), Action::Copy);
