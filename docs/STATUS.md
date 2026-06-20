@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F021-US1 | Scrollbars on overflow: editor (vertical + horizontal), file browser, Help/About, encoding/plugin | Complete |
+| F021-US2 | Help and About show a clickable, bordered Close button (mouse-dismissable; Esc still works) | Complete |
+| F021-US3 | Every dialog button label advertises its activating key (no behavioral change) | Complete |
 | F020-US1 | Interactive dialogs (encoding, plugin mgr, Find/Replace, file browser): mouse-clickable boxed buttons | Complete |
 | F020-US2 | Combined list/field + button focus ring; Tab/Shift+Tab cycle; Enter/Space activate | Complete |
 | F020-US3 | All existing dialog keys preserved (list nav, toggles, match nav, Esc) — zero regression | Complete |

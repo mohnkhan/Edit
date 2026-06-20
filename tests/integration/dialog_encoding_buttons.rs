@@ -50,7 +50,10 @@ fn click(app: &mut App, col: u16, row: u16) {
 #[test]
 fn ring_is_list_ok_cancel_and_wraps() {
     let (mut a, _p) = app_with_file("ring");
-    assert_eq!(a.interactive_button_labels(), vec!["OK", "Cancel"]);
+    assert_eq!(
+        a.interactive_button_labels(),
+        vec!["OK (Enter)", "Cancel (Esc)"]
+    );
     // ensure_dialog_focus runs at the top of handle_action; first call inits to 0.
     a.handle_action(Action::FocusNextField).unwrap(); // 0 (list) -> 1 (OK)
     assert_eq!(a.dialog_focus, 1);

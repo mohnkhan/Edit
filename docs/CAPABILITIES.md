@@ -160,6 +160,15 @@ Buttons per dialog: encoding selector **OK / Cancel**; plugin manager **Close**;
 Each dialog opens focused on its primary control, so existing keyboard flows (arrows, typing, `Space`
 toggle, `Alt+C/A/R/W`, `Ctrl+A`, `F3/F2`) are unchanged.
 
+### Scrollbars & button key hints (Feature 021)
+
+- **Scrollbars** appear automatically when content overflows: the editor shows a vertical bar (and, in
+  normal/non-wrap mode, a horizontal bar); the file browser, Help/About, and the plugin/encoding lists
+  show a vertical bar. Bars indicate position only — scrolling is still driven by the usual keys/cursor.
+- **Help and About** show a clickable **Close (Esc)** button (mouse-dismissable; `Esc`/Enter still work).
+- **Every dialog button label advertises its key**, e.g. `Cancel (Esc)`, `OK (Enter)`, `Save (S)`,
+  `Replace All (Ctrl+A)`, `Close (Esc)`. The key behaves exactly as before; the label is informational.
+
 Built-in accelerators follow DOS/standard convention — File: **N**ew, **O**pen, **S**ave, Save **A**s,
 Save As **E**ncoding, e**X**it; Edit: **U**ndo, **R**edo, **C**ut, C**o**py, **P**aste, **S**elect All;
 Search: **F**ind, Find **N**ext, Find **P**rev, Find **R**eplace; View: **S**plit View, **N**ext Buffer,

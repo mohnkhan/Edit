@@ -11,6 +11,7 @@ pub mod editor;
 pub mod file_browser;
 pub mod menubar;
 pub mod plugin_manager;
+pub mod scrollbar;
 pub mod statusbar;
 pub mod theme;
 pub mod wrap;
@@ -82,6 +83,9 @@ impl Ui {
 
         match app.split_mode {
             SplitMode::Single => {
+                // Feature 021: reserve the right column (vertical bar) and bottom
+                // row (horizontal bar, non-wrap) and draw scrollbars there.
+                let (text, vbar, hbar) = editor_panes(editor_area, app.soft_wrap);
                 let wrap_starts = app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice());
                 let editor_widget = EditorWidget::new(
                     buf,
@@ -91,7 +95,8 @@ impl Ui {
                     wrap_starts,
                 )
                 .with_matches(&app.search_state.matches, app.search_state.active_match);
-                frame.render_widget(editor_widget, editor_area);
+                frame.render_widget(editor_widget, text);
+                render_editor_scrollbars(frame, app, buf, text, vbar, hbar);
             }
             SplitMode::Vertical => {
                 let half_width = editor_area.width / 2;
@@ -103,6 +108,7 @@ impl Ui {
                     editor_area.width - half_width,
                     editor_area.height,
                 );
+                let (l_text, l_vbar, l_hbar) = editor_panes(left_area, app.soft_wrap);
                 frame.render_widget(
                     EditorWidget::new(
                         &app.buffers[0],
@@ -111,13 +117,15 @@ impl Ui {
                         app.soft_wrap,
                         app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice()),
                     ),
-                    left_area,
+                    l_text,
                 );
+                render_editor_scrollbars(frame, app, &app.buffers[0], l_text, l_vbar, l_hbar);
                 let right_buf_idx = if app.buffers.len() > 1 {
                     app.active_idx.max(1)
                 } else {
                     0
                 };
+                let (r_text, r_vbar, r_hbar) = editor_panes(right_area, app.soft_wrap);
                 frame.render_widget(
                     EditorWidget::new(
                         &app.buffers[right_buf_idx],
@@ -126,7 +134,15 @@ impl Ui {
                         app.soft_wrap,
                         app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice()),
                     ),
-                    right_area,
+                    r_text,
+                );
+                render_editor_scrollbars(
+                    frame,
+                    app,
+                    &app.buffers[right_buf_idx],
+                    r_text,
+                    r_vbar,
+                    r_hbar,
                 );
             }
         }
@@ -369,6 +385,23 @@ impl Ui {
                 );
             frame.render_widget(ratatui::widgets::Clear, dialog_area);
             frame.render_widget(dialog, dialog_area);
+            // Feature 021: vertical scrollbar when the plugin list overflows the
+            // body rows (body = interior minus the 4-row button area); position
+            // tracks the cursor so the user sees where the highlight sits.
+            let body_rows = (dialog_area.height as usize).saturating_sub(2 + 4);
+            crate::ui::scrollbar::render_vertical(
+                frame.buffer_mut(),
+                Rect::new(
+                    dialog_area.x + 1,
+                    dialog_area.y + 1,
+                    dialog_area.width.saturating_sub(2),
+                    body_rows as u16,
+                ),
+                app.plugin_host.registry.instances.len(),
+                body_rows,
+                app.plugin_manager_cursor,
+                app.theme,
+            );
             // Boxed Close button in the bottom interior rows.
             let labels = app.interactive_button_labels();
             let rects = crate::ui::buttons::button_rects(dialog_area, &labels);
@@ -380,6 +413,89 @@ impl Ui {
                 app.theme,
             );
         }
+    }
+}
+
+/// Feature 021: split an editor pane area into `(text, vertical_bar, horizontal_bar?)`.
+/// The vertical scrollbar always takes the rightmost column; the horizontal
+/// scrollbar takes the bottom row in non-wrap mode only. The bars are inset so
+/// they never overlap at the bottom-right corner.
+fn editor_panes(area: Rect, soft_wrap: bool) -> (Rect, Rect, Option<Rect>) {
+    let vbar_w: u16 = if area.width >= 2 { 1 } else { 0 };
+    let hbar_h: u16 = if !soft_wrap && area.height >= 2 { 1 } else { 0 };
+    let text_w = area.width - vbar_w;
+    let text_h = area.height - hbar_h;
+    let text = Rect::new(area.x, area.y, text_w, text_h);
+    let vbar = Rect::new(area.x + text_w, area.y, vbar_w, text_h);
+    let hbar = if hbar_h > 0 {
+        Some(Rect::new(area.x, area.y + area.height - 1, text_w, 1))
+    } else {
+        None
+    };
+    (text, vbar, hbar)
+}
+
+/// Feature 021: maximum display width among the editor's currently visible
+/// logical lines — a cheap, viewport-bounded measure for the horizontal
+/// scrollbar's content length (avoids scanning the whole file each frame).
+fn max_visible_line_width(buf: &crate::buffer::Buffer, text: Rect) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    let start = buf.scroll_offset.0;
+    let total = buf.rope.line_count();
+    let end = (start + text.height as usize).min(total);
+    let mut max = 0usize;
+    for i in start..end {
+        let line = buf.rope.line_slice(i);
+        let w = UnicodeWidthStr::width(line.trim_end_matches('\n'));
+        if w > max {
+            max = w;
+        }
+    }
+    max
+}
+
+/// Feature 021: draw the editor's vertical (+ horizontal, non-wrap) scrollbars in
+/// the reserved strips. Inputs mirror the geometry the editor widget was given
+/// and the scroll math in `App` (see `viewport_height` / `content_width`).
+fn render_editor_scrollbars(
+    frame: &mut Frame,
+    app: &App,
+    buf: &crate::buffer::Buffer,
+    text: Rect,
+    vbar: Rect,
+    hbar: Option<Rect>,
+) {
+    // Vertical: lines (or total visual rows in soft-wrap) vs visible rows.
+    let viewport_v = text.height as usize;
+    let content_v = if app.soft_wrap {
+        app.wrap_cache
+            .as_ref()
+            .map(|c| c.total_visual_rows())
+            .unwrap_or_else(|| buf.rope.line_count())
+    } else {
+        buf.rope.line_count()
+    };
+    crate::ui::scrollbar::render_vertical(
+        frame.buffer_mut(),
+        vbar,
+        content_v,
+        viewport_v,
+        buf.scroll_offset.0,
+        app.theme,
+    );
+    // Horizontal (non-wrap only): max visible-line width vs content width.
+    if let Some(hbar) = hbar {
+        let gutter: u16 = if app.config.line_numbers { 4 } else { 0 };
+        let viewport_h = text.width.saturating_sub(gutter) as usize;
+        let content_h = max_visible_line_width(buf, text);
+        crate::ui::scrollbar::render_horizontal(
+            frame.buffer_mut(),
+            hbar,
+            content_h,
+            viewport_h,
+            buf.scroll_offset.1,
+            app.theme,
+        );
     }
 }
 
@@ -627,8 +743,11 @@ fn render_help_overlay(frame: &mut Frame, app: &App, screen: HelpScreen, size: R
     let dy = size.y + size.height.saturating_sub(dh) / 2;
     let dialog_area = Rect::new(dx, dy, dw, dh);
 
+    // Feature 021: reserve a footer hint row + a 3-row boxed Close button (with a
+    // 1-row gap) at the bottom interior, plus a right-edge vertical scrollbar.
     let inner_h = dh.saturating_sub(2) as usize; // borders
-    let body_rows = inner_h.saturating_sub(1); // reserve 1 row for the footer hint
+    let button_reserved = 4usize; // 1-row gap + 3-row boxed button
+    let body_rows = inner_h.saturating_sub(1 + button_reserved); // 1 row = footer hint
     let total = lines.len();
     let max_scroll = total.saturating_sub(body_rows);
     let scroll = app.help_scroll.min(max_scroll);
@@ -641,11 +760,11 @@ fn render_help_overlay(frame: &mut Frame, app: &App, screen: HelpScreen, size: R
     let more_below = scroll < max_scroll;
     let footer = if total > body_rows {
         format!(
-            "↑↓/PgUp/PgDn scroll{}  ·  Esc close",
+            "↑↓/PgUp/PgDn scroll{}",
             if more_below { "  ▼ more" } else { "" }
         )
     } else {
-        "Esc close".to_string()
+        String::new()
     };
     shown.push(Line::from(Span::styled(
         footer,
@@ -658,4 +777,30 @@ fn render_help_overlay(frame: &mut Frame, app: &App, screen: HelpScreen, size: R
 
     frame.render_widget(Clear, dialog_area);
     frame.render_widget(dialog, dialog_area);
+
+    // Vertical scrollbar over the body's right interior column (only on overflow).
+    crate::ui::scrollbar::render_vertical(
+        frame.buffer_mut(),
+        Rect::new(dx + 1, dy + 1, dw.saturating_sub(2), body_rows as u16),
+        total,
+        body_rows,
+        scroll,
+        app.theme,
+    );
+
+    // Boxed Close button in the bottom interior rows (key hint on the label).
+    let labels = [crate::ui::buttons::HELP_CLOSE_LABEL];
+    let rects = crate::ui::buttons::button_rects(dialog_area, &labels);
+    crate::ui::buttons::render_buttons(frame.buffer_mut(), &rects, &labels, 0, app.theme);
+}
+
+/// Feature 021: the Help/About overlay's outer rect + Close button rects, shared
+/// by the renderer and the mouse hit-test so a click lands on the drawn button.
+pub fn help_close_button_rects(size: Rect) -> Vec<Rect> {
+    let dw = 64u16.min(size.width.max(1));
+    let dh = 20u16.min(size.height.max(1));
+    let dx = size.x + size.width.saturating_sub(dw) / 2;
+    let dy = size.y + size.height.saturating_sub(dh) / 2;
+    let dialog_area = Rect::new(dx, dy, dw, dh);
+    crate::ui::buttons::button_rects(dialog_area, &[crate::ui::buttons::HELP_CLOSE_LABEL])
 }

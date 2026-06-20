@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 021: Scroll affordances + dialog button polish
+
+#### Added
+
+- **Scrollbars** — scrollable views now draw a scrollbar when their content overflows: the main editor
+  view gets a **vertical** bar (line position) and, in normal/non-wrap mode, a **horizontal** bar
+  (column position); the **file browser** list, the **Help/About** screens, and the **plugin
+  manager**/encoding dialogs get a vertical bar. Bars reserve their edge so no content is hidden, and
+  are omitted when everything fits.
+- **Help/About Close button** — the Help (`F1`) and About screens now show a clickable, bordered
+  **Close (Esc)** button; the mouse can dismiss them (keyboard `Esc`/Enter still work).
+- **Key hints on dialog buttons** — every dialog button label now advertises its activating key
+  (e.g. `Cancel (Esc)`, `OK (Enter)`, `Save (S)`, `Replace All (Ctrl+A)`, `Close (Esc)`), across the
+  confirm dialogs, the interactive/list dialogs, and the Help Close button.
+
+#### Notes
+
+- Affordance/visibility only — scrolling behavior, navigation keys, dialog actions, and dismissal keys
+  are unchanged. The editor reserves its rightmost column (and, non-wrap, bottom row) for the bars; the
+  viewport-height, content-width, and mouse-mapping math were updated in lockstep so paging,
+  cursor-visibility, and click-to-position stay correct (incl. line-number gutter and split view). The
+  editor's horizontal extent reflects the currently visible lines (a deliberate, fast local measure).
+
 ### feature 020: Boxed buttons + focus ring for the interactive/list dialogs
 
 #### Added

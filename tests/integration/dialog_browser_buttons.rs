@@ -54,12 +54,18 @@ fn ring_len_and_label_by_mode() {
     let base = tree("ring");
     let mut a = make_app();
     a.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
-    assert_eq!(a.interactive_button_labels(), vec!["Open", "Cancel"]);
+    assert_eq!(
+        a.interactive_button_labels(),
+        vec!["Open (Enter)", "Cancel (Esc)"]
+    );
     assert_eq!(a.dialog_focus, 0, "default focus on the browser");
 
     let mut b = make_app();
     b.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Save));
-    assert_eq!(b.interactive_button_labels(), vec!["Save", "Cancel"]);
+    assert_eq!(
+        b.interactive_button_labels(),
+        vec!["Save (Enter)", "Cancel (Esc)"]
+    );
     let _ = fs::remove_dir_all(&base);
 }
 

@@ -47,7 +47,10 @@ fn click(app: &mut App, col: u16, row: u16) {
 fn find_mode_ring_is_query_find_close() {
     let mut a = app_with_text("foo");
     a.handle_action(Action::Find).unwrap();
-    assert_eq!(a.interactive_button_labels(), vec!["Find", "Close"]);
+    assert_eq!(
+        a.interactive_button_labels(),
+        vec!["Find (Enter)", "Close (Esc)"]
+    );
     // Stops: 0=Query, 1=Find, 2=Close, wrap -> 0.
     a.handle_action(Action::FocusNextField).unwrap();
     assert_eq!(a.interactive_focus_is_button(), Some(0)); // Find
@@ -63,7 +66,12 @@ fn replace_mode_ring_has_six_stops_and_syncs_field() {
     a.handle_action(Action::FindReplace).unwrap();
     assert_eq!(
         a.interactive_button_labels(),
-        vec!["Find", "Replace", "Replace All", "Close"]
+        vec![
+            "Find (Enter)",
+            "Replace",
+            "Replace All (Ctrl+A)",
+            "Close (Esc)"
+        ]
     );
     // Stop 0 = Query.
     assert_eq!(

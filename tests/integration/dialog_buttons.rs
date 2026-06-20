@@ -40,7 +40,10 @@ fn click(app: &mut App, col: u16, row: u16) {
 #[test]
 fn save_prompt_buttons_and_safe_default() {
     let a = open_save_prompt();
-    assert_eq!(a.dialog_button_labels(), vec!["Save", "Discard", "Cancel"]);
+    assert_eq!(
+        a.dialog_button_labels(),
+        vec!["Save (S)", "Discard (D)", "Cancel (Esc)"]
+    );
     assert_eq!(
         a.dialog_default_focus(),
         2,

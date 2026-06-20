@@ -568,8 +568,16 @@ impl<'a> Widget for FileBrowserWidget<'a> {
         };
         put(buf, l.inner_left, l.header_row, &header, header_style);
 
-        // Entry list.
-        let name_budget = iw.saturating_sub(2); // 1 for marker col + space
+        // Entry list. Feature 021: when the listing overflows the visible rows,
+        // reserve the rightmost interior column for a vertical scrollbar so entry
+        // names are never drawn under the bar.
+        let bar_w: u16 = if crate::ui::scrollbar::is_needed(b.entries.len(), l.list_rows as usize) {
+            1
+        } else {
+            0
+        };
+        let row_w = iw.saturating_sub(bar_w);
+        let name_budget = row_w.saturating_sub(2); // 1 for marker col + space
         for vis in 0..l.list_rows {
             let idx = b.scroll + vis as usize;
             if idx >= b.entries.len() {
@@ -578,8 +586,9 @@ impl<'a> Widget for FileBrowserWidget<'a> {
             let entry = &b.entries[idx];
             let y = l.list_top + vis;
             let style = if idx == b.selected { selected } else { base };
-            // Fill the row so the selection highlight spans the width.
-            for cx in l.inner_left..l.inner_left + iw {
+            // Fill the row so the selection highlight spans the width (minus the
+            // reserved scrollbar column).
+            for cx in l.inner_left..l.inner_left + row_w {
                 buf.get_mut(cx, y).set_symbol(" ").set_style(style);
             }
             let (marker, display): (&str, String) = match entry.kind {
@@ -594,6 +603,19 @@ impl<'a> Widget for FileBrowserWidget<'a> {
                 y,
                 &truncate_to_width(&display, name_budget),
                 style,
+            );
+        }
+
+        // Feature 021: vertical scrollbar over the list area's right column when
+        // the listing overflows (the column was reserved above).
+        if bar_w > 0 {
+            crate::ui::scrollbar::render_vertical(
+                buf,
+                Rect::new(l.inner_left, l.list_top, iw, l.list_rows),
+                b.entries.len(),
+                l.list_rows as usize,
+                b.scroll,
+                self.theme,
             );
         }
 
@@ -704,6 +726,35 @@ mod tests {
         }
         .render(area, &mut buf);
         buf.content().iter().map(|c| c.symbol()).collect()
+    }
+
+    // Feature 021: a vertical scrollbar (thumb glyph) appears only when the
+    // listing overflows the visible rows.
+    #[test]
+    fn scrollbar_shown_only_when_list_overflows() {
+        let base = std::env::temp_dir().join("edit_fb_scroll_overflow");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        // Far more entries than the ~14 visible list rows of a 24-row terminal.
+        for i in 0..60 {
+            fs::write(base.join(format!("file{i:03}.txt")), b"x").unwrap();
+        }
+        let b = FileBrowser::open(base.clone(), BrowseMode::Open);
+        let rendered = render_browser(&b);
+        assert!(
+            rendered.contains('█') || rendered.contains('▲'),
+            "overflowing listing draws a scrollbar"
+        );
+
+        // A directory that fits draws no scrollbar.
+        let small = temp_tree("fb_no_scroll");
+        let sb = FileBrowser::open(small, BrowseMode::Open);
+        let small_render = render_browser(&sb);
+        assert!(
+            !small_render.contains('█') && !small_render.contains('▲'),
+            "a listing that fits draws no scrollbar"
+        );
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
