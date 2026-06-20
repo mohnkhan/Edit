@@ -44,9 +44,14 @@ Start directory = active buffer's parent dir if it has a path, else process CWD,
 
 | Click target | Effect |
 |---|---|
-| An entry row inside the box | Acts directly: `..`/dir → navigate; file → Open opens it / Save selects its name. (Single click; matches Enter.) |
+| An entry row inside the box (single click) | Select the row (move the highlight). No navigation or open. |
+| An entry row inside the box (double click, same row within 400 ms) | Activate, same as `Enter`: `..`/dir → navigate; file → Open opens it / Save selects its name. |
 | Inside the box but not on an entry (header/footer/filename line) | No navigation (filename line may receive focus; out of scope to edit by mouse). |
 | Outside the box | Cancel (close browser). |
+
+Single-click-selects / double-click-activates is required so that double-clicking a folder (the common
+habit) navigates into it without the second click landing on — and opening — whatever file falls under
+the cursor in the freshly-loaded listing.
 
 Hit-testing uses the same geometry the widget renders with (shared method on `FileBrowser`), so the
 clicked row always equals the drawn row.

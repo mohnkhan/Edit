@@ -137,8 +137,8 @@ A navigable directory listing replaces the old blind path entry:
 
 | Key / action | Effect |
 |---|---|
-| `↑` / `↓` | Move the selection (list scrolls to keep it visible) |
-| `Enter` / `→` / single mouse click | Enter the highlighted folder, or pick the highlighted file (Open) / confirm (Save) |
+| `↑` / `↓` / single mouse click | Move the selection (list scrolls to keep it visible) |
+| `Enter` / `→` / double mouse click | Enter the highlighted folder, or pick the highlighted file (Open) / confirm (Save) |
 | `←` / `Backspace` (empty field) | Go to the parent directory |
 | type characters | Edit the filename (Save) or an absolute jump-path (Open) |
 | `Esc` / click outside | Cancel |

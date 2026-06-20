@@ -14,11 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Added
 
 - **File browser** replaces the blind path-text Open and Save As dialogs. Both now show the current
-  directory's folders and files in a navigable list: arrow keys / clicks move the selection, Enter
-  (or a single click) enters a folder or picks a file, `←`/`Backspace` go to the parent, and the
-  current-directory path is shown at the top. A single click acts directly (enter folder / pick
-  file), matching the keyboard. Long listings scroll to keep the selection visible; folder/file
-  names render UTF-8-correct and truncate (with `…`) without splitting multi-byte characters.
+  directory's folders and files in a navigable list: arrow keys move the selection, Enter enters a
+  folder or picks a file, `←`/`Backspace` go to the parent, and the current-directory path is shown
+  at the top. With the mouse, a single click selects a row and a double-click activates it (enters
+  the folder / opens the file) — so double-clicking a folder browses into it instead of immediately
+  opening a file underneath the cursor. Long listings scroll to keep the selection visible;
+  folder/file names render UTF-8-correct and truncate (with `…`) without splitting multi-byte
+  characters.
 - **Save browser** includes an editable filename field; in Open mode an absolute path may be typed to
   jump straight to it. `Ctrl+S` on an unnamed (new) buffer now opens the Save browser to choose a
   destination, instead of silently failing.

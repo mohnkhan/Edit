@@ -67,6 +67,10 @@ const MIN_HEIGHT: u16 = 24;
 /// Tick interval for autosave and status-bar refresh.
 const TICK_MS: u64 = 500;
 
+/// Max gap between two clicks on the same file-browser row to count as a
+/// double-click (which activates the entry). Feature 012.
+const DOUBLE_CLICK_MS: u64 = 400;
+
 // ── Direction enum ────────────────────────────────────────────────────────────
 
 /// Cardinal directions for cursor movement.
@@ -117,6 +121,10 @@ pub struct App {
     pub pending_encoding_select: Option<usize>,
     /// The navigable file browser (Open/Save); `Some` = a file dialog is open (Feature 012).
     pub file_browser: Option<FileBrowser>,
+    /// Last file-browser entry click (index + time) for double-click detection.
+    /// A single click selects the row; a second click on the same row within
+    /// [`DOUBLE_CLICK_MS`] activates it (enter folder / open file) — Feature 012.
+    pub last_browser_click: Option<(usize, Instant)>,
     /// Which Help overlay is open, if any (Feature 011).
     pub pending_help: Option<HelpScreen>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
@@ -313,6 +321,7 @@ impl App {
             default_encoding,
             pending_encoding_select: None,
             file_browser: None,
+            last_browser_click: None,
             pending_help: None,
             pending_save_as_encoding: None,
             soft_wrap: soft_wrap_initial,
@@ -2272,8 +2281,12 @@ impl App {
             return Ok(());
         }
 
-        // Feature 012 — file browser: a single click acts on the entry directly
-        // (enter folder / pick file); a click outside the box cancels.
+        // Feature 012 — file browser: a single click selects the row; a second
+        // click on the same row (within DOUBLE_CLICK_MS) activates it (enter
+        // folder / open file). This matches file-dialog convention and avoids a
+        // double-click on a folder navigating in and then immediately opening
+        // whatever file lands under the cursor in the new listing. A click
+        // outside the box cancels.
         if self.file_browser.is_some() {
             let (w, h) = self.terminal_size;
             let area = ratatui::layout::Rect::new(0, 0, w, h);
@@ -2284,11 +2297,26 @@ impl App {
                 .hit_test(area, ev.col, ev.row);
             match hit {
                 BrowserHit::Entry(idx) => {
-                    let outcome = self.file_browser.as_mut().unwrap().activate_index(idx);
-                    self.apply_browse_outcome(outcome);
+                    let now = Instant::now();
+                    let double = self.last_browser_click.is_some_and(|(prev, t)| {
+                        prev == idx
+                            && now.duration_since(t) <= Duration::from_millis(DOUBLE_CLICK_MS)
+                    });
+                    if double {
+                        self.last_browser_click = None;
+                        let outcome = self.file_browser.as_mut().unwrap().activate_index(idx);
+                        self.apply_browse_outcome(outcome);
+                    } else {
+                        // First click: just move the highlight to the row.
+                        self.last_browser_click = Some((idx, now));
+                        self.file_browser.as_mut().unwrap().selected = idx;
+                    }
                 }
-                BrowserHit::Outside => self.file_browser = None,
-                BrowserHit::Inside => {}
+                BrowserHit::Outside => {
+                    self.last_browser_click = None;
+                    self.file_browser = None;
+                }
+                BrowserHit::Inside => self.last_browser_click = None,
             }
             return Ok(());
         }

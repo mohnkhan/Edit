@@ -113,7 +113,7 @@ fn save_empty_filename_is_noop() {
 }
 
 #[test]
-fn mouse_click_opens_file() {
+fn mouse_double_click_opens_file() {
     let base = tree("mouse_open");
     fs::write(base.join("click.txt"), b"clicked\n").unwrap();
 
@@ -128,14 +128,65 @@ fn mouse_click_opens_file() {
         row: 5,
         modifiers: KeyModifiers::NONE,
     };
+    // First click only selects (browser stays open, no file opened).
     app.handle_mouse_event(me).unwrap();
+    assert!(
+        app.file_browser.is_some(),
+        "single click selects without opening"
+    );
+    assert_eq!(
+        app.buffers.len(),
+        n_before,
+        "no buffer added on single click"
+    );
+    assert_eq!(
+        app.file_browser.as_ref().unwrap().selected,
+        1,
+        "single click highlights the clicked row"
+    );
 
+    // Second click on the same row activates → opens the file, closes browser.
+    app.handle_mouse_event(me).unwrap();
     assert!(
         app.file_browser.is_none(),
-        "browser closes after mouse open"
+        "browser closes after double-click open"
     );
     assert_eq!(app.buffers.len(), n_before + 1);
     assert!(app.active_buffer().rope.to_string().contains("clicked"));
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn mouse_double_click_folder_enters_then_stays_open() {
+    // Regression: double-clicking a folder must navigate into it and stay open,
+    // not enter and immediately open a file under the cursor in the new listing.
+    let base = tree("mouse_dir");
+    fs::create_dir_all(base.join("sub")).unwrap();
+    fs::write(base.join("sub").join("inner.txt"), b"inner\n").unwrap();
+
+    let mut app = make_app();
+    app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    // entries: index 0 = "..", index 1 = "sub/" → row 5.
+    let me = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 10,
+        row: 5,
+        modifiers: KeyModifiers::NONE,
+    };
+    let n_before = app.buffers.len();
+    app.handle_mouse_event(me).unwrap();
+    app.handle_mouse_event(me).unwrap();
+
+    let fb = app
+        .file_browser
+        .as_ref()
+        .expect("browser stays open after entering a folder");
+    assert!(fb.cwd.ends_with("sub"), "navigated into the folder");
+    assert_eq!(
+        app.buffers.len(),
+        n_before,
+        "no file opened by folder click"
+    );
     let _ = fs::remove_dir_all(&base);
 }
 
