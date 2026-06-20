@@ -4,11 +4,15 @@
 
 ### Bordered-box styling for Find/Replace fields (follow-up to feature 018)
 - **Issue**: #41 (`follow-up`)
-- **Status**: Open (deferred from feature 018, branch `018-field-affordance-help`)
+- **Status**: Complete as of 2026-06-20 (feature 019, branch `019-find-replace-field-boxes`)
 - **Description**: Feature 018 gave the file-browser fields a bordered, labeled input box with a caret
-  (and made the Open-mode path field visible). The Find/Replace fields already show a label + caret
-  inline; styling them as the same bordered boxes is a consistency follow-up. Spec:
-  `specs/018-field-affordance-help/`.
+  (and made the Open-mode path field visible). The Find/Replace fields already showed a label + caret
+  inline; styling them as the same bordered boxes was a consistency follow-up.
+- **Implementation**: The Find/Replace overlay in `src/ui/mod.rs` now renders each field as a labeled,
+  bordered 3-row input box with a `▏` caret (only in the focused field) and right-anchored horizontal
+  scroll, reusing `truncate_to_width`/`grapheme_width` from `src/ui/file_browser.rs`. Behavior
+  (editing, `Tab`, option toggles, match count, `Esc`) unchanged; no focus-ring/buttons (still #38).
+  Spec: `specs/019-find-replace-field-boxes/`.
 
 ### Boxed dialog buttons for interactive/list dialogs (follow-up to feature 016)
 - **Issue**: #38 (`follow-up`)
