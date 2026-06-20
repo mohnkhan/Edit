@@ -4605,7 +4605,14 @@ impl App {
         // or closes one (`[x]`), and never reaches the editor (FR-008). Uses the
         // same geometry as the renderer. A click on the row outside any tab is a
         // no-op. Reached only when no modal is open (guarded above).
-        if self.tab_bar_visible() && ev.row + 1 == self.editor_top() {
+        //
+        // Exception: when a menu dropdown is open it overlays the tab row (feature
+        // 033 renders it on top by z-order), so its items — including the first one
+        // on the tab row — own these clicks. Skip the tab-bar interception in that
+        // case and let `hit_test_menu` below route the click, otherwise the first
+        // dropdown item is unreachable by mouse whenever 2+ buffers are open.
+        let dropdown_open = matches!(self.menu_bar.state, MenuState::DropDown { .. });
+        if !dropdown_open && self.tab_bar_visible() && ev.row + 1 == self.editor_top() {
             let area = ratatui::layout::Rect::new(0, ev.row, self.terminal_size.0, 1);
             for r in crate::ui::tabbar::tab_hit_regions(area, &self.buffers, self.active_idx) {
                 if ev.col == r.close_rect.x {
@@ -6562,6 +6569,39 @@ mod tests {
             app.menu_bar.state,
             MenuState::DropDown { top_idx: 1, .. }
         ));
+    }
+
+    /// Regression: with 2+ buffers the tab bar occupies row 1, but an open menu
+    /// dropdown overlays it (feature 033). The *first* dropdown item — which lands
+    /// on row 1 — must still be clickable; previously the tab-bar click handler
+    /// swallowed the click, so e.g. Search ▸ Find / Help ▸ Help could not be
+    /// invoked by mouse while keyboard Enter still worked.
+    #[test]
+    fn first_dropdown_item_clickable_with_tab_bar_open() {
+        let mut app = make_app();
+        app.terminal_size = (80, 24);
+        // Two buffers → tab bar on row 1.
+        app.buffers.push(crate::buffer::Buffer::new_empty());
+        app.active_idx = 0;
+        assert!(app.tab_bar_visible());
+
+        // Open the Search menu by clicking its title (col 13, row 0), then click
+        // its first item ("Find", row 1) — the row the tab bar also occupies.
+        app.handle_mouse_event(mouse_press(13, 0)).unwrap();
+        assert!(
+            matches!(app.menu_bar.state, MenuState::DropDown { top_idx: 2, .. }),
+            "clicking Search should open its dropdown"
+        );
+        app.handle_mouse_event(mouse_press(13, 1)).unwrap();
+
+        // Find ▸ first item fired: the Find dialog is open and the menu closed.
+        assert!(
+            app.pending_find_replace.is_some(),
+            "first Search item should invoke Find, not switch tabs"
+        );
+        assert!(!app.menu_bar.is_active());
+        // The click must not have changed the active buffer.
+        assert_eq!(app.active_idx, 0);
     }
 
     #[test]
