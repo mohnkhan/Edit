@@ -6,6 +6,7 @@
 #![allow(dead_code, unused_variables, unused_imports)]
 
 pub mod buttons;
+pub mod contextmenu;
 pub mod dialog;
 pub mod editor;
 pub mod file_browser;
@@ -478,6 +479,12 @@ impl Ui {
                 app.interactive_focus_is_button().unwrap_or(usize::MAX),
                 app.theme,
             );
+        }
+
+        // Feature 030 (US3) — editor right-click context menu, drawn last so it
+        // overlays everything (it only opens when no other modal is active).
+        if let Some(ref menu) = app.pending_context_menu {
+            crate::ui::contextmenu::render(frame.buffer_mut(), size, menu, app.theme);
         }
     }
 }

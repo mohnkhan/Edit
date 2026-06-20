@@ -202,6 +202,9 @@ pub struct App {
     /// A single click selects the row; a second click on the same row within
     /// [`DOUBLE_CLICK_MS`] activates it (enter folder / open file) — Feature 012.
     pub last_browser_click: Option<(usize, Instant)>,
+    /// Feature 030: last editor left-press `(col, row, count, time)` for
+    /// double/triple-click detection (count 1=single, 2=word, 3=line).
+    pub last_editor_click: Option<(u16, u16, u8, Instant)>,
     /// Which Help overlay is open, if any (Feature 011).
     pub pending_help: Option<HelpScreen>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
@@ -232,6 +235,9 @@ pub struct App {
     /// Set to the buffer index awaiting a close confirmation (the clicked tab's
     /// buffer is modified). `Some` shows the [`ButtonDialog::CloseConfirm`] modal.
     pub pending_close_confirm: Option<usize>,
+
+    /// Feature 030 (US3): the open editor right-click context menu, if any.
+    pub pending_context_menu: Option<crate::ui::contextmenu::ContextMenu>,
 
     // ── Feature 015: interactive Find / Replace dialog ────────────────────────
     /// `Some` while an interactive Find/Replace dialog is open (modal).
@@ -454,6 +460,7 @@ impl App {
             pending_encoding_select: None,
             file_browser: None,
             last_browser_click: None,
+            last_editor_click: None,
             pending_help: None,
             pending_save_as_encoding: None,
             soft_wrap: soft_wrap_initial,
@@ -465,6 +472,7 @@ impl App {
             watcher_notice,
             pending_revert_confirm: None,
             pending_close_confirm: None,
+            pending_context_menu: None,
             pending_find_replace: None,
             pending_goto_line: None,
             dialog_focus: 0,
@@ -899,6 +907,33 @@ impl App {
 
     pub fn handle_action(&mut self, action: Action) -> io::Result<()> {
         self.ensure_dialog_focus();
+
+        // Feature 030 (US3): the editor context menu is modal while open — Up/Down
+        // move focus, Enter/Space activate the focused item (routing to the real
+        // action), Esc dismisses; all other keys are consumed.
+        if let Some(mut menu) = self.pending_context_menu {
+            match &action {
+                Action::MoveDown => {
+                    menu.focus_next();
+                    self.pending_context_menu = Some(menu);
+                }
+                Action::MoveUp => {
+                    menu.focus_prev();
+                    self.pending_context_menu = Some(menu);
+                }
+                Action::InsertNewline | Action::InsertChar(' ') => {
+                    let act = crate::ui::contextmenu::ITEMS[menu.focus].1.clone();
+                    self.pending_context_menu = None;
+                    return self.handle_action(act);
+                }
+                Action::MenuClose | Action::Quit => {
+                    self.pending_context_menu = None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // Feature 016: button focus + activation for confirm/dismiss dialogs.
         // Tab/Shift+Tab move focus; Enter/Space activate the focused button. All
         // other keys (letter shortcuts, Esc) fall through to the per-dialog guards
@@ -2229,6 +2264,104 @@ impl App {
         self.clamp_scroll();
     }
 
+    // ── Feature 030 — multi-click selection (US2 / #54) ───────────────────────
+
+    /// Classify the current editor left-press as single (1), double (2), or triple
+    /// (3) based on the previous press's time and cell. A press within
+    /// [`DOUBLE_CLICK_MS`] of the previous one on the same cell increments the
+    /// count (wrapping 3 → 1); otherwise it resets to 1.
+    fn next_editor_click_count(&mut self, col: u16, row: u16) -> u8 {
+        let now = Instant::now();
+        let count = match self.last_editor_click {
+            Some((pc, pr, n, t))
+                if pc == col
+                    && pr == row
+                    && now.duration_since(t) <= Duration::from_millis(DOUBLE_CLICK_MS) =>
+            {
+                if n >= 3 {
+                    1
+                } else {
+                    n + 1
+                }
+            }
+            _ => 1,
+        };
+        self.last_editor_click = Some((col, row, count, now));
+        count
+    }
+
+    /// Classify a grapheme for word-selection: word characters (alphanumeric or
+    /// `_`), whitespace, or other (punctuation/symbols). Double-click selects a
+    /// maximal run of the same class.
+    fn grapheme_class(g: &str) -> u8 {
+        match g.chars().next() {
+            Some(c) if c.is_alphanumeric() || c == '_' => 0, // word
+            Some(c) if c.is_whitespace() => 1,               // space
+            _ => 2,                                          // other
+        }
+    }
+
+    /// Select the word (run of same-class graphemes) under the cursor (US2).
+    fn select_word_at_cursor(&mut self) {
+        let buf = &self.buffers[self.active_idx];
+        let line = buf.cursor.line;
+        let graphemes: Vec<String> = buf
+            .rope
+            .line_slice(line)
+            .graphemes(true)
+            .map(|g| g.to_string())
+            .collect();
+        let len = graphemes.len();
+        if len == 0 {
+            self.buffers[self.active_idx].selection = None; // empty line — clear
+            return;
+        }
+        // Clamp the index (a click at end-of-line lands on `len`).
+        let idx = buf.cursor.grapheme_col.min(len - 1);
+        let class = Self::grapheme_class(&graphemes[idx]);
+        let mut start = idx;
+        while start > 0 && Self::grapheme_class(&graphemes[start - 1]) == class {
+            start -= 1;
+        }
+        let mut end = idx + 1;
+        while end < len && Self::grapheme_class(&graphemes[end]) == class {
+            end += 1;
+        }
+        self.set_selection_on_line(line, start, end);
+    }
+
+    /// Select the whole logical line under the cursor (US2).
+    fn select_line_at_cursor(&mut self) {
+        let line = self.buffers[self.active_idx].cursor.line;
+        let len = self.buffers[self.active_idx]
+            .rope
+            .grapheme_count_on_line(line);
+        self.set_selection_on_line(line, 0, len);
+    }
+
+    /// Set the active selection to `[start, end)` grapheme columns on `line`, with
+    /// the cursor at `end`. A degenerate range clears the selection.
+    fn set_selection_on_line(&mut self, line: usize, start: usize, end: usize) {
+        let buf = &mut self.buffers[self.active_idx];
+        if start >= end {
+            buf.selection = None;
+            return;
+        }
+        let vcol = |g| CursorPos::visual_col_from_grapheme_col(&buf.rope, line, g);
+        let anchor = CursorPos {
+            line,
+            grapheme_col: start,
+            visual_col: vcol(start),
+        };
+        let active = CursorPos {
+            line,
+            grapheme_col: end,
+            visual_col: vcol(end),
+        };
+        buf.selection = Some(Selection { anchor, active });
+        buf.cursor = active;
+    }
+
     /// Adjust `scroll_offset` so that `cursor` is within the visible viewport.
     fn clamp_scroll(&mut self) {
         // Clamp to at least 1 row: a tiny/zero terminal frame (possible now that
@@ -2503,7 +2636,7 @@ impl App {
     /// (byte-slicing a `String` panics on multibyte boundaries) and clamps a
     /// reversed/degenerate range to empty rather than panicking — defense-in-depth
     /// for copy/cut.
-    pub(crate) fn selection_text(&self) -> Option<String> {
+    pub fn selection_text(&self) -> Option<String> {
         let buf = &self.buffers[self.active_idx];
         let sel = buf.selection.as_ref()?;
         let (start, end) = sel.ordered_range();
@@ -3892,6 +4025,45 @@ impl App {
             return Ok(());
         };
 
+        // Feature 030 (US3): while the context menu is open it is modal — a press
+        // on an item activates it, a press elsewhere dismisses. (Wheel/drag ignored.)
+        if let Some(menu) = self.pending_context_menu {
+            if ev.kind == NormalizedMouseKind::Press {
+                let (w, h) = self.terminal_size;
+                let rect = crate::ui::contextmenu::menu_rect(
+                    &menu,
+                    ratatui::layout::Rect::new(0, 0, w, h),
+                );
+                if ev.button == MouseButton::Left {
+                    if let Some(idx) = crate::ui::contextmenu::hit_test(rect, ev.col, ev.row) {
+                        let act = crate::ui::contextmenu::ITEMS[idx].1.clone();
+                        self.pending_context_menu = None;
+                        return self.handle_action(act);
+                    }
+                }
+                // Press outside the menu (or non-left) dismisses it.
+                self.pending_context_menu = None;
+            }
+            return Ok(());
+        }
+
+        // Feature 030 (US3): a right-click in the editor opens the context menu —
+        // but only when no other modal/menu is active (modal precedence, FR-010).
+        if ev.kind == NormalizedMouseKind::Press && ev.button == MouseButton::Right {
+            let (_, term_rows) = self.terminal_size;
+            let in_editor = ev.row >= self.editor_top() && ev.row + 1 < term_rows;
+            let any_modal = self.open_button_dialog().is_some()
+                || self.interactive_dialog().is_some()
+                || self.pending_help.is_some()
+                || self.pending_goto_line.is_some()
+                || self.menu_bar.is_active();
+            if in_editor && !any_modal {
+                self.pending_context_menu =
+                    Some(crate::ui::contextmenu::ContextMenu::new(ev.col, ev.row));
+            }
+            return Ok(());
+        }
+
         // Feature 024: while a scrollbar thumb drag is active, mouse drags scroll
         // (proportional) instead of selecting text. Released below.
         if ev.kind == NormalizedMouseKind::Drag && self.scrollbar_drag.is_some() {
@@ -4070,8 +4242,33 @@ impl App {
                     self.activate_interactive_button(i);
                     return Ok(());
                 }
+                // Feature 030 (#53): a click on a list row selects that row and
+                // focuses the list (primary control). Buttons were checked first.
+                match self.interactive_dialog() {
+                    Some(InteractiveDialog::EncodingSelect) => {
+                        if let Some(idx) = crate::ui::dialog::encoding_row_hit(rect, ev.col, ev.row)
+                        {
+                            self.pending_encoding_select = Some(idx);
+                            self.dialog_focus = 0;
+                            return Ok(());
+                        }
+                    }
+                    Some(InteractiveDialog::PluginManager) => {
+                        if let Some(idx) = crate::ui::plugin_manager::manager_row_hit(
+                            &self.plugin_host,
+                            rect,
+                            ev.col,
+                            ev.row,
+                        ) {
+                            self.plugin_manager_cursor = idx;
+                            self.dialog_focus = 0;
+                            return Ok(());
+                        }
+                    }
+                    _ => {}
+                }
             }
-            // Not on a button: fall through to dialog-specific handling (file
+            // Not on a button or row: fall through to dialog-specific handling (file
             // browser entry clicks below; the other dialogs ignore the click).
         }
 
@@ -4208,11 +4405,20 @@ impl App {
                 if self.menu_bar.is_active() {
                     self.menu_bar.close_menu();
                 } else {
-                    // Editor click: move the cursor, clear any selection, and set
-                    // the drag anchor so a following drag selects (Feature 017).
+                    // Editor click: position the cursor first (maps the click to a
+                    // line/grapheme col).
                     self.handle_mouse_click(ev.col, ev.row);
-                    self.buffers[self.active_idx].selection = None;
-                    self.drag_anchor = Some(self.buffers[self.active_idx].cursor);
+                    // Feature 030: classify single/double/triple click.
+                    match self.next_editor_click_count(ev.col, ev.row) {
+                        2 => self.select_word_at_cursor(),
+                        3 => self.select_line_at_cursor(),
+                        _ => {
+                            // Single click: clear selection, set the drag anchor so
+                            // a following drag selects (Feature 017).
+                            self.buffers[self.active_idx].selection = None;
+                            self.drag_anchor = Some(self.buffers[self.active_idx].cursor);
+                        }
+                    }
                 }
             }
         }
@@ -4903,6 +5109,51 @@ mod tests {
             a.status_message
         );
         assert!(a.buffers[0].modified, "stays modified after a failed save");
+    }
+
+    // T005 (Feature 030): double-click selects the word under the cursor; triple
+    // selects the line; works over multibyte; degenerate cases don't panic.
+    #[test]
+    fn word_and_line_selection() {
+        let mut a = make_app();
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("foo bar_baz, café\n");
+        a.active_idx = 0;
+        let put = |a: &mut App, g: usize| {
+            a.buffers[0].cursor = crate::buffer::CursorPos {
+                line: 0,
+                grapheme_col: g,
+                visual_col: g,
+            };
+        };
+        // Cursor in "bar_baz" (underscore is a word char) → whole token.
+        put(&mut a, 5);
+        a.select_word_at_cursor();
+        assert_eq!(a.selection_text().as_deref(), Some("bar_baz"));
+        // Cursor in the multibyte word "café".
+        put(&mut a, 13);
+        a.select_word_at_cursor();
+        assert_eq!(a.selection_text().as_deref(), Some("café"));
+        // Triple-click selects the whole line content.
+        a.select_line_at_cursor();
+        assert_eq!(a.selection_text().as_deref(), Some("foo bar_baz, café"));
+        // Empty line → no panic, no selection.
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("\n");
+        put(&mut a, 0);
+        a.select_word_at_cursor();
+        assert!(a.buffers[0].selection.is_none());
+    }
+
+    // T005 (Feature 030): click-count classification (single/double/triple) within
+    // the time+cell window, wrapping after 3.
+    #[test]
+    fn editor_click_count_classification() {
+        let mut a = make_app();
+        assert_eq!(a.next_editor_click_count(5, 5), 1);
+        assert_eq!(a.next_editor_click_count(5, 5), 2);
+        assert_eq!(a.next_editor_click_count(5, 5), 3);
+        assert_eq!(a.next_editor_click_count(5, 5), 1, "wraps after triple");
+        // A different cell resets to single.
+        assert_eq!(a.next_editor_click_count(9, 9), 1);
     }
 
     // T006 (Feature 029): delete_selection over multibyte text removes the right

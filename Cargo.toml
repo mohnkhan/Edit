@@ -156,6 +156,10 @@ path = "tests/integration/ux_hardening.rs"
 name = "ux_round2"
 path = "tests/integration/ux_round2.rs"
 
+[[test]]
+name = "interaction"
+path = "tests/integration/interaction.rs"
+
 [[bench]]
 name = "startup"
 harness = false

@@ -48,9 +48,9 @@ edit [OPTIONS] [FILE...]
 |---|---|
 | `Ctrl+Z` | Undo |
 | `Ctrl+Y` | Redo |
-| `Ctrl+X` | Cut selection |
-| `Ctrl+C` | Copy selection |
-| `Ctrl+V` | Paste |
+| `Ctrl+X` / `F8` | Cut selection |
+| `Ctrl+C` / `F9` | Copy selection |
+| `Ctrl+V` / `F11` | Paste |
 | `Delete` | Delete character at cursor |
 | `Backspace` | Delete character before cursor |
 | `Tab` | Insert tab / indent selection |
@@ -80,6 +80,12 @@ replaces it; `Backspace`/`Delete` delete it; moving without Shift (or a single c
 | `Ctrl+A` | Select all |
 | Mouse press-drag-release | Select the dragged range |
 | Single click | Move cursor, clear selection |
+| Double-click | Select the word under the pointer (Feature 030) |
+| Triple-click | Select the whole line (Feature 030) |
+| Right-click | Open the Cut/Copy/Paste/Select All context menu (Feature 030) |
+
+In dialogs, clicking a list row (encoding select, plugin manager) selects it (Feature 030). The
+right-click context menu is operable by mouse or keyboard (`↑`/`↓`, `Enter`/`Space`, `Esc`).
 
 ### Search and Replace
 
@@ -100,10 +106,9 @@ replaces it; `Backspace`/`Delete` delete it; moving without Shift (or a single c
 
 | Key | Action |
 |---|---|
-| `Ctrl+Tab` | Next buffer |
-| `Ctrl+Shift+Tab` | Previous buffer |
+| `Ctrl+Tab` / `F6` | Next buffer |
+| `Ctrl+Shift+Tab` / `Shift+F6` | Previous buffer |
 | `Ctrl+W` | Close current buffer |
-| `F6` | Switch to next split pane |
 | Mouse left-click on a tab | Switch to that buffer (tab bar, Feature 027) |
 | Mouse left-click on a tab's `✕` | Close that buffer; a modified buffer prompts Save/Discard/Cancel (Feature 027) |
 

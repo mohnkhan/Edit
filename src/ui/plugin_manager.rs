@@ -80,6 +80,31 @@ pub fn line_count(body: &str) -> u16 {
 /// `Close` button row. Shared by the renderer and the app's mouse hit-testing so
 /// clicks land on the drawn button. Height = body lines + 2 borders + 4 (a 1-row
 /// gap and a 3-row button box); width 70, centered in `area`.
+/// Feature 030: map a click at `(col, row)` to a plugin-list index, or `None` if
+/// the click is outside the instance rows. Mirrors the renderer: instance `i` is
+/// drawn at `rect.y + 1 + i` (one row per plugin, before the blank + hint rows).
+pub fn manager_row_hit(
+    host: &PluginHost,
+    rect: ratatui::layout::Rect,
+    col: u16,
+    row: u16,
+) -> Option<usize> {
+    let n = host.registry.instances.len();
+    if n == 0 {
+        return None;
+    }
+    let first = rect.y + 1;
+    if col <= rect.x || col + 1 >= rect.x + rect.width || row < first {
+        return None;
+    }
+    let idx = (row - first) as usize;
+    if idx < n {
+        Some(idx)
+    } else {
+        None
+    }
+}
+
 pub fn manager_rect(
     host: &PluginHost,
     cursor: usize,

@@ -4,29 +4,30 @@
 
 ### Mouse interaction inside dialogs (follow-up to feature 029)
 - **Issue**: #53 (`follow-up`)
-- **Status**: Deferred 2026-06-20 during the feature-029 UX audit.
-- **Description**: The interactive dialogs (Find/Replace, Go-to-Line, encoding select, plugin manager)
-  ignore mouse clicks on their content — no click-to-select list items, no click-to-position caret in
-  text fields (only the feature-020 boxed buttons and the keyboard work).
-- **Suggested approach**: Per-dialog content hit-testing mapping a click to a list index / caret
-  grapheme index via the shared `ui::width`, using the renderer's geometry.
+- **Status**: List-row clicks **shipped** 2026-06-20 (feature 030 — encoding & plugin-manager dialogs
+  are now click-to-select). The remaining half — caret-on-click inside dialog text fields — is split to
+  **#58** (`follow-up`), deferred because it requires reverse-mapping clicks through the right-anchored
+  field rendering.
+
+### Caret-on-click inside dialog text fields (follow-up to feature 030)
+- **Issue**: #58 (`follow-up`)
+- **Status**: Deferred 2026-06-20 (split from #53).
+- **Description**: Clicking inside the Find/Replace, Go-to-Line, and file-browser Name fields should move
+  the caret to the clicked grapheme. Needs a shared `field_caret_at` accounting for the right-anchored
+  visible text + embedded caret glyph, using `ui::width`.
 
 ### Double-click word / triple-click line selection (follow-up to feature 029)
 - **Issue**: #54 (`follow-up`)
-- **Status**: Deferred 2026-06-20 during the feature-029 UX audit.
-- **Description**: The editor supports click-to-position and drag-select but not double-click-word or
-  triple-click-line selection.
+- **Status**: Complete as of 2026-06-20 (feature 030, branch `030-interaction-completeness`).
+- **Description**: The editor now selects the word on double-click and the line on triple-click.
 
 ### Right-click context menu (follow-up to feature 029)
 - **Issue**: #55 (`follow-up`)
-- **Status**: Deferred 2026-06-20 during the feature-029 UX audit.
-- **Description**: Right-click events are dropped; no Cut/Copy/Paste/Select-All context menu.
+- **Status**: Complete as of 2026-06-20 (feature 030). Cut/Copy/Paste/Select All popup, mouse + keyboard.
 
 ### Additional DOS-standard F-key bindings (follow-up to feature 029)
 - **Issue**: #56 (`follow-up`)
-- **Status**: Deferred 2026-06-20 during the feature-029 UX audit.
-- **Description**: Classic EDIT.COM F-keys (F4/F6–F9/F11) are unbound; actions are reachable today via
-  Ctrl-based bindings/menus. Optional faithfulness polish.
+- **Status**: Complete as of 2026-06-20 (feature 030). F6/Shift+F6 buffer switch; F8/F9/F11 cut/copy/paste.
 
 ### Syntax highlighting beyond the baseline 5 (Constitution Principle VI)
 - **Status**: Rust / JSON / TOML shipped 2026-06-20 (feature 026, branch

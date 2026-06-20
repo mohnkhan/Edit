@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 030: Interaction completeness
+
+Addresses the deferred follow-ups from the feature-029 UX audit (#53–#56).
+
+#### Added
+
+- **Click a list row to select it** in the encoding-select and plugin-manager dialogs (closes the
+  list-click half of #53; the file browser already supported this). Clicking a row focuses the list.
+- **Double-click selects the word, triple-click selects the line** in the editor (Unicode-aware word
+  runs; multibyte-safe). A following single click clears the selection. (#54)
+- **Right-click context menu** in the editor with Cut / Copy / Paste / Select All — operable by mouse
+  and keyboard (↑/↓ move, Enter/Space activate, Esc or outside-click dismiss); respects modal
+  precedence. (#55)
+- **DOS-standard F-key accelerators** (additive; the Ctrl bindings remain): **F6** next buffer,
+  **Shift+F6** previous buffer, **F8** cut, **F9** copy, **F11** paste. Existing F-keys
+  (F1/F2/F3/F5/F10/F12) are unchanged. (#56)
+
+#### Notes
+
+- No new dependencies (Constitution IV); each story has regression tests (V). The remaining half of #53
+  — positioning the caret by clicking *inside* a dialog text field — is split into a focused follow-up
+  (#58) because it requires reverse-mapping clicks through the right-anchored field rendering; the
+  list-click behavior ships here.
+
 ### feature 029: UX completeness hardening (round 2)
 
 #### Fixed
