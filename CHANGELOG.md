@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 026: Syntax highlighting for Rust, JSON, and TOML
+
+#### Added
+
+- **Three more syntax highlighters** — `.rs` (Rust: keywords, types, strings/char/byte/raw, numbers,
+  `//` + `/* */` comments, `#[…]` attributes, `name!` macros), `.json` (keys vs string values, numbers,
+  `true`/`false`/`null`, punctuation), and `.toml` (`[..]`/`[[..]]` headers, keys, strings, numbers,
+  dates, booleans, `#` comments). The editor now highlights 8 languages.
+
+#### Notes
+
+- Line-based, best-effort (consistent with the existing highlighters), reusing the `Highlighter` trait,
+  `Span`, and theme classes; no new dependencies. A plugin highlighter for these extensions still
+  overrides the built-in. This is the constitution's Principle-VI spec gate for languages beyond the
+  baseline 5. The existing 5 highlighters are unchanged.
+
 ### feature 025: Go to Line
 
 #### Added

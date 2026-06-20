@@ -69,6 +69,50 @@ pub fn detect_highlighter(path: &Path) -> Option<Box<dyn Highlighter>> {
         Some("md") => Some(Box::new(
             crate::highlight::languages::markdown::MarkdownHighlighter,
         )),
+        // Feature 026: Rust / JSON / TOML.
+        Some("rs") => Some(Box::new(crate::highlight::languages::rust::RustHighlighter)),
+        Some("json") => Some(Box::new(crate::highlight::languages::json::JsonHighlighter)),
+        Some("toml") => Some(Box::new(crate::highlight::languages::toml::TomlHighlighter)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Feature 026: the new extensions resolve to their highlighters; unknown → None.
+    #[test]
+    fn detect_resolves_rust_json_toml() {
+        let name = |p: &str| detect_highlighter(Path::new(p)).map(|h| h.name());
+        assert_eq!(name("a.rs"), Some("Rust"));
+        assert_eq!(name("Cargo.toml"), Some("TOML"));
+        assert_eq!(name("config.json"), Some("JSON"));
+        assert_eq!(name("a.c"), Some("C"));
+        assert_eq!(name("a.unknownext"), None);
+        assert_eq!(name("noext"), None);
+    }
+
+    // Highlighting representative lines of each new language yields sorted,
+    // non-overlapping spans with no panic.
+    #[test]
+    fn new_highlighters_produce_valid_spans() {
+        let samples = [
+            ("x.rs", "pub fn f<T>(x: u32) -> Result<T> { /* c */ \"s\" }"),
+            ("x.json", r#"{"k": [1, true, null], "s": "v"}"#),
+            ("x.toml", "[pkg]\nname = \"e\" # c\nver = 1.2"),
+        ];
+        for (path, text) in samples {
+            let h = detect_highlighter(Path::new(path)).unwrap();
+            for line in text.lines() {
+                let spans = h.highlight(line);
+                let mut last = 0usize;
+                for s in &spans {
+                    assert!(s.start >= last, "overlap in {path}: {line:?}");
+                    assert!(s.end <= line.len());
+                    last = s.end;
+                }
+            }
+        }
     }
 }
