@@ -169,6 +169,13 @@ toggle, `Alt+C/A/R/W`, `Ctrl+A`, `F3/F2`) are unchanged.
 - **Every dialog button label advertises its key**, e.g. `Cancel (Esc)`, `OK (Enter)`, `Save (S)`,
   `Replace All (Ctrl+A)`, `Close (Esc)`. The key behaves exactly as before; the label is informational.
 
+### Mouse-wheel scrolling (Feature 023)
+
+The mouse wheel scrolls whatever is under the cursor (or the open dialog/overlay): the editor view
+(viewport only, ~3 lines per notch, cursor unchanged), the file-browser listing, the Help/About screens,
+and the encoding/plugin lists. Scrolling is bounded and the scrollbars track it. The wheel does not
+change click/drag or keyboard behavior; a wheel over the menu/status bar is ignored.
+
 Built-in accelerators follow DOS/standard convention — File: **N**ew, **O**pen, **S**ave, Save **A**s,
 Save As **E**ncoding, e**X**it; Edit: **U**ndo, **R**edo, **C**ut, C**o**py, **P**aste, **S**elect All;
 Search: **F**ind, Find **N**ext, Find **P**rev, Find **R**eplace; View: **S**plit View, **N**ext Buffer,

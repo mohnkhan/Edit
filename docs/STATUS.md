@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F023-US1 | Mouse wheel scrolls the editor viewport (3 lines/notch, cursor unchanged, bounded) | Complete |
+| F023-US2 | Mouse wheel scrolls the file browser, Help/About, and encoding/plugin dialogs (modal wins) | Complete |
+| F023-US3 | Wheel handling leaves click/drag-selection and keyboard scrolling unchanged | Complete |
 | F022-US1 | File dialog: live glob/substring filtering (case-insensitive); dirs/`..` always kept; absolute path still jumps | Complete |
 | F022-US2 | File dialog: per-entry size + modified-date columns (`<DIR>` for folders), aligned, name truncates | Complete |
 | F021-US1 | Scrollbars on overflow: editor (vertical + horizontal), file browser, Help/About, encoding/plugin | Complete |
