@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 027: Buffer tab bar
+
+#### Added
+
+- **Buffer tab bar** — when 2+ buffers are open, a one-row tab strip appears directly below the menu bar
+  listing each open file by name (with a `●` marker for unsaved buffers); the active tab is highlighted.
+  **Click a tab** to switch to that buffer (same as `Ctrl+Tab`/`Ctrl+Shift+Tab`, which are unchanged), or
+  click its **`✕`** close box to close it. Closing a modified buffer opens a **Save / Discard / Cancel**
+  confirmation (no silent data loss). With a single buffer there is no tab bar — the editor keeps its
+  full-height layout. Tabs that overflow the width truncate/scroll to keep the active tab visible.
+
+#### Notes
+
+- The tab bar shrinks the editor by exactly one row; all editor geometry (cursor placement, paging,
+  mouse-wheel, and scrollbars) accounts for it through a single `editor_top()` source, so clicks and
+  scrolling stay correct beneath the bar. No new dependencies. The close confirmation reuses the
+  feature-016 boxed-button dialog infrastructure.
+
 ### feature 026: Syntax highlighting for Rust, JSON, and TOML
 
 #### Added

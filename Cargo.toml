@@ -144,6 +144,10 @@ path = "tests/integration/scrollbar_interaction.rs"
 name = "go_to_line"
 path = "tests/integration/go_to_line.rs"
 
+[[test]]
+name = "buffer_tab_bar"
+path = "tests/integration/buffer_tab_bar.rs"
+
 [[bench]]
 name = "startup"
 harness = false

@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F027-US1 | Buffer tab bar (2+ buffers): one-row strip below the menu bar; click a tab to switch; active highlighted, modified marked | Complete |
+| F027-US2 | Tab `✕` close box: clean buffer closes immediately; modified opens a Save/Discard/Cancel confirm (no silent data loss) | Complete |
+| F027-US3 | Editor geometry accounts for the tab row (cursor/paging/wheel/scrollbars); single-buffer layout unchanged | Complete |
 | F026-US1 | Rust (.rs) syntax highlighting (keywords, types, strings, numbers, comments, attributes, macros) | Complete |
 | F026-US2 | JSON (.json) syntax highlighting (keys vs values, numbers, true/false/null, punctuation) | Complete |
 | F026-US3 | TOML (.toml) syntax highlighting (headers, keys, strings, numbers, dates, booleans, comments) | Complete |

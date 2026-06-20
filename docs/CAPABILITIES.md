@@ -104,6 +104,12 @@ replaces it; `Backspace`/`Delete` delete it; moving without Shift (or a single c
 | `Ctrl+Shift+Tab` | Previous buffer |
 | `Ctrl+W` | Close current buffer |
 | `F6` | Switch to next split pane |
+| Mouse left-click on a tab | Switch to that buffer (tab bar, Feature 027) |
+| Mouse left-click on a tab's `✕` | Close that buffer; a modified buffer prompts Save/Discard/Cancel (Feature 027) |
+
+With **2 or more buffers open**, a one-row **tab bar** appears below the menu bar listing each open file
+(active tab highlighted, a `●` marks unsaved buffers). It is hidden with a single buffer. Overflowing
+tabs truncate/scroll to keep the active tab visible.
 
 ### View
 

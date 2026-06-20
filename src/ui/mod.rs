@@ -13,6 +13,7 @@ pub mod menubar;
 pub mod plugin_manager;
 pub mod scrollbar;
 pub mod statusbar;
+pub mod tabbar;
 pub mod theme;
 pub mod wrap;
 
@@ -64,18 +65,45 @@ impl Ui {
         let size = frame.size();
 
         // ── Layout ──────────────────────────────────────────────────────────
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
+        // Feature 027: with 2+ buffers a one-row tab bar sits between the menu
+        // bar and the editor, shrinking the editor by exactly one row. The row
+        // count here must agree with `App::editor_top()` (the geometry source).
+        let tab_bar_visible = app.tab_bar_visible();
+        let constraints: &[Constraint] = if tab_bar_visible {
+            &[
+                Constraint::Length(1), // menu bar
+                Constraint::Length(1), // tab bar
+                Constraint::Min(1),    // editor
+                Constraint::Length(1), // status bar
+            ]
+        } else {
+            &[
                 Constraint::Length(1), // menu bar
                 Constraint::Min(1),    // editor
                 Constraint::Length(1), // status bar
-            ])
+            ]
+        };
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
             .split(size);
 
         let menubar_area = chunks[0];
-        let editor_area = chunks[1];
-        let statusbar_area = chunks[2];
+        let tab_bar_area = if tab_bar_visible {
+            Some(chunks[1])
+        } else {
+            None
+        };
+        let editor_area = if tab_bar_visible {
+            chunks[2]
+        } else {
+            chunks[1]
+        };
+        let statusbar_area = if tab_bar_visible {
+            chunks[3]
+        } else {
+            chunks[2]
+        };
 
         // ── Editor area ───────────────────────────────────────────────────────
         let buf = app.active_buffer();
@@ -175,6 +203,19 @@ impl Ui {
         let menus = resolve_menus(&app.plugin_host.registry.menu_items());
         let menubar = MenuBarWidget::new(app.theme, &app.menu_bar, toggle_states, &menus);
         frame.render_widget(menubar, menubar_area);
+
+        // ── Tab bar (Feature 027) ─────────────────────────────────────────────
+        // Shown only with 2+ buffers; uses the same geometry as the mouse
+        // hit-testing in `App::handle_mouse_event`.
+        if let Some(area) = tab_bar_area {
+            tabbar::render_tab_bar(
+                frame.buffer_mut(),
+                area,
+                &app.buffers,
+                app.active_idx,
+                app.theme,
+            );
+        }
 
         // ── Dialogs (overlaid) ────────────────────────────────────────────────
         // Feature 016 — confirm/dismiss dialogs with boxed, focusable buttons.
