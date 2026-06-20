@@ -451,7 +451,7 @@ fn compute_layout(area: Rect, mode: BrowseMode) -> BrowserLayout {
 // ---------------------------------------------------------------------------
 
 /// Approximate display width of a grapheme's leading scalar (1 narrow, 2 wide).
-fn grapheme_width(g: &str) -> u16 {
+pub fn grapheme_width(g: &str) -> u16 {
     let cp = g.chars().next().map(|c| c as u32).unwrap_or(0);
     let wide = (0x1100..=0x115F).contains(&cp)
         || (0x2E80..=0x303E).contains(&cp)

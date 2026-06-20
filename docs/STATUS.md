@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F019-US1 | Find dialog: search field rendered as a bordered, labeled input box with a caret | Complete |
+| F019-US2 | Replace dialog: both fields as bordered boxes; caret only in the focused field | Complete |
+| F019-US3 | All existing Find/Replace behavior (editing, Tab, toggles, count, Esc) preserved | Complete |
 | F018-US1 | File dialog: bordered, labeled input box with caret (Open path field now visible) | Complete |
 | F018-US2 | Help redesigned as a grouped, scrollable Key\|Action table (no truncation) | Complete |
 | F017-US1 | Selected text rendered with a highlight (reverse video); Select All shows it | Complete |

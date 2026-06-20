@@ -204,40 +204,20 @@ impl Ui {
         // Feature 015 — interactive Find / Replace dialog overlay.
         if let Some(ref d) = app.pending_find_replace {
             use crate::ui::dialog::{DialogField, DialogMode};
+            use crate::ui::file_browser::truncate_to_width;
             let base = ratatui::style::Style::default()
                 .fg(app.theme.menubar_fg)
                 .bg(app.theme.menubar_bg);
             let is_replace = d.mode == DialogMode::Replace;
 
-            // Caret marker inside the focused field's text.
-            let with_caret = |text: &str, focused: bool| -> String {
-                if !focused {
-                    return text.to_string();
-                }
-                let mut out = String::new();
-                for (i, g) in
-                    unicode_segmentation::UnicodeSegmentation::graphemes(text, true).enumerate()
-                {
-                    if i == d.caret {
-                        out.push('│');
-                    }
-                    out.push_str(g);
-                }
-                let len = unicode_segmentation::UnicodeSegmentation::graphemes(text, true).count();
-                if d.caret >= len {
-                    out.push('│');
-                }
-                out
-            };
-
             let count = match (d.query.is_empty(), app.search_state.active_match) {
                 (true, _) => String::new(),
-                (false, Some(i)) => format!("  {}/{}", i + 1, app.search_state.matches.len()),
+                (false, Some(i)) => format!("{}/{}", i + 1, app.search_state.matches.len()),
                 (false, None) => {
                     if app.search_state.matches.is_empty() {
-                        "  not found".to_string()
+                        "not found".to_string()
                     } else {
-                        format!("  {} matches", app.search_state.matches.len())
+                        format!("{} matches", app.search_state.matches.len())
                     }
                 }
             };
@@ -249,41 +229,82 @@ impl Ui {
                 opt(d.regex, "Regex(Alt+R)"),
                 opt(d.whole_word, "Word(Alt+W)"),
             );
-
-            let mut lines: Vec<ratatui::text::Line> = Vec::new();
-            lines.push(ratatui::text::Line::from(format!(
-                "Find:    {}{}",
-                with_caret(&d.query, d.focus == DialogField::Query),
-                count
-            )));
-            if is_replace {
-                lines.push(ratatui::text::Line::from(format!(
-                    "Replace: {}",
-                    with_caret(&d.replacement, d.focus == DialogField::Replacement)
-                )));
-            }
-            lines.push(ratatui::text::Line::from(opts));
             let hint = if is_replace {
                 "Enter replace · Ctrl+A all · Tab field · F3/F2 next/prev · Esc close"
             } else {
                 "Enter find · F3/F2 next/prev · Esc close"
             };
-            lines.push(ratatui::text::Line::from(hint));
-
             let title = if is_replace { " Replace " } else { " Find " };
-            let dialog = ratatui::widgets::Paragraph::new(lines).style(base).block(
-                ratatui::widgets::Block::default()
-                    .title(title)
-                    .borders(ratatui::widgets::Borders::ALL),
-            );
-            let dw = 70u16.min(size.width);
-            let dh = if is_replace { 6u16 } else { 5u16 }.min(size.height);
+
+            // Feature 019: each field is a labeled, bordered 3-row input box,
+            // matching the file-browser input box from feature 018. Layout:
+            // (label row + 3-row box) per field, then an options row and a hint row.
+            let n_fields: u16 = if is_replace { 2 } else { 1 };
+            let content_h = n_fields * 4 + 2; // fields + options + hint
+            let dw = 70u16.min(size.width.max(1));
+            let dh = (content_h + 2).min(size.height.max(1)); // +2 outer borders
             let dx = size.x + size.width.saturating_sub(dw) / 2;
             // Place near the top so it doesn't hide the current match.
             let dy = size.y + 1;
             let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
+
             frame.render_widget(ratatui::widgets::Clear, dialog_area);
-            frame.render_widget(dialog, dialog_area);
+            frame.render_widget(
+                ratatui::widgets::Block::default()
+                    .title(title)
+                    .borders(ratatui::widgets::Borders::ALL)
+                    .style(base),
+                dialog_area,
+            );
+
+            let inner_x = dx + 1;
+            let inner_w = dw.saturating_sub(2);
+            let bottom = dy + dh.saturating_sub(1); // first bottom-border row
+            let mut row = dy + 1;
+
+            render_find_field(
+                frame,
+                base,
+                inner_x,
+                inner_w,
+                &mut row,
+                bottom,
+                "Find what:",
+                &count,
+                &d.query,
+                d.focus == DialogField::Query,
+                d.caret,
+            );
+            if is_replace {
+                render_find_field(
+                    frame,
+                    base,
+                    inner_x,
+                    inner_w,
+                    &mut row,
+                    bottom,
+                    "Replace with:",
+                    "",
+                    &d.replacement,
+                    d.focus == DialogField::Replacement,
+                    d.caret,
+                );
+            }
+            // Options row.
+            if row < bottom {
+                frame.render_widget(
+                    ratatui::widgets::Paragraph::new(truncate_to_width(&opts, inner_w)).style(base),
+                    ratatui::layout::Rect::new(inner_x, row, inner_w, 1),
+                );
+                row += 1;
+            }
+            // Hint row.
+            if row < bottom {
+                frame.render_widget(
+                    ratatui::widgets::Paragraph::new(truncate_to_width(hint, inner_w)).style(base),
+                    ratatui::layout::Rect::new(inner_x, row, inner_w, 1),
+                );
+            }
         }
 
         // T015 — Encoding select dialog overlay.
@@ -337,6 +358,101 @@ impl Ui {
             frame.render_widget(dialog, dialog_area);
         }
     }
+}
+
+/// Feature 019: build the in-box display string for a Find/Replace field.
+/// Embeds the caret glyph `▏` at grapheme index `caret` (only when `focused`),
+/// then right-anchors the result to `inner_w` display columns so the caret and
+/// trailing text stay visible when the value is wider than the box.
+fn field_box_text(text: &str, focused: bool, caret: usize, inner_w: u16) -> String {
+    use crate::ui::file_browser::grapheme_width;
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let mut s = String::new();
+    let mut len = 0usize;
+    for (i, g) in text.graphemes(true).enumerate() {
+        if focused && i == caret {
+            s.push('▏');
+        }
+        s.push_str(g);
+        len = i + 1;
+    }
+    if focused && caret >= len {
+        s.push('▏');
+    }
+
+    let total: u16 = s.graphemes(true).map(grapheme_width).sum();
+    if total <= inner_w {
+        return s;
+    }
+    // Keep the tail (caret + latest chars) visible.
+    let mut acc = 0u16;
+    let mut tail = String::new();
+    for g in s.graphemes(true).rev() {
+        let w = grapheme_width(g);
+        if acc + w > inner_w {
+            break;
+        }
+        acc += w;
+        tail.insert_str(0, g);
+    }
+    tail
+}
+
+/// Feature 019: render one labeled, bordered Find/Replace input box starting at
+/// `*row`, advancing `*row` past the box. Clamps to `bottom` so a short terminal
+/// degrades gracefully instead of drawing outside the dialog.
+#[allow(clippy::too_many_arguments)]
+fn render_find_field(
+    frame: &mut Frame,
+    base: ratatui::style::Style,
+    inner_x: u16,
+    inner_w: u16,
+    row: &mut u16,
+    bottom: u16,
+    label: &str,
+    extra: &str,
+    text: &str,
+    focused: bool,
+    caret: usize,
+) {
+    use crate::ui::file_browser::truncate_to_width;
+    use ratatui::layout::Rect;
+    use ratatui::style::Modifier;
+    use ratatui::widgets::{Block, Borders, Paragraph};
+
+    if *row >= bottom {
+        return;
+    }
+    // Label row (label left; optional `extra`, e.g. the match count, after it).
+    let label_line = if extra.is_empty() {
+        label.to_string()
+    } else {
+        format!("{}  {}", label, extra)
+    };
+    frame.render_widget(
+        Paragraph::new(truncate_to_width(&label_line, inner_w))
+            .style(base.add_modifier(Modifier::BOLD)),
+        Rect::new(inner_x, *row, inner_w, 1),
+    );
+    *row += 1;
+
+    // 3-row bordered box, clamped to the remaining height.
+    let box_h = 3u16.min(bottom.saturating_sub(*row));
+    if box_h == 0 {
+        return;
+    }
+    let box_rect = Rect::new(inner_x, *row, inner_w, box_h);
+    frame.render_widget(Block::default().borders(Borders::ALL).style(base), box_rect);
+    if box_h >= 2 {
+        let box_inner_w = inner_w.saturating_sub(2);
+        let shown = field_box_text(text, focused, caret, box_inner_w);
+        frame.render_widget(
+            Paragraph::new(shown).style(base),
+            Rect::new(inner_x + 1, *row + 1, box_inner_w, 1),
+        );
+    }
+    *row += box_h;
 }
 
 /// Render the Help / About overlay (Feature 011), centred over the editor.

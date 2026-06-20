@@ -85,8 +85,8 @@ replaces it; `Backspace`/`Delete` delete it; moving without Shift (or a single c
 
 | Key | Action |
 |---|---|
-| `Ctrl+F` | Open the interactive Find dialog (type term, `Enter` to search; matches highlighted, view jumps to the current match, "X of Y" shown) |
-| `Ctrl+H` | Open the interactive Replace dialog (find + replace-with fields) |
+| `Ctrl+F` | Open the interactive Find dialog (type term in a bordered, labeled input box with a caret; `Enter` to search; matches highlighted, view jumps to the current match, "X of Y" shown) |
+| `Ctrl+H` | Open the interactive Replace dialog (find + replace-with fields, each a bordered, labeled input box; caret in the focused field) |
 | `F3` | Find next (wraps) |
 | `F2` | Find previous (wraps) |
 | `Tab` | Replace dialog: switch between the find and replace fields |

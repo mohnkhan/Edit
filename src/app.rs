@@ -3551,6 +3551,116 @@ mod tests {
         );
     }
 
+    // Feature 019: the Find dialog renders its query in a labeled, bordered
+    // input box with a caret (matching the file-browser box from feature 018).
+    #[test]
+    fn find_dialog_renders_bordered_box_with_caret() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = make_app();
+        app.handle_action(Action::Find).unwrap();
+        for c in "needle".chars() {
+            app.handle_action(Action::InsertChar(c)).unwrap();
+        }
+        let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        t.draw(|f| app.render(f)).unwrap();
+        let s: String = t
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(
+            s.contains('┌') && s.contains('└') && s.contains('│'),
+            "field box borders drawn"
+        );
+        assert!(s.contains("Find what:"), "field label shown");
+        assert!(s.contains('▏'), "caret glyph shown in the focused field");
+        assert!(s.contains("needle"), "typed query shown in the box");
+        for label in ["Case", "Wrap", "Regex", "Word"] {
+            assert!(s.contains(label), "option {label} still shown");
+        }
+        assert!(s.contains("Esc close"), "hint row still shown");
+    }
+
+    // Feature 019: the Replace dialog renders BOTH fields as bordered boxes; the
+    // caret appears only in the focused field (FR-005 / contract C-2).
+    #[test]
+    fn replace_dialog_renders_two_boxes_and_focused_caret() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let render = |app: &mut App| -> String {
+            let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            t.draw(|f| app.render(f)).unwrap();
+            t.backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect()
+        };
+        let mut app = make_app();
+        app.handle_action(Action::FindReplace).unwrap();
+        for c in "foo".chars() {
+            app.handle_action(Action::InsertChar(c)).unwrap();
+        }
+        let s = render(&mut app);
+        assert!(
+            s.contains("Find what:") && s.contains("Replace with:"),
+            "both field labels shown"
+        );
+        // Two bordered boxes => at least two top-left corners.
+        assert!(s.matches('┌').count() >= 2, "two field boxes drawn");
+        assert_eq!(
+            s.matches('▏').count(),
+            1,
+            "exactly one caret (focused field only)"
+        );
+
+        // Switching focus to the replacement field moves the (single) caret there.
+        app.handle_action(Action::FocusNextField).unwrap();
+        for c in "bar".chars() {
+            app.handle_action(Action::InsertChar(c)).unwrap();
+        }
+        let s2 = render(&mut app);
+        assert_eq!(
+            s2.matches('▏').count(),
+            1,
+            "still exactly one caret after Tab"
+        );
+        assert!(s2.contains("bar"), "replacement text rendered in its box");
+    }
+
+    // Feature 019: the taller boxed Replace dialog must render fully within the
+    // frame at the minimum supported terminal size without panic (FR-009 /
+    // contract C-5). Below the minimum the app shows its "too small" guard
+    // instead, so the boundary case is exactly MIN_WIDTH x MIN_HEIGHT.
+    #[test]
+    fn replace_dialog_renders_at_minimum_terminal() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = make_app();
+        app.handle_action(Action::FindReplace).unwrap();
+        app.handle_action(Action::InsertChar('x')).unwrap();
+        let mut t = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+        t.draw(|f| app.render(f)).unwrap();
+        let s: String = t
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        // Both boxes plus the hint fit at the minimum size.
+        assert!(
+            s.matches('┌').count() >= 2,
+            "both field boxes drawn at min size"
+        );
+        assert!(
+            s.contains("Replace with:"),
+            "second field present at min size"
+        );
+        assert!(s.contains("Esc close"), "hint row present at min size");
+    }
+
     // Feature 017: Select All renders the selected text with reverse-video.
     #[test]
     fn select_all_renders_reverse_highlight() {

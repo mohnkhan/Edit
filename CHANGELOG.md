@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 019: Bordered-box styling for the Find/Replace fields
+
+#### Added
+
+- **Find/Replace input boxes** — the Find (`Ctrl+F`) and Replace (`Ctrl+H`) dialogs now draw each
+  editable field as a clearly bordered, labeled box (`Find what:` / `Replace with:`) with a visible
+  caret, matching the file-browser input box from feature 018. The caret appears only in the focused
+  field; long entries scroll horizontally so the caret stays visible. Editing, `Tab` field switch,
+  the option toggles (`Alt+C/A/R/W`), the match count, and `Esc` are unchanged.
+
+#### Notes
+
+- Scope is visual/affordance only; the combined field+button focus ring for the interactive/list
+  dialogs remains a separate follow-up (issue #38). Resolves the feature-018 follow-up (issue #41).
+
 ### feature 018: Editable-field affordance + Help redesign
 
 #### Added
