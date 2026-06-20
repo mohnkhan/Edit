@@ -47,6 +47,10 @@ pub enum EntryKind {
 pub struct Entry {
     pub name: String,
     pub kind: EntryKind,
+    /// File byte size; `None` for directories / `..` / unreadable metadata (Feature 022).
+    pub size: Option<u64>,
+    /// Modified time as Unix epoch seconds; `None` if unreadable (Feature 022).
+    pub mtime: Option<u64>,
 }
 
 /// Result of activating an entry / confirming, returned to the app event loop.
@@ -78,6 +82,9 @@ pub struct FileBrowser {
     pub mode: BrowseMode,
     /// Always a canonical, absolute directory with no `..` components.
     pub cwd: PathBuf,
+    /// Full sorted listing (source of truth) — Feature 022.
+    pub all_entries: Vec<Entry>,
+    /// The currently displayed (filtered) listing.
     pub entries: Vec<Entry>,
     pub selected: usize,
     pub scroll: usize,
@@ -96,6 +103,7 @@ impl FileBrowser {
         let mut b = FileBrowser {
             mode,
             cwd,
+            all_entries: Vec::new(),
             entries: Vec::new(),
             selected: 0,
             scroll: 0,
@@ -126,19 +134,30 @@ impl FileBrowser {
         let mut files: Vec<Entry> = Vec::new();
         for entry in read.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
+            // Feature 022: best-effort size + modified time (epoch secs).
+            let meta = entry.metadata().ok();
             let is_dir = match entry.file_type() {
                 Ok(ft) => ft.is_dir(),
                 Err(_) => entry.path().is_dir(),
             };
+            let mtime = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| {
+                t.duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .map(|d| d.as_secs())
+            });
             if is_dir {
                 dirs.push(Entry {
                     name,
                     kind: EntryKind::Dir,
+                    size: None,
+                    mtime,
                 });
             } else {
                 files.push(Entry {
                     name,
                     kind: EntryKind::File,
+                    size: meta.as_ref().map(|m| m.len()),
+                    mtime,
                 });
             }
         }
@@ -146,22 +165,56 @@ impl FileBrowser {
         dirs.sort_by(by_name);
         files.sort_by(by_name);
 
-        let mut entries = Vec::with_capacity(dirs.len() + files.len() + 1);
+        let mut all = Vec::with_capacity(dirs.len() + files.len() + 1);
         if !self.is_root() {
-            entries.push(Entry {
+            all.push(Entry {
                 name: "..".to_string(),
                 kind: EntryKind::Parent,
+                size: None,
+                mtime: None,
             });
         }
-        entries.extend(dirs);
-        entries.extend(files);
+        all.extend(dirs);
+        all.extend(files);
 
-        self.entries = entries;
+        self.all_entries = all;
+        self.error = None;
+        self.scroll = 0;
+        // Feature 022: derive the displayed (filtered) listing.
+        self.apply_filter();
+    }
+
+    /// Feature 022: derive `entries` (displayed) from `all_entries` by applying the
+    /// field text as a filter. Empty or an absolute path → no filtering; a pattern
+    /// with `*`/`?` → glob; otherwise case-insensitive substring. Directories and
+    /// `..` are always kept so navigation is never blocked. Re-clamps the selection.
+    pub fn apply_filter(&mut self) {
+        let pat = self.filename.trim();
+        let no_filter = pat.is_empty() || pat.starts_with('/');
+        self.entries = if no_filter {
+            self.all_entries.clone()
+        } else if is_glob(pat) {
+            self.all_entries
+                .iter()
+                .filter(|e| !matches!(e.kind, EntryKind::File) || glob_match(pat, &e.name))
+                .cloned()
+                .collect()
+        } else {
+            let needle = pat.to_lowercase();
+            self.all_entries
+                .iter()
+                .filter(|e| {
+                    !matches!(e.kind, EntryKind::File) || e.name.to_lowercase().contains(&needle)
+                })
+                .cloned()
+                .collect()
+        };
         if self.selected >= self.entries.len() {
             self.selected = self.entries.len().saturating_sub(1);
         }
-        self.scroll = 0;
-        self.error = None;
+        if self.scroll >= self.entries.len() {
+            self.scroll = 0;
+        }
     }
 
     // ── Navigation ─────────────────────────────────────────────────────────
@@ -353,6 +406,7 @@ impl FileBrowser {
 
     pub fn push_char(&mut self, c: char) {
         self.filename.push(c);
+        self.apply_filter(); // Feature 022: live filtering
     }
 
     /// Backspace: delete the last char of the field, or go to parent when empty.
@@ -361,6 +415,7 @@ impl FileBrowser {
             self.enter_parent();
         } else {
             self.filename.pop();
+            self.apply_filter(); // Feature 022: live filtering
         }
     }
 
@@ -504,6 +559,85 @@ pub fn truncate_to_width(s: &str, max_cols: u16) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Feature 022: glob matching + size/date formatting (std-only, no new crates)
+// ---------------------------------------------------------------------------
+
+/// Case-insensitive wildcard match anchored to the whole `name`. Supports `*`
+/// (any run, incl. empty) and `?` (exactly one char). No character classes.
+/// Classic linear two-pointer backtracking.
+pub fn glob_match(pattern: &str, name: &str) -> bool {
+    let p: Vec<char> = pattern.to_lowercase().chars().collect();
+    let s: Vec<char> = name.to_lowercase().chars().collect();
+    let (mut pi, mut si) = (0usize, 0usize);
+    let (mut star, mut mark): (Option<usize>, usize) = (None, 0);
+    while si < s.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == s[si]) {
+            pi += 1;
+            si += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = si;
+            pi += 1;
+        } else if let Some(st) = star {
+            pi = st + 1;
+            mark += 1;
+            si = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// `true` when `pattern` should be treated as a glob (has `*` or `?`).
+pub fn is_glob(pattern: &str) -> bool {
+    pattern.contains('*') || pattern.contains('?')
+}
+
+/// Human-readable byte size: `0B`, `1023B`, `1.0K`, `15K`, `3.4M`, `2.0G`.
+/// Sub-10 magnitudes get one decimal; larger values are rounded to integer.
+pub fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "K", "M", "G"];
+    if bytes < 1024 {
+        return format!("{bytes}B");
+    }
+    let mut val = bytes as f64;
+    let mut unit = 0usize;
+    while val >= 1024.0 && unit < UNITS.len() - 1 {
+        val /= 1024.0;
+        unit += 1;
+    }
+    if val < 10.0 {
+        format!("{:.1}{}", val, UNITS[unit])
+    } else {
+        format!("{:.0}{}", val, UNITS[unit])
+    }
+}
+
+/// Format a Unix epoch-seconds timestamp as `YYYY-MM-DD HH:MM` in UTC, using the
+/// days-from-civil algorithm (no `chrono`/`time` dependency).
+pub fn format_mtime(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (hh, mm) = ((rem / 3600) as u32, ((rem % 3600) / 60) as u32);
+    // days since 1970-01-01 → civil (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02}")
+}
+
+// ---------------------------------------------------------------------------
 // Widget
 // ---------------------------------------------------------------------------
 
@@ -577,7 +711,17 @@ impl<'a> Widget for FileBrowserWidget<'a> {
             0
         };
         let row_w = iw.saturating_sub(bar_w);
-        let name_budget = row_w.saturating_sub(2); // 1 for marker col + space
+        // Feature 022: detail columns — size (right-aligned) + modified date.
+        // Shown only when the row is wide enough; otherwise name-only (degrade).
+        const SIZE_W: u16 = 6; // "1023B" / "1.0K" / "<DIR>"
+        const DATE_W: u16 = 16; // "YYYY-MM-DD HH:MM"
+        let detail_w = SIZE_W + 1 + DATE_W; // size + gap + date
+        let show_detail = row_w >= 1 + 8 + 1 + detail_w; // marker + min name + gap + detail
+        let name_budget = if show_detail {
+            row_w.saturating_sub(1 + 1 + detail_w) // marker + gap-before-detail + detail
+        } else {
+            row_w.saturating_sub(2) // marker + space (legacy)
+        };
         for vis in 0..l.list_rows {
             let idx = b.scroll + vis as usize;
             if idx >= b.entries.len() {
@@ -604,6 +748,35 @@ impl<'a> Widget for FileBrowserWidget<'a> {
                 &truncate_to_width(&display, name_budget),
                 style,
             );
+            if show_detail {
+                // Size column (right-aligned): "<DIR>" for dirs/parent, human size
+                // for files, blank when metadata is unreadable.
+                let size_str = match entry.kind {
+                    EntryKind::File => entry.size.map(human_size).unwrap_or_default(),
+                    _ => "<DIR>".to_string(),
+                };
+                let date_str = entry.mtime.map(format_mtime).unwrap_or_default();
+                let detail_start = l.inner_left + row_w - detail_w;
+                let size_w = size_str
+                    .graphemes(true)
+                    .map(grapheme_width)
+                    .sum::<u16>()
+                    .min(SIZE_W);
+                put(
+                    buf,
+                    detail_start + SIZE_W - size_w,
+                    y,
+                    &truncate_to_width(&size_str, SIZE_W),
+                    style,
+                );
+                put(
+                    buf,
+                    detail_start + SIZE_W + 1,
+                    y,
+                    &truncate_to_width(&date_str, DATE_W),
+                    style,
+                );
+            }
         }
 
         // Feature 021: vertical scrollbar over the list area's right column when
@@ -726,6 +899,136 @@ mod tests {
         }
         .render(area, &mut buf);
         buf.content().iter().map(|c| c.symbol()).collect()
+    }
+
+    // ── Feature 022 — glob / size / date helpers ──────────────────────────────
+
+    #[test]
+    fn glob_match_basics() {
+        assert!(glob_match("*.log", "a.log"));
+        assert!(glob_match("*.LOG", "a.log"), "case-insensitive");
+        assert!(!glob_match("*.log", "a.txt"));
+        assert!(glob_match("te?t", "test"));
+        assert!(glob_match("te?t", "text"));
+        assert!(!glob_match("te?t", "tt"), "? is exactly one char");
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("a*z", "abcz"));
+        assert!(!glob_match("a*z", "abc"), "anchored to whole name");
+        assert!(glob_match("*foo*", "xxfooyy"));
+    }
+
+    #[test]
+    fn human_size_boundaries() {
+        assert_eq!(human_size(0), "0B");
+        assert_eq!(human_size(1023), "1023B");
+        assert_eq!(human_size(1024), "1.0K");
+        assert_eq!(human_size(1536), "1.5K");
+        assert_eq!(human_size(20 * 1024), "20K");
+        assert_eq!(human_size(3 * 1024 * 1024 + 512 * 1024), "3.5M");
+        assert_eq!(human_size(2 * 1024 * 1024 * 1024), "2.0G");
+    }
+
+    // Feature 022: the listing shows a <DIR> marker for directories and a size +
+    // date for files; a long name truncates while detail columns remain.
+    #[test]
+    fn listing_shows_detail_columns_and_truncates_name() {
+        let base = std::env::temp_dir().join("edit_fb_detail");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("subdir")).unwrap();
+        fs::write(
+            base.join("averylongfilename_that_should_be_truncated_in_the_listing.txt"),
+            vec![b'x'; 2048],
+        )
+        .unwrap();
+        let b = FileBrowser::open(base.clone(), BrowseMode::Open);
+        let rendered = render_browser(&b);
+        assert!(
+            rendered.contains("<DIR>"),
+            "directory shows a <DIR> indicator"
+        );
+        assert!(
+            rendered.contains("2.0K"),
+            "file shows a human-readable size"
+        );
+        assert!(
+            rendered.contains('…'),
+            "long name is truncated with an ellipsis"
+        );
+        // A date column (a 20xx year) is present.
+        assert!(rendered.contains("20"), "a modified date is shown");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    // Feature 022: apply_filter keeps dirs + ".." and filters files.
+    #[test]
+    fn apply_filter_keeps_dirs_and_filters_files() {
+        let base = std::env::temp_dir().join("edit_fb_filter_keep");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("sub")).unwrap();
+        fs::write(base.join("a.log"), b"x").unwrap();
+        fs::write(base.join("b.txt"), b"x").unwrap();
+        let mut b = FileBrowser::open(base.clone(), BrowseMode::Open);
+
+        // Glob filter: only *.log files, but dirs + ".." remain.
+        b.filename = "*.log".to_string();
+        b.apply_filter();
+        let names: Vec<&str> = b.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&".."), "parent kept");
+        assert!(names.contains(&"sub"), "directory kept");
+        assert!(names.contains(&"a.log"));
+        assert!(!names.contains(&"b.txt"), "non-matching file hidden");
+
+        // Substring filter (case-insensitive).
+        b.filename = "B".to_string();
+        b.apply_filter();
+        let names: Vec<&str> = b.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"b.txt"));
+        assert!(!names.contains(&"a.log"));
+        assert!(
+            names.contains(&"sub"),
+            "dir still kept under substring filter"
+        );
+
+        // Clearing restores the full listing.
+        b.filename.clear();
+        b.apply_filter();
+        assert_eq!(b.entries.len(), b.all_entries.len());
+
+        // Absolute path is a jump target, not a filter (listing unfiltered).
+        b.filename = "/etc".to_string();
+        b.apply_filter();
+        assert_eq!(b.entries.len(), b.all_entries.len());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn apply_filter_reclamps_selection() {
+        let base = std::env::temp_dir().join("edit_fb_filter_clamp");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        for i in 0..5 {
+            fs::write(base.join(format!("f{i}.txt")), b"x").unwrap();
+        }
+        fs::write(base.join("only.log"), b"x").unwrap();
+        let mut b = FileBrowser::open(base.clone(), BrowseMode::Open);
+        b.selected = b.entries.len() - 1; // last entry
+        b.filename = "*.log".to_string();
+        b.apply_filter();
+        assert!(
+            b.selected < b.entries.len(),
+            "selection re-clamped into the filtered list"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn format_mtime_known_epoch() {
+        // 2021-01-01 00:00:00 UTC = 1_609_459_200.
+        assert_eq!(format_mtime(1_609_459_200), "2021-01-01 00:00");
+        // 1970-01-01 00:00:00 UTC = 0.
+        assert_eq!(format_mtime(0), "1970-01-01 00:00");
+        // 1_781_876_700 = 2026-06-19 13:45 UTC.
+        assert_eq!(format_mtime(1_781_876_700), "2026-06-19 13:45");
     }
 
     // Feature 021: a vertical scrollbar (thumb glyph) appears only when the

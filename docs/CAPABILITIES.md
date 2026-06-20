@@ -207,11 +207,19 @@ A navigable directory listing replaces the old blind path entry:
 | `↑` / `↓` / single mouse click | Move the selection (list scrolls to keep it visible) |
 | `Enter` / `→` / double mouse click | Enter the highlighted folder, or pick the highlighted file (Open) / confirm (Save) |
 | `←` / `Backspace` (empty field) | Go to the parent directory |
-| type characters | Edit the filename (Save) or an absolute jump-path (Open) |
+| type characters | Filter the listing live (Feature 022) — see below; in Save mode the text is also the filename to write; an absolute path (`/…`) is a jump target |
 | `Esc` / click outside | Cancel |
 
 Folders and files are listed (dot-files shown), sorted parent → folders → files; names render
 UTF-8-correct and truncate without corruption. All chosen paths are validated by the path sanitizer.
+
+**Filtering (Feature 022)**: typing filters the listing as you go — a pattern with wildcards (`*.log`,
+`te?t.txt`) glob-matches names; plain text matches by case-insensitive substring. Directories and `..`
+always stay visible so you can navigate; clearing the field restores the full listing; an absolute path
+keeps its jump-to-path behavior.
+
+**Detail columns (Feature 022)**: each file row shows a human-readable size and a modified date
+(`YYYY-MM-DD HH:MM`, UTC); folders show `<DIR>`. Columns are aligned and the name truncates when narrow.
 
 ### Edit
 - Undo (`Ctrl+Z`)

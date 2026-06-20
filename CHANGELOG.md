@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 022: File dialog — glob filtering + richer entry details
+
+#### Added
+
+- **Live listing filter** — typing in the file dialog now filters the listing as you type: a pattern
+  with wildcards (`*.log`, `*.rs`, `te?t.txt`) glob-matches names; plain text (`rep`) matches by
+  case-insensitive substring. Directories and `..` always remain so you can still navigate; clearing the
+  field restores the full listing. An absolute path (`/…`) keeps its jump-to-path behavior.
+- **Entry detail columns** — each row now shows a human-readable size (e.g. `1.2K`, `3.4M`) and a
+  modified date (`YYYY-MM-DD HH:MM`, UTC) for files; directories show a `<DIR>` indicator. Columns are
+  aligned and the name is truncated (width-correct) when space is tight.
+
+#### Fixed
+
+- Typing a glob like `*.log` previously did nothing (only absolute paths were honored) — Enter would
+  just open the highlighted entry and the dialog appeared to "just close". Globs now filter the listing.
+
+#### Notes
+
+- File browser only (Open + Save); confirm semantics unchanged (Open jumps/opens, Save writes the typed
+  name). Preserves the feature-020 buttons/focus ring and the feature-021 scrollbar (which now reflects
+  the filtered count). No new dependencies — in-house glob matcher + size/date formatting (Constitution
+  IV); Open/Save still validate paths (Constitution VII).
+
 ### feature 021: Scroll affordances + dialog button polish
 
 #### Added

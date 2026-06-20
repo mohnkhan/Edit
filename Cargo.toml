@@ -128,6 +128,10 @@ path = "tests/integration/help_close_button.rs"
 name = "dialog_key_hints"
 path = "tests/integration/dialog_key_hints.rs"
 
+[[test]]
+name = "file_dialog_filter"
+path = "tests/integration/file_dialog_filter.rs"
+
 [[bench]]
 name = "startup"
 harness = false
