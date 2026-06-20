@@ -6458,6 +6458,36 @@ mod tests {
         }
     }
 
+    // Feature 033: with the tab bar shown (2+ buffers), an open menu's dropdown
+    // must overlay the tab-bar row — the first dropdown item used to be hidden
+    // behind the tab bar (z-order bug).
+    #[test]
+    fn open_menu_dropdown_overlays_tab_bar() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = make_app();
+        app.terminal_size = (80, 24);
+        // Two buffers → the tab bar occupies row 1.
+        app.buffers.push(crate::buffer::Buffer::new_empty());
+        app.active_idx = 0;
+        assert!(app.tab_bar_visible());
+        // Open the File menu (its dropdown drops from row 0 into row 1+).
+        app.menu_bar.state = MenuState::DropDown {
+            top_idx: 0,
+            item_idx: 0,
+        };
+        let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        t.draw(|f| app.render(f)).unwrap();
+        // Row 1 must show the first dropdown item ("New"), not be fully covered by
+        // the tab bar.
+        let row1: String = (0..80)
+            .map(|x| t.backend().buffer().get(x, 1).symbol().to_string())
+            .collect();
+        assert!(
+            row1.contains("New"),
+            "first File-menu item should overlay the tab bar at row 1, got: {row1:?}"
+        );
+    }
+
     #[test]
     fn test_mouse_click_opens_top_level_menu() {
         let mut app = make_app();

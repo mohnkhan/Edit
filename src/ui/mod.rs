@@ -195,20 +195,12 @@ impl Ui {
         );
         frame.render_widget(status_bar, statusbar_area);
 
-        // ── Menu bar ──────────────────────────────────────────────────────────
-        // Rendered AFTER the editor/status bar so an open dropdown overlays the
-        // editor content (the dropdown extends into the editor rows), but BEFORE
-        // the modal dialog overlays so dialogs stay on top.
-        use crate::input::keymap::Action;
-        let toggle_states: &[(Action, bool)] = &[(Action::ToggleSoftWrap, app.soft_wrap)];
-        // Feature 009: render the composite menu list (built-in + active plugin menus).
-        let menus = resolve_menus(&app.plugin_host.registry.menu_items());
-        let menubar = MenuBarWidget::new(app.theme, &app.menu_bar, toggle_states, &menus);
-        frame.render_widget(menubar, menubar_area);
-
         // ── Tab bar (Feature 027) ─────────────────────────────────────────────
         // Shown only with 2+ buffers; uses the same geometry as the mouse
-        // hit-testing in `App::handle_mouse_event`.
+        // hit-testing in `App::handle_mouse_event`. Rendered BEFORE the menu bar so
+        // an open menu's dropdown (which drops from row 0 into the tab-bar row and
+        // below) overlays the tab bar instead of being painted over by it
+        // (Feature 033: z-order fix — the first dropdown item was hidden).
         if let Some(area) = tab_bar_area {
             tabbar::render_tab_bar(
                 frame.buffer_mut(),
@@ -218,6 +210,17 @@ impl Ui {
                 app.theme,
             );
         }
+
+        // ── Menu bar ──────────────────────────────────────────────────────────
+        // Rendered AFTER the editor/status bar (and the tab bar) so an open
+        // dropdown overlays the content below it, but BEFORE the modal dialog
+        // overlays so dialogs stay on top.
+        use crate::input::keymap::Action;
+        let toggle_states: &[(Action, bool)] = &[(Action::ToggleSoftWrap, app.soft_wrap)];
+        // Feature 009: render the composite menu list (built-in + active plugin menus).
+        let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+        let menubar = MenuBarWidget::new(app.theme, &app.menu_bar, toggle_states, &menus);
+        frame.render_widget(menubar, menubar_area);
 
         // ── Dialogs (overlaid) ────────────────────────────────────────────────
         // Feature 016 — confirm/dismiss dialogs with boxed, focusable buttons.
