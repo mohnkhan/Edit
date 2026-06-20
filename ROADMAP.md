@@ -2,6 +2,18 @@
 
 ## Deferred Features
 
+### Boxed dialog buttons for interactive/list dialogs (follow-up to feature 016)
+- **Issue**: #38 (`follow-up`)
+- **Status**: Open (deferred from feature 016, branch `016-dialog-buttons`)
+- **Description**: Feature 016 gave boxed, focusable, mouse-clickable buttons + tab order to the
+  confirm/dismiss dialogs (save prompt, session restore, external change, revert, plugin consent).
+  The interactive/list dialogs — encoding select, plugin manager, Find/Replace, and the file browser
+  — were deferred; they need a combined field/list + button focus-ring (their `Enter`/`Space`/`Tab`
+  already carry list/field meaning). They remain navigable today (file browser by mouse; the rest by
+  keyboard).
+- **Suggested approach**: reuse `src/ui/buttons.rs`; add a per-dialog focus ring. Spec:
+  `specs/016-dialog-buttons/`.
+
 ### Plugin API
 - **Issue**: #2 (implemented in feature 008)
 - **Status**: Complete as of 2026-06-19 (branch `008-plugin-api`)

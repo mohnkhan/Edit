@@ -42,6 +42,16 @@ pub enum HelpScreen {
     About,
 }
 
+/// Confirm/dismiss dialogs that carry a boxed button bar (Feature 016).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ButtonDialog {
+    SessionRestore,
+    SavePrompt,
+    ExternalChange,
+    RevertConfirm,
+    PluginConsent,
+}
+
 /// Char index where the cursor should land after **undo**-ing `op`.
 fn undo_target_idx(op: &EditOp) -> usize {
     match op {
@@ -158,6 +168,15 @@ pub struct App {
     // ── Feature 015: interactive Find / Replace dialog ────────────────────────
     /// `Some` while an interactive Find/Replace dialog is open (modal).
     pub pending_find_replace: Option<FindReplaceDialog>,
+
+    // ── Feature 016: focused dialog button ────────────────────────────────────
+    /// Index of the focused button in the currently open confirm/dismiss dialog.
+    /// Only one modal is open at a time, so a single field suffices. Reset to the
+    /// dialog's safe default when it opens.
+    pub dialog_focus: usize,
+    /// Whether `dialog_focus` has been initialized for the currently open dialog
+    /// (so focus defaults to the safe button once, then the user can move it).
+    pub dialog_focus_init: bool,
 
     // ── Feature 008: plugin subsystem ────────────────────────────────────────
     /// The Rhai plugin host owning the engine and registry for this session.
@@ -346,6 +365,8 @@ impl App {
             watcher_notice,
             pending_revert_confirm: None,
             pending_find_replace: None,
+            dialog_focus: 0,
+            dialog_focus_init: false,
             plugin_host,
             pending_plugin_consent,
             pending_plugin_manager: false,
@@ -510,6 +531,7 @@ impl App {
         // geometry — e.g. a click inside the visible file-browser box read as
         // "outside" and closed the dialog (Feature 012 follow-up).
         self.terminal_size = (size.width, size.height);
+        self.ensure_dialog_focus();
 
         // Enforce minimum terminal size
         if size.width < MIN_WIDTH || size.height < MIN_HEIGHT {
@@ -541,6 +563,33 @@ impl App {
     }
 
     pub fn handle_action(&mut self, action: Action) -> io::Result<()> {
+        self.ensure_dialog_focus();
+        // Feature 016: button focus + activation for confirm/dismiss dialogs.
+        // Tab/Shift+Tab move focus; Enter/Space activate the focused button. All
+        // other keys (letter shortcuts, Esc) fall through to the per-dialog guards
+        // below, which still handle them.
+        {
+            let n = self.dialog_button_labels().len();
+            if n > 0 {
+                match &action {
+                    Action::FocusNextField => {
+                        self.dialog_focus = crate::ui::buttons::next(self.dialog_focus, n);
+                        return Ok(());
+                    }
+                    Action::FocusPrevField => {
+                        self.dialog_focus = crate::ui::buttons::prev(self.dialog_focus, n);
+                        return Ok(());
+                    }
+                    Action::InsertNewline | Action::InsertChar(' ') => {
+                        let idx = self.dialog_focus.min(n - 1);
+                        self.activate_dialog_button(idx);
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // When the session restore dialog is active, only Y/y/Enter (confirm)
         // and N/n/Escape/Quit (decline) are forwarded; everything else is
         // dropped silently so the dialog stays visible.
@@ -942,7 +991,8 @@ impl App {
             | Action::ToggleSearchWrap
             | Action::ToggleSearchRegex
             | Action::ToggleSearchWholeWord
-            | Action::FocusNextField => {}
+            | Action::FocusNextField
+            | Action::FocusPrevField => {}
 
             // Menu navigation (T048 / Feature 009). Alt+<letter> opens a
             // dropdown directly; F10 (`Menu`) enters the top-level highlight
@@ -2480,6 +2530,218 @@ impl App {
         }
     }
 
+    // ── Feature 016 — dialog buttons (confirm/dismiss dialogs) ────────────────
+
+    /// Initialize the focused dialog button to the safe default once per dialog
+    /// opening; reset when no button-dialog is open (Feature 016). Called from
+    /// render and before key/mouse handling so focus is correct even without a
+    /// prior frame.
+    fn ensure_dialog_focus(&mut self) {
+        if self.open_button_dialog().is_some() {
+            if !self.dialog_focus_init {
+                self.dialog_focus = self.dialog_default_focus();
+                self.dialog_focus_init = true;
+            }
+        } else {
+            self.dialog_focus_init = false;
+        }
+    }
+
+    /// The currently-open confirm/dismiss dialog that has a button bar, if any.
+    /// Order matches modal precedence.
+    fn open_button_dialog(&self) -> Option<ButtonDialog> {
+        if self.pending_session_restore.is_some() {
+            Some(ButtonDialog::SessionRestore)
+        } else if self.pending_save_prompt {
+            Some(ButtonDialog::SavePrompt)
+        } else if self.pending_external_change.is_some() {
+            Some(ButtonDialog::ExternalChange)
+        } else if self.pending_revert_confirm.is_some() {
+            Some(ButtonDialog::RevertConfirm)
+        } else if !self.pending_plugin_consent.is_empty() {
+            Some(ButtonDialog::PluginConsent)
+        } else {
+            None
+        }
+    }
+
+    /// Ordered button labels for the open confirm/dismiss dialog (tab order).
+    pub fn dialog_button_labels(&self) -> Vec<&'static str> {
+        match self.open_button_dialog() {
+            Some(ButtonDialog::SessionRestore) => vec!["Restore", "Decline"],
+            Some(ButtonDialog::SavePrompt) => vec!["Save", "Discard", "Cancel"],
+            Some(ButtonDialog::ExternalChange) => vec!["Reload", "Keep"],
+            Some(ButtonDialog::RevertConfirm) => vec!["Revert", "Cancel"],
+            Some(ButtonDialog::PluginConsent) => vec!["Allow", "Deny"],
+            None => vec![],
+        }
+    }
+
+    /// Safe default-focused button index for the open dialog (R6).
+    pub fn dialog_default_focus(&self) -> usize {
+        match self.open_button_dialog() {
+            Some(ButtonDialog::SavePrompt) => 2,     // Cancel
+            Some(ButtonDialog::ExternalChange) => 1, // Keep
+            Some(ButtonDialog::RevertConfirm) => 1,  // Cancel
+            Some(ButtonDialog::PluginConsent) => 1,  // Deny
+            _ => 0,
+        }
+    }
+
+    /// Whether clicking outside the dialog box cancels it (all current ones have a
+    /// safe cancel).
+    pub fn dialog_supports_outside_cancel(&self) -> bool {
+        self.open_button_dialog().is_some()
+    }
+
+    /// Button index treated as "cancel/no/keep" for an outside click.
+    fn dialog_cancel_index(&self) -> Option<usize> {
+        match self.open_button_dialog()? {
+            ButtonDialog::SessionRestore => Some(1), // Decline
+            ButtonDialog::SavePrompt => Some(2),     // Cancel
+            ButtonDialog::ExternalChange => Some(1), // Keep
+            ButtonDialog::RevertConfirm => Some(1),  // Cancel
+            ButtonDialog::PluginConsent => Some(1),  // Deny
+        }
+    }
+
+    /// Run the choice for button `idx` of the open confirm/dismiss dialog, reusing
+    /// the existing handlers so a button == the corresponding key shortcut.
+    pub fn activate_dialog_button(&mut self, idx: usize) {
+        match self.open_button_dialog() {
+            Some(ButtonDialog::SessionRestore) => {
+                if idx == 0 {
+                    self.do_restore_session();
+                }
+                self.pending_session_restore = None;
+            }
+            Some(ButtonDialog::SavePrompt) => match idx {
+                0 => self.prompt_save_and_quit(),
+                1 => self.prompt_discard_and_quit(),
+                _ => self.prompt_cancel_quit(),
+            },
+            Some(ButtonDialog::ExternalChange) => {
+                if let Some(ec) = self.pending_external_change.take() {
+                    if idx == 0 {
+                        self.reload_from_disk(ec.buf_idx);
+                    } else {
+                        self.buffers[ec.buf_idx].modified = true;
+                    }
+                }
+            }
+            Some(ButtonDialog::RevertConfirm) => {
+                if idx == 0 {
+                    if let Some(b) = self.pending_revert_confirm.take() {
+                        self.reload_from_disk(b);
+                    }
+                } else {
+                    self.pending_revert_confirm = None;
+                }
+            }
+            Some(ButtonDialog::PluginConsent) => self.consent_decide(idx == 0),
+            None => {}
+        }
+    }
+
+    /// Title + body lines for the open confirm dialog (Feature 016). Centralized
+    /// here so the overlay render and mouse hit-test share identical geometry.
+    fn dialog_view_text(&self) -> Option<(&'static str, Vec<String>)> {
+        let kind = self.open_button_dialog()?;
+        let active_name = || {
+            self.buffers
+                .get(self.active_idx)
+                .and_then(|b| b.path.as_ref())
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "[No Name]".to_string())
+        };
+        let v = match kind {
+            ButtonDialog::SessionRestore => (
+                "Restore Session",
+                vec!["Restore previous session?".to_string()],
+            ),
+            ButtonDialog::SavePrompt => (
+                "Unsaved Changes",
+                vec![format!("Save changes to {}?", active_name())],
+            ),
+            ButtonDialog::ExternalChange => {
+                let mut lines = vec!["File changed on disk.".to_string()];
+                if let Some(ec) = &self.pending_external_change {
+                    if self.buffers.get(ec.buf_idx).map(|b| b.modified) == Some(true) {
+                        lines.push("WARNING: unsaved changes will be lost.".to_string());
+                    }
+                }
+                ("External Change", lines)
+            }
+            ButtonDialog::RevertConfirm => (
+                "Revert",
+                vec![
+                    format!("Revert {} to last saved version?", active_name()),
+                    "Unsaved changes will be lost.".to_string(),
+                ],
+            ),
+            ButtonDialog::PluginConsent => {
+                let name = self
+                    .pending_plugin_consent
+                    .first()
+                    .map(|m| m.id.clone())
+                    .unwrap_or_default();
+                (
+                    "Plugin Consent",
+                    vec![format!("Allow plugin '{}' to run?", name)],
+                )
+            }
+        };
+        Some(v)
+    }
+
+    /// Overlay rect for the open confirm dialog, sized to fit its body + button
+    /// row. Shared by the renderer and mouse hit-testing so clicks land on the
+    /// drawn buttons (Feature 016).
+    pub fn button_dialog_rect(&self) -> Option<ratatui::layout::Rect> {
+        let (_title, body) = self.dialog_view_text()?;
+        let labels = self.dialog_button_labels();
+        let (tw, th) = self.terminal_size;
+        let body_w = body
+            .iter()
+            .map(|l| unicode_width::UnicodeWidthStr::width(l.as_str()) as u16)
+            .max()
+            .unwrap_or(0);
+        // Each button: width(label)+4, plus 1-col gaps.
+        let buttons_w: u16 = labels
+            .iter()
+            .map(|l| unicode_width::UnicodeWidthStr::width(*l) as u16 + 4)
+            .sum::<u16>()
+            + labels.len().saturating_sub(1) as u16;
+        let inner = body_w.max(buttons_w);
+        let dw = (inner + 4).clamp(24, tw.max(24)).min(tw.max(1));
+        // borders(2) + body lines + gap(1) + button row(3)
+        let dh = (body.len() as u16 + 6).min(th.max(1));
+        let dx = tw.saturating_sub(dw) / 2;
+        let dy = th.saturating_sub(dh) / 2;
+        Some(ratatui::layout::Rect::new(dx, dy, dw, dh))
+    }
+
+    /// Everything the renderer needs to draw the open confirm dialog:
+    /// `(rect, title, body lines, button labels, focused index)`. `None` when no
+    /// button-dialog is open (Feature 016).
+    #[allow(clippy::type_complexity)]
+    pub fn button_dialog_render(
+        &self,
+    ) -> Option<(
+        ratatui::layout::Rect,
+        &'static str,
+        Vec<String>,
+        Vec<&'static str>,
+        usize,
+    )> {
+        let rect = self.button_dialog_rect()?;
+        let (title, body) = self.dialog_view_text()?;
+        let labels = self.dialog_button_labels();
+        let focus = self.dialog_focus.min(labels.len().saturating_sub(1));
+        Some((rect, title, body, labels, focus))
+    }
+
     /// File ▸ Revert (Feature 014): reload the active buffer from its last saved
     /// version on disk, discarding in-editor changes. No-op with a notice when the
     /// buffer was never saved; asks for confirmation when there are unsaved changes.
@@ -2674,6 +2936,31 @@ impl App {
                     self.file_browser = None;
                 }
                 BrowserHit::Inside => self.last_browser_click = None,
+            }
+            return Ok(());
+        }
+
+        // Feature 016 — confirm/dismiss dialogs: a click on a boxed button
+        // activates it; a click outside the dialog cancels (where safe). Uses the
+        // same geometry the renderer drew with.
+        self.ensure_dialog_focus();
+        if self.open_button_dialog().is_some() {
+            if let Some(rect) = self.button_dialog_rect() {
+                let labels = self.dialog_button_labels();
+                let rects = crate::ui::buttons::button_rects(rect, &labels);
+                if let Some(i) = crate::ui::buttons::hit_test_buttons(&rects, ev.col, ev.row) {
+                    self.activate_dialog_button(i);
+                } else {
+                    let inside = ev.col >= rect.x
+                        && ev.col < rect.x + rect.width
+                        && ev.row >= rect.y
+                        && ev.row < rect.y + rect.height;
+                    if !inside {
+                        if let Some(c) = self.dialog_cancel_index() {
+                            self.activate_dialog_button(c);
+                        }
+                    }
+                }
             }
             return Ok(());
         }
@@ -3125,6 +3412,33 @@ mod tests {
             app.terminal_size,
             (120, 40),
             "terminal_size must follow the actual frame size"
+        );
+    }
+
+    // Feature 016: the save prompt renders boxed, focusable buttons.
+    #[test]
+    fn save_prompt_renders_boxed_buttons() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = make_app();
+        app.handle_action(Action::InsertChar('x')).unwrap();
+        app.handle_action(Action::Quit).unwrap();
+        assert!(app.pending_save_prompt);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let content: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(content.contains("Save"), "Save button label drawn");
+        assert!(content.contains("Discard"), "Discard button label drawn");
+        assert!(content.contains("Cancel"), "Cancel button label drawn");
+        assert!(content.contains('▶'), "focused-button marker drawn");
+        assert!(
+            content.contains('┌') && content.contains('│'),
+            "boxed button borders drawn"
         );
     }
 

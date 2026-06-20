@@ -40,6 +40,9 @@ pub enum Action {
     /// Feature 015: move focus to the next field (Tab) — used by the Replace
     /// dialog; inert no-op outside a dialog (Tab is otherwise unbound).
     FocusNextField,
+    /// Feature 016: move focus to the previous control (Shift+Tab) — dialog
+    /// button focus; inert no-op outside a dialog.
+    FocusPrevField,
 
     // Menu navigation
     Menu,
@@ -142,6 +145,8 @@ impl KeybindingMap {
         map.insert("Alt+R".to_string(), Action::ToggleSearchRegex);
         map.insert("Alt+W".to_string(), Action::ToggleSearchWholeWord);
         map.insert("Tab".to_string(), Action::FocusNextField);
+        map.insert("BackTab".to_string(), Action::FocusPrevField);
+        map.insert("Shift+Tab".to_string(), Action::FocusPrevField);
 
         // Help / menu
         map.insert("F1".to_string(), Action::Help);

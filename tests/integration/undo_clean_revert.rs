@@ -128,7 +128,9 @@ fn revert_confirm_restores_disk_and_clears_modified() {
         Some(0),
         "modified buffer asks to confirm"
     );
-    app.handle_action(Action::InsertNewline).unwrap(); // confirm
+    // Feature 016: the Revert dialog's default button is the safe Cancel, so
+    // confirming is done with the 'Y' shortcut (or Tab to Revert + Enter).
+    app.handle_action(Action::InsertChar('Y')).unwrap(); // confirm
 
     assert_eq!(app.pending_revert_confirm, None);
     assert!(!modified(&app), "buffer clean after revert");
@@ -190,7 +192,7 @@ fn revert_reload_failure_leaves_buffer_unchanged() {
     std::fs::remove_file(&path).unwrap(); // make the on-disk file unreadable
     app.handle_action(Action::Revert).unwrap();
     assert_eq!(app.pending_revert_confirm, Some(0));
-    app.handle_action(Action::InsertNewline).unwrap(); // confirm → reload fails
+    app.handle_action(Action::InsertChar('Y')).unwrap(); // confirm → reload fails
 
     // Buffer content is preserved on a failed reload.
     assert!(app.active_buffer().rope.to_string().starts_with('Z'));

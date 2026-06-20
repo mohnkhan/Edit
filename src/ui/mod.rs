@@ -5,6 +5,7 @@
 
 #![allow(dead_code, unused_variables, unused_imports)]
 
+pub mod buttons;
 pub mod dialog;
 pub mod editor;
 pub mod file_browser;
@@ -160,100 +161,44 @@ impl Ui {
         frame.render_widget(menubar, menubar_area);
 
         // ── Dialogs (overlaid) ────────────────────────────────────────────────
-        // Session restore dialog takes priority over the save prompt.
-        if app.pending_session_restore.is_some() {
-            let dialog = ratatui::widgets::Paragraph::new("Restore previous session? [Y/n]")
-                .style(
-                    ratatui::style::Style::default()
-                        .fg(app.theme.menubar_fg)
-                        .bg(app.theme.menubar_bg),
-                )
-                .block(
-                    ratatui::widgets::Block::default()
-                        .title("Restore Session")
-                        .borders(ratatui::widgets::Borders::ALL),
-                );
-
-            let dw = 50u16.min(size.width);
-            let dh = 5u16.min(size.height);
-            let dx = size.x + size.width.saturating_sub(dw) / 2;
-            let dy = size.y + size.height.saturating_sub(dh) / 2;
-            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
-
-            frame.render_widget(ratatui::widgets::Clear, dialog_area);
-            frame.render_widget(dialog, dialog_area);
+        // Feature 016 — confirm/dismiss dialogs with boxed, focusable buttons.
+        // One shared geometry (App::button_dialog_render → buttons::button_rects)
+        // drives both this render and mouse hit-testing. Covers session restore,
+        // unsaved-changes save prompt, external change, revert, and plugin consent.
+        if let Some((rect, title, body, labels, focus)) = app.button_dialog_render() {
+            let base = ratatui::style::Style::default()
+                .fg(app.theme.menubar_fg)
+                .bg(app.theme.menubar_bg);
+            frame.render_widget(ratatui::widgets::Clear, rect);
+            let block = ratatui::widgets::Block::default()
+                .title(title)
+                .borders(ratatui::widgets::Borders::ALL)
+                .style(base);
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+            // Body lines at the top of the interior (above the button row).
+            let body_area = ratatui::layout::Rect::new(
+                inner.x,
+                inner.y,
+                inner.width,
+                inner.height.saturating_sub(3),
+            );
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new(body.join("\n"))
+                    .style(base)
+                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                body_area,
+            );
+            // Boxed buttons in the bottom interior rows.
+            let rects = crate::ui::buttons::button_rects(rect, &labels);
+            crate::ui::buttons::render_buttons(
+                frame.buffer_mut(),
+                &rects,
+                &labels,
+                focus,
+                app.theme,
+            );
             return;
-        }
-
-        // When app.pending_save_prompt is set, render the save-prompt dialog.
-        if app.pending_save_prompt {
-            use crate::ui::dialog::SavePromptDialog;
-            let filename = buf
-                .path
-                .as_ref()
-                .and_then(|p| p.file_name())
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "[No Name]".to_string());
-            // We need a 'static str for SavePromptDialog but we have a String.
-            // Render a plain paragraph instead to avoid lifetime issues until
-            // the dialog API is refined in T041.
-            let dialog = ratatui::widgets::Paragraph::new(format!(
-                "Save changes to {}?  [S]ave / [D]iscard / [C]ancel",
-                filename
-            ))
-            .style(
-                ratatui::style::Style::default()
-                    .fg(app.theme.menubar_fg)
-                    .bg(app.theme.menubar_bg),
-            )
-            .block(
-                ratatui::widgets::Block::default()
-                    .title("Unsaved Changes")
-                    .borders(ratatui::widgets::Borders::ALL),
-            );
-
-            // Centered overlay rect (fixed 60×5)
-            let dw = 60u16.min(size.width);
-            let dh = 5u16.min(size.height);
-            let dx = size.x + size.width.saturating_sub(dw) / 2;
-            let dy = size.y + size.height.saturating_sub(dh) / 2;
-            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
-
-            frame.render_widget(ratatui::widgets::Clear, dialog_area);
-            frame.render_widget(dialog, dialog_area);
-        }
-
-        // Feature 014 — Revert confirmation overlay.
-        if let Some(idx) = app.pending_revert_confirm {
-            let filename = app
-                .buffers
-                .get(idx)
-                .and_then(|b| b.path.as_ref())
-                .and_then(|p| p.file_name())
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "[No Name]".to_string());
-            let dialog = ratatui::widgets::Paragraph::new(format!(
-                "Revert {} to last saved version? Unsaved changes will be lost.  [Y]es / [N]o",
-                filename
-            ))
-            .style(
-                ratatui::style::Style::default()
-                    .fg(app.theme.menubar_fg)
-                    .bg(app.theme.menubar_bg),
-            )
-            .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(
-                ratatui::widgets::Block::default()
-                    .title("Revert")
-                    .borders(ratatui::widgets::Borders::ALL),
-            );
-            let dw = 60u16.min(size.width);
-            let dh = 6u16.min(size.height);
-            let dx = size.x + size.width.saturating_sub(dw) / 2;
-            let dy = size.y + size.height.saturating_sub(dh) / 2;
-            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
-            frame.render_widget(ratatui::widgets::Clear, dialog_area);
-            frame.render_widget(dialog, dialog_area);
         }
 
         // Feature 015 — interactive Find / Replace dialog overlay.
@@ -341,55 +286,6 @@ impl Ui {
             frame.render_widget(dialog, dialog_area);
         }
 
-        // Feature 007 — External-change dialog overlay (T022 / T028).
-        if let Some(ref ec) = app.pending_external_change {
-            let fname = ec
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| ec.path.display().to_string());
-
-            let dirty = app
-                .buffers
-                .get(ec.buf_idx)
-                .map(|b| b.modified)
-                .unwrap_or(false);
-
-            let body = if dirty {
-                format!(
-                    "  \"{}\" was modified externally.\n  WARNING: You have unsaved changes.\n\n  [Y] Reload from disk   [N] Keep in editor",
-                    fname
-                )
-            } else {
-                format!(
-                    "  \"{}\" was modified externally.\n\n  [Y] Reload from disk   [N] Keep in editor",
-                    fname
-                )
-            };
-
-            let dh: u16 = if dirty { 7 } else { 5 };
-            let dialog = ratatui::widgets::Paragraph::new(body)
-                .style(
-                    ratatui::style::Style::default()
-                        .fg(app.theme.menubar_fg)
-                        .bg(app.theme.menubar_bg),
-                )
-                .block(
-                    ratatui::widgets::Block::default()
-                        .title("File Changed on Disk")
-                        .borders(ratatui::widgets::Borders::ALL),
-                );
-
-            let dw = 60u16.min(size.width);
-            let dh = dh.min(size.height);
-            let dx = size.x + size.width.saturating_sub(dw) / 2;
-            let dy = size.y + size.height.saturating_sub(dh) / 2;
-            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
-
-            frame.render_widget(ratatui::widgets::Clear, dialog_area);
-            frame.render_widget(dialog, dialog_area);
-        }
-
         // T015 — Encoding select dialog overlay.
         if let Some(cursor_idx) = app.pending_encoding_select {
             use crate::ui::dialog::EncodingSelectDialog;
@@ -413,30 +309,6 @@ impl Ui {
         // Feature 011 — Help / About overlay.
         if let Some(screen) = app.pending_help {
             render_help_overlay(frame, app, screen, size);
-        }
-
-        // Feature 008 — Plugin consent dialog (exclusive modal; highest priority).
-        if let Some(plugin) = app.pending_plugin_consent.first() {
-            let body = crate::ui::plugin_manager::consent_body(plugin);
-            let dh = (crate::ui::plugin_manager::line_count(&body) + 2).min(size.height);
-            let dw = 64u16.min(size.width);
-            let dialog = ratatui::widgets::Paragraph::new(body)
-                .style(
-                    ratatui::style::Style::default()
-                        .fg(app.theme.menubar_fg)
-                        .bg(app.theme.menubar_bg),
-                )
-                .block(
-                    ratatui::widgets::Block::default()
-                        .title("Plugin Consent")
-                        .borders(ratatui::widgets::Borders::ALL),
-                );
-            let dx = size.x + size.width.saturating_sub(dw) / 2;
-            let dy = size.y + size.height.saturating_sub(dh) / 2;
-            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
-            frame.render_widget(ratatui::widgets::Clear, dialog_area);
-            frame.render_widget(dialog, dialog_area);
-            return;
         }
 
         // Feature 008 — Plugin manager dialog.

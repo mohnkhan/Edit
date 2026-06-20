@@ -8,6 +8,10 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F016-US1 | Mouse-click dialog buttons (confirm/dismiss dialogs); outside-click cancels | Complete |
+| F016-US2 | Boxed buttons with one focused (borders + ▶ marker) | Complete |
+| F016-US3 | Tab/Shift+Tab order + Enter/Space activation; safe default focus; letter shortcuts intact | Complete |
+| F016 (defer) | Boxed buttons for encoding/plugin-manager/Find-Replace/file-browser dialogs | Deferred (#38) |
 | F015-US1 | Interactive Find dialog (Ctrl+F): type term, Enter to search, highlight matches, jump to current, "X of Y" | Complete |
 | F015-US2 | Find Next/Prev (F3/F2) cycle matches with wrap; current-match highlight distinct | Complete |
 | F015-US3 | Replace dialog (Ctrl+H): Replace current (Enter) + Replace All (Ctrl+A), undoable, reports count | Complete |

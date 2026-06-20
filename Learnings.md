@@ -10,6 +10,24 @@ took a while to find or surprised you. Newest patterns/sessions near the top of 
 
 These classes of bug have each bitten us more than once. Check for them in review.
 
+### P8 — Changing a default focus/Enter target silently changes Enter semantics
+
+When you add focusable buttons with a *safe* default to a dialog that previously hard-coded `Enter` =
+confirm, `Enter` now activates the focused (often Cancel) button instead. This is usually the desired
+safer behavior, but it **changes existing behavior and tests**. (Feat 016: the Revert dialog's `Enter`
+went from "confirm revert" to "Cancel"; its feat-014 test had to switch to the `Y` shortcut.) When
+introducing focus/default to an existing confirm flow, audit every test/handler that assumed `Enter`
+meant the affirmative, and keep a letter shortcut for the affirmative.
+
+### P9 — Same key, different meaning per dialog (disambiguate before reusing)
+
+`Tab`, `Enter`, `Space`, `Ctrl+A` already carry meaning in some dialogs (feat 015 `Tab` switches
+Find/Replace fields; plugin-manager `Space` toggles a list item; `Ctrl+A` is Select-All globally).
+Before binding one of these to a new cross-dialog behavior (button focus/activate), confirm it doesn't
+clobber an existing per-dialog meaning — scope the new behavior to the dialogs that need it, or exclude
+the conflicting one. (Feat 016 excluded `Space` activation in plugin-manager and deferred the
+field-rich dialogs precisely to avoid this.)
+
 ### P1 — "Implemented but never wired up"
 
 A widget, state field, action, or handler exists in the code but is never connected to the event loop,
