@@ -7,6 +7,7 @@
 
 pub mod dialog;
 pub mod editor;
+pub mod file_browser;
 pub mod menubar;
 pub mod plugin_manager;
 pub mod statusbar;
@@ -280,24 +281,14 @@ impl Ui {
             frame.render_widget(dialog, size);
         }
 
-        // Feature 010 — Open-file dialog overlay.
-        if let Some(ref input) = app.pending_open {
-            use crate::ui::dialog::OpenFileDialog;
-            let dialog = OpenFileDialog {
-                input: input.clone(),
+        // Feature 012 — File browser overlay (Open / Save As).
+        if let Some(ref browser) = app.file_browser {
+            use crate::ui::file_browser::FileBrowserWidget;
+            let widget = FileBrowserWidget {
+                browser,
                 theme: app.theme,
             };
-            frame.render_widget(dialog, size);
-        }
-
-        // Feature 011 — Save-As dialog overlay.
-        if let Some(ref input) = app.pending_save_as {
-            use crate::ui::dialog::SaveAsFileDialog;
-            let dialog = SaveAsFileDialog {
-                input: input.clone(),
-                theme: app.theme,
-            };
-            frame.render_widget(dialog, size);
+            frame.render_widget(widget, size);
         }
 
         // Feature 011 — Help / About overlay.

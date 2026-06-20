@@ -84,6 +84,10 @@ path = "tests/integration/menu_activation.rs"
 name = "menu_mnemonics"
 path = "tests/integration/menu_mnemonics.rs"
 
+[[test]]
+name = "file_browser"
+path = "tests/integration/file_browser.rs"
+
 [[bench]]
 name = "startup"
 harness = false
