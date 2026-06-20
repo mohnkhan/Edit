@@ -132,6 +132,10 @@ path = "tests/integration/dialog_key_hints.rs"
 name = "file_dialog_filter"
 path = "tests/integration/file_dialog_filter.rs"
 
+[[test]]
+name = "mouse_wheel"
+path = "tests/integration/mouse_wheel.rs"
+
 [[bench]]
 name = "startup"
 harness = false

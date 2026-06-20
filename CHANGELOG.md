@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 023: Mouse-wheel scrolling (app-wide)
+
+#### Added
+
+- **Mouse-wheel scrolling** — the wheel now scrolls every scrollable surface: the editor view (viewport
+  only, ~3 lines per notch, cursor unchanged), the file-browser listing, the Help/About screens, and the
+  encoding/plugin list dialogs. When a dialog/overlay is open the wheel scrolls it (not the editor
+  underneath). Scrolling is bounded (no over-scroll) and the feature-021 scrollbars track it.
+
+#### Fixed
+
+- Wheel events were previously dropped everywhere (the mouse handler only acted on left-clicks), so the
+  wheel did nothing in the editor, file browser, Help, or dialogs.
+
+#### Notes
+
+- Wheel handling only — no change to click/drag selection, dialog buttons, or keyboard navigation. A
+  wheel over the menu bar / status bar is ignored. Fixed 3-line step (no config). Resolves the
+  "scroll doesn't work with mouse in Help" report (and the same gap app-wide).
+
 ### feature 022: File dialog — glob filtering + richer entry details
 
 #### Added

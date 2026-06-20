@@ -97,6 +97,9 @@ const TICK_MS: u64 = 500;
 /// double-click (which activates the entry). Feature 012.
 const DOUBLE_CLICK_MS: u64 = 400;
 
+/// Lines/rows/items scrolled per mouse-wheel notch (Feature 023).
+const WHEEL_STEP: usize = 3;
+
 // ── Direction enum ────────────────────────────────────────────────────────────
 
 /// Cardinal directions for cursor movement.
@@ -490,6 +493,27 @@ impl App {
     fn viewport_height(&self) -> usize {
         let hbar = if self.soft_wrap { 0 } else { 1 };
         (self.terminal_size.1 as usize).saturating_sub(2 + hbar)
+    }
+
+    /// Feature 023: scroll the editor pane `buf_idx` by `step` rows (viewport
+    /// only — the cursor is not moved), clamped to `[0, content_rows-1]`. Content
+    /// rows are visual rows in soft-wrap, else logical lines.
+    fn wheel_scroll_editor(&mut self, buf_idx: usize, down: bool, step: usize) {
+        let content_rows = if self.soft_wrap {
+            self.wrap_cache
+                .as_ref()
+                .map(|c| c.total_visual_rows())
+                .unwrap_or_else(|| self.buffers[buf_idx].rope.line_count())
+        } else {
+            self.buffers[buf_idx].rope.line_count()
+        };
+        let max = content_rows.saturating_sub(1);
+        let off = self.buffers[buf_idx].scroll_offset.0;
+        self.buffers[buf_idx].scroll_offset.0 = if down {
+            (off + step).min(max)
+        } else {
+            off.saturating_sub(step)
+        };
     }
 
     // ── Event loop ───────────────────────────────────────────────────────────
@@ -3296,6 +3320,72 @@ impl App {
             return Ok(());
         }
 
+        // Feature 023: mouse-wheel scrolling. Routed to the open modal/overlay
+        // (modal wins), else the editor pane under the cursor. Placed BEFORE the
+        // Press/Left guard so wheel events are not dropped, and returns so the
+        // click/cursor paths below are never entered for a wheel event.
+        if matches!(
+            ev.kind,
+            NormalizedMouseKind::ScrollUp | NormalizedMouseKind::ScrollDown
+        ) {
+            let down = ev.kind == NormalizedMouseKind::ScrollDown;
+            let step = WHEEL_STEP;
+            if self.pending_help.is_some() {
+                self.help_scroll = if down {
+                    self.help_scroll.saturating_add(step)
+                } else {
+                    self.help_scroll.saturating_sub(step)
+                };
+            } else if let Some(idx) = self.pending_encoding_select {
+                let n = crate::ui::dialog::ENCODING_OPTIONS.len();
+                self.pending_encoding_select = Some(if down {
+                    (idx + step).min(n - 1)
+                } else {
+                    idx.saturating_sub(step)
+                });
+            } else if self.file_browser.is_some() {
+                let (w, h) = self.terminal_size;
+                let vis = ratatui::layout::Rect::new(0, 0, w, h);
+                if let Some(fb) = self.file_browser.as_mut() {
+                    let rows = fb.visible_rows(vis);
+                    for _ in 0..step {
+                        if down {
+                            fb.move_down(rows);
+                        } else {
+                            fb.move_up(rows);
+                        }
+                    }
+                }
+            } else if self.pending_plugin_manager {
+                let n = self.plugin_host.registry.instances.len();
+                if n > 0 {
+                    self.plugin_manager_cursor = if down {
+                        (self.plugin_manager_cursor + step).min(n - 1)
+                    } else {
+                        self.plugin_manager_cursor.saturating_sub(step)
+                    };
+                }
+            } else if self.pending_find_replace.is_some() {
+                // Nothing scrollable in the Find/Replace dialog — ignore.
+            } else {
+                // Editor: ignore the menu-bar row (0) and status-bar row (last).
+                let (w, term_rows) = self.terminal_size;
+                if ev.row >= 1 && ev.row + 1 < term_rows {
+                    let buf_idx = if matches!(self.split_mode, crate::ui::SplitMode::Vertical) {
+                        if ev.col >= w / 2 && self.buffers.len() > 1 {
+                            self.active_idx.max(1)
+                        } else {
+                            0
+                        }
+                    } else {
+                        self.active_idx
+                    };
+                    self.wheel_scroll_editor(buf_idx, down, step);
+                }
+            }
+            return Ok(());
+        }
+
         // Only left-button presses drive the menu / cursor for now.
         if ev.kind != NormalizedMouseKind::Press || ev.button != MouseButton::Left {
             return Ok(());
@@ -3965,6 +4055,39 @@ mod tests {
                 "exactly one focused button rendered (setup {setup})"
             );
         }
+    }
+
+    // ── Feature 023 — mouse-wheel editor scroll ──────────────────────────────
+
+    // T003: wheel_scroll_editor moves the viewport by the step, clamps at top and
+    // bottom, and never changes the cursor.
+    #[test]
+    fn wheel_scroll_editor_clamps_and_keeps_cursor() {
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        for _ in 0..50 {
+            a.handle_action(Action::InsertNewline).unwrap();
+        }
+        a.buffers[0].scroll_offset.0 = 0;
+        a.buffers[0].cursor.line = 5;
+        a.buffers[0].cursor.grapheme_col = 0;
+        let cur = a.buffers[0].cursor;
+
+        a.wheel_scroll_editor(0, true, 3);
+        assert_eq!(a.buffers[0].scroll_offset.0, 3, "scrolled down by step");
+        assert_eq!(a.buffers[0].cursor, cur, "cursor unchanged by wheel scroll");
+
+        a.wheel_scroll_editor(0, false, 3);
+        assert_eq!(a.buffers[0].scroll_offset.0, 0, "scrolled back up");
+        a.wheel_scroll_editor(0, false, 3);
+        assert_eq!(a.buffers[0].scroll_offset.0, 0, "clamped at the top");
+
+        // Drive to the bottom and confirm the clamp.
+        for _ in 0..100 {
+            a.wheel_scroll_editor(0, true, 3);
+        }
+        let max = a.buffers[0].rope.line_count().saturating_sub(1);
+        assert_eq!(a.buffers[0].scroll_offset.0, max, "clamped at the bottom");
     }
 
     // ── Feature 021 — editor scrollbar geometry ──────────────────────────────
