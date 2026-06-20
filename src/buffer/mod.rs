@@ -200,7 +200,7 @@ impl Buffer {
 
     /// Create an empty, unnamed, writable buffer with UTF-8 encoding.
     pub fn new_empty() -> Buffer {
-        Buffer {
+        let mut b = Buffer {
             path: None,
             rope: EditorRope::new(),
             encoding: EncodingId::Utf8,
@@ -214,7 +214,10 @@ impl Buffer {
             syntax: None,
             autosave: AutosaveState::new(false, 30),
             pending_recovery: false,
-        }
+        };
+        // Feature 014: the empty state IS the clean baseline.
+        b.undo_stack.mark_saved();
+        b
     }
 
     /// Open a file from disk and decode it using the given encoding.
@@ -268,7 +271,7 @@ impl Buffer {
         };
 
         let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        Ok(Buffer {
+        let mut b = Buffer {
             path: Some(path.to_path_buf()),
             rope,
             encoding,
@@ -282,7 +285,16 @@ impl Buffer {
             syntax: None,
             autosave: AutosaveState::for_path(&abs_path, !readonly, 30),
             pending_recovery: false,
-        })
+        };
+        // Feature 014: the on-disk content loaded here is the clean baseline.
+        b.undo_stack.mark_saved();
+        Ok(b)
+    }
+
+    /// Feature 014: recompute the modified flag from the undo history — the
+    /// buffer is modified iff its content differs from the saved baseline.
+    pub fn refresh_modified(&mut self) {
+        self.modified = !self.undo_stack.is_at_saved();
     }
 
     // -----------------------------------------------------------------------
@@ -359,6 +371,37 @@ impl Buffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // Feature 014 — clean baseline on construction
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn new_empty_buffer_is_clean_baseline() {
+        let b = Buffer::new_empty();
+        assert!(!b.modified);
+        assert!(
+            b.undo_stack.is_at_saved(),
+            "a fresh empty buffer's empty state is the clean baseline"
+        );
+    }
+
+    #[test]
+    fn refresh_modified_follows_saved_state() {
+        let mut b = Buffer::new_empty();
+        // Simulate an edit recorded in history.
+        b.rope.insert_str(0, "x");
+        b.undo_stack.push(crate::buffer::undo::EditOp::Insert {
+            at: 0,
+            text: "x".into(),
+        });
+        b.refresh_modified();
+        assert!(b.modified, "after an edit the buffer is modified");
+        // Undo back to the saved baseline.
+        b.undo_stack.undo(&mut b.rope);
+        b.refresh_modified();
+        assert!(!b.modified, "undo back to baseline is clean");
+    }
 
     // -----------------------------------------------------------------------
     // CursorPos

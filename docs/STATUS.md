@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F014-US1 | Undo back to the saved/opened content clears `[Modified]`; redo restores it | Complete |
+| F014-US2 | No false-clean after divergent edits (saved point invalidated when its branch is discarded) | Complete |
+| F014-US3 | File ▸ Revert reloads from disk (confirm when dirty; no-op for never-saved; safe on read error) | Complete |
 | F013-US1 | Underlined accelerator letter shown on every top-level menu and dropdown item | Complete |
 | F013-US2 | Typing an item's accelerator while its dropdown is open activates it; non-match is inert | Complete |
 | F013-US3 | Top-level letter / `Alt`+letter opens the matching menu; bare `Alt` activates the bar (terminal-permitting) | Complete |

@@ -86,6 +86,11 @@ impl EditOp {
 pub struct UndoStack {
     ops: Vec<EditOp>,
     cursor: usize,
+    /// Feature 014: the `cursor` value recorded at the last save/open — the
+    /// "clean" baseline. `None` means there is no reachable saved point (e.g. a
+    /// divergent edit discarded the branch that contained it). The buffer is
+    /// clean exactly when `saved == Some(cursor)`.
+    saved: Option<usize>,
 }
 
 impl UndoStack {
@@ -98,7 +103,24 @@ impl UndoStack {
         UndoStack {
             ops: Vec::new(),
             cursor: 0,
+            saved: None,
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Saved-point tracking (Feature 014)
+    // -----------------------------------------------------------------------
+
+    /// Mark the current position as the saved/clean baseline (call on open and
+    /// after a successful save).
+    pub fn mark_saved(&mut self) {
+        self.saved = Some(self.cursor);
+    }
+
+    /// True when the current content equals the saved baseline along the current
+    /// branch (i.e. the buffer is clean).
+    pub fn is_at_saved(&self) -> bool {
+        self.saved == Some(self.cursor)
     }
 
     // -----------------------------------------------------------------------
@@ -110,6 +132,14 @@ impl UndoStack {
     /// Truncates any redo branch (ops at or after the cursor) before pushing,
     /// so history always remains linear after a new edit.
     pub fn push(&mut self, op: EditOp) {
+        // Feature 014: if the saved baseline lives in the redo branch we are
+        // about to discard, it becomes unreachable — drop it so the buffer is
+        // never falsely reported clean after a divergent edit.
+        if let Some(s) = self.saved {
+            if s > self.cursor {
+                self.saved = None;
+            }
+        }
         self.truncate_redo();
         self.ops.push(op);
         self.cursor += 1;
@@ -386,5 +416,86 @@ mod tests {
         });
         // No undo done — redo branch is empty.
         assert!(stack.redo(&mut rope).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Feature 014 — saved-point marker
+    // -----------------------------------------------------------------------
+
+    fn ins(at: usize, t: &str) -> EditOp {
+        EditOp::Insert { at, text: t.into() }
+    }
+
+    #[test]
+    fn saved_marker_tracks_clean_through_undo_redo() {
+        let mut rope = rope_with("");
+        let mut s = UndoStack::new();
+        s.mark_saved(); // clean at cursor 0
+        assert!(s.is_at_saved());
+
+        rope.insert_str(0, "a");
+        s.push(ins(0, "a"));
+        assert!(!s.is_at_saved(), "an edit diverges from saved");
+
+        s.undo(&mut rope);
+        assert!(s.is_at_saved(), "undo back to saved point is clean");
+
+        s.redo(&mut rope);
+        assert!(!s.is_at_saved(), "redo away from saved is modified");
+    }
+
+    #[test]
+    fn saved_marker_after_save_midway() {
+        let mut rope = rope_with("");
+        let mut s = UndoStack::new();
+        s.mark_saved();
+        rope.insert_str(0, "a");
+        s.push(ins(0, "a"));
+        rope.insert_str(1, "b");
+        s.push(ins(1, "b"));
+        s.mark_saved(); // saved at cursor 2 ("ab")
+        assert!(s.is_at_saved());
+        s.undo(&mut rope); // back to "a", cursor 1
+        assert!(!s.is_at_saved());
+        s.redo(&mut rope); // forward to "ab", cursor 2
+        assert!(s.is_at_saved());
+    }
+
+    #[test]
+    fn divergent_edit_invalidates_saved_no_false_clean() {
+        // save at cursor 2; undo to 1; new edit C truncates the redo branch that
+        // held the saved point → saved must be dropped, never falsely clean.
+        let mut rope = rope_with("");
+        let mut s = UndoStack::new();
+        s.mark_saved();
+        rope.insert_str(0, "a");
+        s.push(ins(0, "a"));
+        rope.insert_str(1, "b");
+        s.push(ins(1, "b"));
+        s.mark_saved(); // saved = Some(2)
+        s.undo(&mut rope); // cursor 1, content "a"
+        assert!(!s.is_at_saved());
+        rope.insert_str(1, "c");
+        s.push(ins(1, "c")); // divergent: discards [b]; cursor 2 but content "ac"
+        assert!(
+            !s.is_at_saved(),
+            "must NOT be clean: cursor==2 but content differs from saved 'ab'"
+        );
+    }
+
+    #[test]
+    fn saved_marker_below_cursor_survives_divergent_push() {
+        // saved at cursor 1 (kept prefix); diverging at a deeper cursor must not
+        // drop a saved marker that is still reachable by undo.
+        let mut rope = rope_with("");
+        let mut s = UndoStack::new();
+        rope.insert_str(0, "a");
+        s.push(ins(0, "a"));
+        s.mark_saved(); // saved = Some(1)
+        rope.insert_str(1, "b");
+        s.push(ins(1, "b")); // cursor 2; saved 1 <= cursor, retained
+        assert!(!s.is_at_saved());
+        s.undo(&mut rope); // back to cursor 1 → clean
+        assert!(s.is_at_saved());
     }
 }

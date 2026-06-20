@@ -136,9 +136,14 @@ letters are assigned automatically (Feature 013).
 - Save (`Ctrl+S`) — on an unnamed buffer, opens the Save file browser
 - Save As… — opens the Save **file browser** (navigate to a folder, type a name)
 - Save As Encoding… (`F12`) — choose output encoding for this file
+- Revert — reload the buffer from its last saved version on disk, discarding changes (confirms when
+  there are unsaved changes; no-op for a never-saved buffer). Menu-only, no keybinding.
 - Close
 - ----
 - Exit (`Ctrl+Q`)
+
+The `[Modified]` indicator clears when undo returns the buffer to its saved/opened content and
+reappears on redo or further edits (Feature 014).
 
 #### File browser (Open / Save As)
 

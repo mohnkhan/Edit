@@ -70,6 +70,11 @@ static FILE_MENU: &[MenuItem] = &[
         mnemonic: Some('e'),
     },
     MenuItem {
+        label: "Revert",
+        action: Action::Revert,
+        mnemonic: Some('r'),
+    },
+    MenuItem {
         label: "Exit",
         action: Action::Quit,
         mnemonic: Some('x'),
@@ -1703,6 +1708,7 @@ mod tests {
                 ("Save", Some('s')),
                 ("Save As", Some('a')),
                 ("Save As Encoding...", Some('e')),
+                ("Revert", Some('r')),
                 ("Exit", Some('x')),
             ]
         );

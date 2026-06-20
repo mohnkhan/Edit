@@ -149,6 +149,11 @@ pub struct App {
     /// One-shot status-bar notice (e.g., file-deleted notice); cleared after one render frame.
     pub watcher_notice: Option<String>,
 
+    // ── Feature 014: Revert confirmation ──────────────────────────────────────
+    /// Set to the buffer index awaiting a Revert confirmation (buffer is modified);
+    /// `Some` shows a modal confirm dialog. Cleared on confirm/cancel.
+    pub pending_revert_confirm: Option<usize>,
+
     // ── Feature 008: plugin subsystem ────────────────────────────────────────
     /// The Rhai plugin host owning the engine and registry for this session.
     pub plugin_host: crate::plugin::PluginHost,
@@ -334,6 +339,7 @@ impl App {
             self_write_times: std::collections::HashMap::new(),
             pending_external_change: None,
             watcher_notice,
+            pending_revert_confirm: None,
             plugin_host,
             pending_plugin_consent,
             pending_plugin_manager: false,
@@ -602,6 +608,29 @@ impl App {
             return Ok(());
         }
 
+        // Feature 014 — Revert confirmation intercept: Y/Enter discards changes
+        // and reloads from disk; N/Esc cancels (buffer untouched).
+        if let Some(buf_idx) = self.pending_revert_confirm {
+            match &action {
+                Action::InsertNewline => {
+                    self.pending_revert_confirm = None;
+                    self.reload_from_disk(buf_idx);
+                }
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'Y') => {
+                    self.pending_revert_confirm = None;
+                    self.reload_from_disk(buf_idx);
+                }
+                Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
+                    self.pending_revert_confirm = None;
+                }
+                Action::MenuClose | Action::Quit => {
+                    self.pending_revert_confirm = None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // T012 — Encoding-dialog intercept: when the dialog is open, only
         // Up/Down (navigate), Enter (confirm), and Esc/MenuClose (cancel) are
         // processed; all other actions are silently consumed.
@@ -813,6 +842,7 @@ impl App {
             // File operations (Feature 011).
             Action::New => self.new_buffer(),
             Action::Close => self.close_active_buffer(),
+            Action::Revert => self.handle_revert(),
 
             // Edit operations (Feature 011) — previously unhandled, so both the
             // menu items and the Ctrl+Z/Y/X/C/V/A shortcuts were dead.
@@ -1162,6 +1192,8 @@ impl App {
         match self.active_buffer().save() {
             Ok(()) => {
                 self.active_buffer_mut().modified = false;
+                // Feature 014: the just-written content is the new clean baseline.
+                self.active_buffer_mut().undo_stack.mark_saved();
                 // Feature 007: record write time for self-write suppression (FR-007).
                 if let Some(path) = self.buffers[self.active_idx].path.clone() {
                     self.self_write_times.insert(path, Instant::now());
@@ -1190,7 +1222,8 @@ impl App {
             match self.buffers[self.active_idx].save() {
                 Ok(()) => {
                     self.buffers[self.active_idx].modified = false;
-                    // Feature 007: record write time for self-write suppression.
+                    self.buffers[self.active_idx].undo_stack.mark_saved(); // Feature 014
+                                                                           // Feature 007: record write time for self-write suppression.
                     if let Some(path) = self.buffers[self.active_idx].path.clone() {
                         self.self_write_times.insert(path, Instant::now());
                     }
@@ -2189,12 +2222,31 @@ impl App {
         }
     }
 
+    /// File ▸ Revert (Feature 014): reload the active buffer from its last saved
+    /// version on disk, discarding in-editor changes. No-op with a notice when the
+    /// buffer was never saved; asks for confirmation when there are unsaved changes.
+    pub fn handle_revert(&mut self) {
+        let idx = self.active_idx;
+        if self.buffers[idx].path.is_none() {
+            self.status_message = Some("Nothing to revert (never saved)".to_string());
+            return;
+        }
+        if self.buffers[idx].modified {
+            // Confirm before discarding unsaved changes.
+            self.pending_revert_confirm = Some(idx);
+        } else {
+            // Clean buffer — reload directly (harmless re-read).
+            self.reload_from_disk(idx);
+        }
+    }
+
     /// Write the active buffer to `path` (File ▸ Save As).
     pub fn do_save_as(&mut self, path: PathBuf) {
         match self.buffers[self.active_idx].save_as(path.clone()) {
             Ok(()) => {
                 self.buffers[self.active_idx].modified = false;
-                // Feature 007: suppress the watcher event from our own write.
+                self.buffers[self.active_idx].undo_stack.mark_saved(); // Feature 014
+                                                                       // Feature 007: suppress the watcher event from our own write.
                 self.self_write_times.insert(path.clone(), Instant::now());
                 self.status_message = Some(format!("Saved as {}", path.display()));
             }
@@ -2270,7 +2322,9 @@ impl App {
     fn apply_history_cursor(&mut self, char_idx: usize) {
         let (line, gcol) = self.line_col_for_char_idx(char_idx);
         let buf = &mut self.buffers[self.active_idx];
-        buf.modified = true;
+        // Feature 014: undo/redo may return the content to the saved baseline —
+        // derive Modified from the undo history instead of forcing it true.
+        buf.refresh_modified();
         buf.selection = None;
         let vcol = CursorPos::visual_col_from_grapheme_col(&buf.rope, line, gcol);
         buf.cursor = CursorPos {
@@ -2374,6 +2428,7 @@ impl App {
             || self.pending_external_change.is_some()
             || !self.pending_plugin_consent.is_empty()
             || self.pending_plugin_manager
+            || self.pending_revert_confirm.is_some()
         {
             return Ok(());
         }

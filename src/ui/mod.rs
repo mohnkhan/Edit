@@ -222,6 +222,39 @@ impl Ui {
             frame.render_widget(dialog, dialog_area);
         }
 
+        // Feature 014 — Revert confirmation overlay.
+        if let Some(idx) = app.pending_revert_confirm {
+            let filename = app
+                .buffers
+                .get(idx)
+                .and_then(|b| b.path.as_ref())
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "[No Name]".to_string());
+            let dialog = ratatui::widgets::Paragraph::new(format!(
+                "Revert {} to last saved version? Unsaved changes will be lost.  [Y]es / [N]o",
+                filename
+            ))
+            .style(
+                ratatui::style::Style::default()
+                    .fg(app.theme.menubar_fg)
+                    .bg(app.theme.menubar_bg),
+            )
+            .wrap(ratatui::widgets::Wrap { trim: true })
+            .block(
+                ratatui::widgets::Block::default()
+                    .title("Revert")
+                    .borders(ratatui::widgets::Borders::ALL),
+            );
+            let dw = 60u16.min(size.width);
+            let dh = 6u16.min(size.height);
+            let dx = size.x + size.width.saturating_sub(dw) / 2;
+            let dy = size.y + size.height.saturating_sub(dh) / 2;
+            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
+            frame.render_widget(ratatui::widgets::Clear, dialog_area);
+            frame.render_widget(dialog, dialog_area);
+        }
+
         // Feature 007 — External-change dialog overlay (T022 / T028).
         if let Some(ref ec) = app.pending_external_change {
             let fname = ec
