@@ -88,7 +88,8 @@ impl Ui {
                     show_line_numbers,
                     app.soft_wrap,
                     wrap_starts,
-                );
+                )
+                .with_matches(&app.search_state.matches, app.search_state.active_match);
                 frame.render_widget(editor_widget, editor_area);
             }
             SplitMode::Vertical => {
@@ -250,6 +251,91 @@ impl Ui {
             let dh = 6u16.min(size.height);
             let dx = size.x + size.width.saturating_sub(dw) / 2;
             let dy = size.y + size.height.saturating_sub(dh) / 2;
+            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
+            frame.render_widget(ratatui::widgets::Clear, dialog_area);
+            frame.render_widget(dialog, dialog_area);
+        }
+
+        // Feature 015 — interactive Find / Replace dialog overlay.
+        if let Some(ref d) = app.pending_find_replace {
+            use crate::ui::dialog::{DialogField, DialogMode};
+            let base = ratatui::style::Style::default()
+                .fg(app.theme.menubar_fg)
+                .bg(app.theme.menubar_bg);
+            let is_replace = d.mode == DialogMode::Replace;
+
+            // Caret marker inside the focused field's text.
+            let with_caret = |text: &str, focused: bool| -> String {
+                if !focused {
+                    return text.to_string();
+                }
+                let mut out = String::new();
+                for (i, g) in
+                    unicode_segmentation::UnicodeSegmentation::graphemes(text, true).enumerate()
+                {
+                    if i == d.caret {
+                        out.push('│');
+                    }
+                    out.push_str(g);
+                }
+                let len = unicode_segmentation::UnicodeSegmentation::graphemes(text, true).count();
+                if d.caret >= len {
+                    out.push('│');
+                }
+                out
+            };
+
+            let count = match (d.query.is_empty(), app.search_state.active_match) {
+                (true, _) => String::new(),
+                (false, Some(i)) => format!("  {}/{}", i + 1, app.search_state.matches.len()),
+                (false, None) => {
+                    if app.search_state.matches.is_empty() {
+                        "  not found".to_string()
+                    } else {
+                        format!("  {} matches", app.search_state.matches.len())
+                    }
+                }
+            };
+            let opt = |on: bool, label: &str| format!("[{}] {}", if on { 'x' } else { ' ' }, label);
+            let opts = format!(
+                "{}  {}  {}  {}",
+                opt(d.case_sensitive, "Case(Alt+C)"),
+                opt(d.wrap, "Wrap(Alt+A)"),
+                opt(d.regex, "Regex(Alt+R)"),
+                opt(d.whole_word, "Word(Alt+W)"),
+            );
+
+            let mut lines: Vec<ratatui::text::Line> = Vec::new();
+            lines.push(ratatui::text::Line::from(format!(
+                "Find:    {}{}",
+                with_caret(&d.query, d.focus == DialogField::Query),
+                count
+            )));
+            if is_replace {
+                lines.push(ratatui::text::Line::from(format!(
+                    "Replace: {}",
+                    with_caret(&d.replacement, d.focus == DialogField::Replacement)
+                )));
+            }
+            lines.push(ratatui::text::Line::from(opts));
+            let hint = if is_replace {
+                "Enter replace · Ctrl+A all · Tab field · F3/F2 next/prev · Esc close"
+            } else {
+                "Enter find · F3/F2 next/prev · Esc close"
+            };
+            lines.push(ratatui::text::Line::from(hint));
+
+            let title = if is_replace { " Replace " } else { " Find " };
+            let dialog = ratatui::widgets::Paragraph::new(lines).style(base).block(
+                ratatui::widgets::Block::default()
+                    .title(title)
+                    .borders(ratatui::widgets::Borders::ALL),
+            );
+            let dw = 70u16.min(size.width);
+            let dh = if is_replace { 6u16 } else { 5u16 }.min(size.height);
+            let dx = size.x + size.width.saturating_sub(dw) / 2;
+            // Place near the top so it doesn't hide the current match.
+            let dy = size.y + 1;
             let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
             frame.render_widget(ratatui::widgets::Clear, dialog_area);
             frame.render_widget(dialog, dialog_area);

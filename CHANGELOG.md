@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 015: Interactive Find and Replace dialogs
+
+#### Added
+
+- **Find dialog** (`Ctrl+F` / Search ▸ Find): a modal input box to type a search term; `Enter` finds
+  all matches, highlights them in the document (the current match shown distinctly), jumps the view to
+  the first match at/after the cursor, and shows an "X of Y" indicator. `F3` / `F2` step to the
+  next/previous match with wrap-around; `Esc` closes and clears the highlights.
+- **Replace dialog** (`Ctrl+H` / Search ▸ Find Replace): find + replace-with fields (`Tab` switches
+  focus); `Enter` replaces the current match and advances; `Ctrl+A` replaces all and reports the count.
+  Replacements are a single undoable edit and mark the buffer modified.
+- **Search-option toggles** in the dialog: case-sensitive (`Alt+C`), wrap-around (`Alt+A`), regex
+  (`Alt+R`), and **whole-word** (`Alt+W`). Whole-word (word-boundary) matching was added to the search
+  engine. All field input and match highlighting are UTF-8/grapheme-correct.
+- Built via the full Spec Kit pipeline; artifacts under `specs/015-find-replace-dialog/`.
+
+#### Fixed
+
+- Search ▸ Find and Search ▸ Find Replace were stubs (reset state / logged, with no way to type a
+  term). They now open working interactive dialogs.
+- **Crash on a very small terminal**: scroll clamping computed `viewport_height − 1`, which underflowed
+  and panicked when the visible height was 0 (possible now that the editor tracks the real frame size).
+  The viewport height used for clamping is floored at 1, so editing never panics at any frame size.
+
 ### feature 014: Undo-to-clean state and Revert to saved
 
 #### Added

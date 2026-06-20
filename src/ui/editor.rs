@@ -37,6 +37,10 @@ pub struct EditorWidget<'a> {
     /// Pre-computed visual sub-line start byte offsets per logical line.
     /// None when soft_wrap is false.
     pub wrap_starts: Option<&'a [Vec<u32>]>,
+    /// Active search match ranges (char indices) to highlight (Feature 015).
+    pub match_ranges: &'a [crate::search::CharRange],
+    /// Index into `match_ranges` of the current match (rendered distinctly).
+    pub active_match: Option<usize>,
 }
 
 impl<'a> EditorWidget<'a> {
@@ -54,7 +58,27 @@ impl<'a> EditorWidget<'a> {
             show_line_numbers,
             soft_wrap,
             wrap_starts,
+            match_ranges: &[],
+            active_match: None,
         }
+    }
+
+    /// Attach search match highlighting (Feature 015).
+    pub fn with_matches(
+        mut self,
+        match_ranges: &'a [crate::search::CharRange],
+        active_match: Option<usize>,
+    ) -> Self {
+        self.match_ranges = match_ranges;
+        self.active_match = active_match;
+        self
+    }
+
+    /// Index of the match range containing char index `c`, if any (Feature 015).
+    fn match_at(&self, c: usize) -> Option<usize> {
+        self.match_ranges
+            .iter()
+            .position(|r| c >= r.start && c < r.end)
     }
 
     /// Width of the gutter (including the `|` separator) when line numbers are shown.
@@ -314,11 +338,16 @@ impl<'a> Widget for EditorWidget<'a> {
                 .map(|h| h.highlight(&line_str))
                 .unwrap_or_default();
 
+            // Feature 015: char index of the first char on this line, for
+            // mapping match ranges (char indices) onto rendered cells.
+            let line_start_char = self.buffer.rope.line_to_char(file_line);
+
             // Walk grapheme clusters, skipping those before scroll_vcol and
             // collecting those that fit in content_width.
             let mut visual_col: usize = 0;
             let mut screen_col: usize = 0; // position within the content area
             let mut byte_off: usize = 0; // byte offset within line_str
+            let mut char_off: usize = 0; // char offset within line_str
 
             for grapheme in line_str.graphemes(true) {
                 let gw = UnicodeWidthStr::width(grapheme);
@@ -328,6 +357,7 @@ impl<'a> Widget for EditorWidget<'a> {
                 if visual_col + gw <= scroll_vcol {
                     visual_col += gw;
                     byte_off += gbytes;
+                    char_off += grapheme.chars().count();
                     continue;
                 }
 
@@ -348,6 +378,7 @@ impl<'a> Widget for EditorWidget<'a> {
                     }
                     visual_col += gw;
                     byte_off += gbytes;
+                    char_off += grapheme.chars().count();
                     continue;
                 }
 
@@ -368,11 +399,30 @@ impl<'a> Widget for EditorWidget<'a> {
 
                 // Preserve the background from normal_style so highlights
                 // don't accidentally turn the background black.
-                let style = if is_cursor {
+                let mut style = if is_cursor {
                     base_style
                 } else {
                     base_style.bg(self.theme.background)
                 };
+
+                // Feature 015: overlay a search-match background (current match
+                // distinct from other matches). Cursor cell keeps its own style.
+                if !is_cursor {
+                    let abs_char = line_start_char + char_off;
+                    if let Some(mi) = self.match_at(abs_char) {
+                        let is_active = self.active_match == Some(mi);
+                        style = if is_active {
+                            style
+                                .bg(ratatui::style::Color::LightYellow)
+                                .fg(ratatui::style::Color::Black)
+                                .add_modifier(ratatui::style::Modifier::BOLD)
+                        } else {
+                            style
+                                .bg(ratatui::style::Color::Yellow)
+                                .fg(ratatui::style::Color::Black)
+                        };
+                    }
+                }
 
                 // Write the grapheme. For wide chars (gw == 2) ratatui will
                 // automatically place a space in the second cell.
@@ -384,6 +434,7 @@ impl<'a> Widget for EditorWidget<'a> {
                 screen_col += gw;
                 visual_col += gw;
                 byte_off += gbytes;
+                char_off += grapheme.chars().count();
             }
 
             // If the cursor is at the end of the line (past all graphemes) and

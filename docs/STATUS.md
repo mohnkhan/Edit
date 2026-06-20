@@ -8,6 +8,10 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F015-US1 | Interactive Find dialog (Ctrl+F): type term, Enter to search, highlight matches, jump to current, "X of Y" | Complete |
+| F015-US2 | Find Next/Prev (F3/F2) cycle matches with wrap; current-match highlight distinct | Complete |
+| F015-US3 | Replace dialog (Ctrl+H): Replace current (Enter) + Replace All (Ctrl+A), undoable, reports count | Complete |
+| F015-US4 | Search options: case-sensitive, wrap, regex, whole-word (new engine support) | Complete |
 | F014-US1 | Undo back to the saved/opened content clears `[Modified]`; redo restores it | Complete |
 | F014-US2 | No false-clean after divergent edits (saved point invalidated when its branch is discarded) | Complete |
 | F014-US3 | File ▸ Revert reloads from disk (confirm when dirty; no-op for never-saved; safe on read error) | Complete |

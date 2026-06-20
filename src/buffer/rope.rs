@@ -94,6 +94,15 @@ impl EditorRope {
         self.0.len_chars()
     }
 
+    /// Char (Unicode scalar) index of the first character of line `line_idx`.
+    /// Clamped to the document length for out-of-range lines (Feature 015).
+    pub fn line_to_char(&self, line_idx: usize) -> usize {
+        if line_idx >= self.0.len_lines() {
+            return self.0.len_chars();
+        }
+        self.0.line_to_char(line_idx)
+    }
+
     /// Convert a char (Unicode scalar) index to a UTF-8 byte index.
     ///
     /// This is implemented by materialising the rope as a `String` and then

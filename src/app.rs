@@ -27,6 +27,7 @@ use crate::{
     input::mouse::{normalize_mouse, MouseButton, NormalizedMouseKind},
     input::{dispatch_event, Action, KeybindingMap},
     search::{SearchEngine, SearchState},
+    ui::dialog::{DialogField, DialogMode, FindReplaceDialog},
     ui::file_browser::{BrowseMode, BrowserHit, FileBrowser, Outcome as BrowseOutcome},
     ui::menubar::{hit_test_menu, resolve_menus, MenuBarState, MenuHit, MenuState, ResolvedMenu},
     ui::theme::{theme_by_name, Theme},
@@ -153,6 +154,10 @@ pub struct App {
     /// Set to the buffer index awaiting a Revert confirmation (buffer is modified);
     /// `Some` shows a modal confirm dialog. Cleared on confirm/cancel.
     pub pending_revert_confirm: Option<usize>,
+
+    // ── Feature 015: interactive Find / Replace dialog ────────────────────────
+    /// `Some` while an interactive Find/Replace dialog is open (modal).
+    pub pending_find_replace: Option<FindReplaceDialog>,
 
     // ── Feature 008: plugin subsystem ────────────────────────────────────────
     /// The Rhai plugin host owning the engine and registry for this session.
@@ -340,6 +345,7 @@ impl App {
             pending_external_change: None,
             watcher_notice,
             pending_revert_confirm: None,
+            pending_find_replace: None,
             plugin_host,
             pending_plugin_consent,
             pending_plugin_manager: false,
@@ -631,6 +637,58 @@ impl App {
             return Ok(());
         }
 
+        // Feature 015 — Find/Replace dialog intercept. While open, keystrokes
+        // edit the dialog fields and drive the search; the buffer is only touched
+        // by an explicit Replace/Replace-All. All input is consumed.
+        if self.pending_find_replace.is_some() {
+            match action {
+                Action::MenuClose | Action::Quit => self.close_find_replace(),
+                Action::InsertChar(c) => self.pending_find_replace.as_mut().unwrap().insert_char(c),
+                Action::Backspace => self.pending_find_replace.as_mut().unwrap().backspace(),
+                Action::MoveLeft => self.pending_find_replace.as_mut().unwrap().move_left(),
+                Action::MoveRight => self.pending_find_replace.as_mut().unwrap().move_right(),
+                Action::FocusNextField => {
+                    self.pending_find_replace.as_mut().unwrap().switch_focus()
+                }
+                Action::ToggleSearchCase => {
+                    let d = self.pending_find_replace.as_mut().unwrap();
+                    d.case_sensitive = !d.case_sensitive;
+                    self.run_find_from_dialog();
+                }
+                Action::ToggleSearchWrap => {
+                    let d = self.pending_find_replace.as_mut().unwrap();
+                    d.wrap = !d.wrap;
+                }
+                Action::ToggleSearchRegex => {
+                    let d = self.pending_find_replace.as_mut().unwrap();
+                    d.regex = !d.regex;
+                    self.run_find_from_dialog();
+                }
+                Action::ToggleSearchWholeWord => {
+                    let d = self.pending_find_replace.as_mut().unwrap();
+                    d.whole_word = !d.whole_word;
+                    self.run_find_from_dialog();
+                }
+                Action::InsertNewline => {
+                    let mode = self.pending_find_replace.as_ref().unwrap().mode;
+                    match mode {
+                        DialogMode::Find => self.run_find_from_dialog(),
+                        DialogMode::Replace => self.replace_current_from_dialog(),
+                    }
+                }
+                // Ctrl+A → Replace All (only while the Replace dialog is open).
+                Action::SelectAll
+                    if self.pending_find_replace.as_ref().unwrap().mode == DialogMode::Replace =>
+                {
+                    self.replace_all_from_dialog();
+                }
+                Action::FindNext => self.find_next(),
+                Action::FindPrev => self.find_prev(),
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // T012 — Encoding-dialog intercept: when the dialog is open, only
         // Up/Down (navigate), Enter (confirm), and Esc/MenuClose (cancel) are
         // processed; all other actions are silently consumed.
@@ -873,18 +931,18 @@ impl App {
                 }
             }
 
-            // Search and replace (T055 / T057)
-            Action::Find => {
-                self.search_state = SearchState::default();
-                // TODO: show FindDialog overlay (full modal input in future task)
-                log::debug!("Find action: search state reset");
-            }
+            // Search and replace (Feature 015 — interactive dialogs)
+            Action::Find => self.open_find_dialog(),
             Action::FindNext => self.find_next(),
             Action::FindPrev => self.find_prev(),
-            Action::FindReplace => {
-                // TODO: show ReplaceDialog overlay (full modal input in future task)
-                log::debug!("FindReplace action triggered");
-            }
+            Action::FindReplace => self.open_replace_dialog(),
+            // Search-option toggles and Tab focus are only meaningful inside an
+            // open Find/Replace dialog (handled by the intercept above); inert here.
+            Action::ToggleSearchCase
+            | Action::ToggleSearchWrap
+            | Action::ToggleSearchRegex
+            | Action::ToggleSearchWholeWord
+            | Action::FocusNextField => {}
 
             // Menu navigation (T048 / Feature 009). Alt+<letter> opens a
             // dropdown directly; F10 (`Menu`) enters the top-level highlight
@@ -1508,7 +1566,11 @@ impl App {
 
     /// Adjust `scroll_offset` so that `cursor` is within the visible viewport.
     fn clamp_scroll(&mut self) {
-        let vh = self.viewport_height();
+        // Clamp to at least 1 row: a tiny/zero terminal frame (possible now that
+        // terminal_size follows the real frame, feature 012 follow-up) would make
+        // `vh - 1` underflow below. Guarding here keeps editing crash-free on any
+        // frame size.
+        let vh = self.viewport_height().max(1);
 
         if self.soft_wrap && self.wrap_cache.is_some() {
             let cursor_vr = self.cursor_visual_row();
@@ -1841,6 +1903,199 @@ impl App {
 
     // ── T055 — Find next / find prev ─────────────────────────────────────────
 
+    // ── Feature 015 — interactive Find / Replace dialog ────────────────────────
+
+    /// Open the Find dialog (Ctrl+F / Search ▸ Find), seeded with the last query.
+    pub fn open_find_dialog(&mut self) {
+        let seed = self.search_state.query.clone();
+        self.pending_find_replace = Some(FindReplaceDialog::new(DialogMode::Find, seed));
+    }
+
+    /// Open the Replace dialog (Ctrl+H / Search ▸ Find Replace).
+    pub fn open_replace_dialog(&mut self) {
+        let seed = self.search_state.query.clone();
+        let mut d = FindReplaceDialog::new(DialogMode::Replace, seed);
+        if let Some(r) = &self.search_state.replacement {
+            d.replacement = r.clone();
+        }
+        self.pending_find_replace = Some(d);
+    }
+
+    /// Close the Find/Replace dialog and clear the active match highlights.
+    pub fn close_find_replace(&mut self) {
+        self.pending_find_replace = None;
+        self.search_state.matches.clear();
+        self.search_state.active_match = None;
+    }
+
+    /// Char index of the cursor in the active buffer (for "first match at/after
+    /// the cursor").
+    fn cursor_char_index(&self) -> usize {
+        let buf = &self.buffers[self.active_idx];
+        let text = buf.rope.to_string();
+        let mut char_count = 0usize;
+        for (line_idx, line_text) in text.split('\n').enumerate() {
+            if line_idx == buf.cursor.line {
+                let gcols = unicode_segmentation::UnicodeSegmentation::graphemes(line_text, true)
+                    .take(buf.cursor.grapheme_col)
+                    .map(|g| g.chars().count())
+                    .sum::<usize>();
+                return char_count + gcols;
+            }
+            char_count += line_text.chars().count() + 1; // + newline
+        }
+        char_count
+    }
+
+    /// Copy the dialog's query/options into `search_state`, run the search,
+    /// highlight matches, and jump to the first match at/after the cursor.
+    fn run_find_from_dialog(&mut self) {
+        let (query, case, regex, whole, wrap, replacement) = {
+            let d = match self.pending_find_replace.as_ref() {
+                Some(d) => d,
+                None => return,
+            };
+            (
+                d.query.clone(),
+                d.case_sensitive,
+                d.regex,
+                d.whole_word,
+                d.wrap,
+                d.replacement.clone(),
+            )
+        };
+        self.search_state.query = query.clone();
+        self.search_state.case_sensitive = case;
+        self.search_state.regex_mode = regex;
+        self.search_state.whole_word = whole;
+        self.search_state.wrap = wrap;
+        self.search_state.replacement = Some(replacement);
+
+        if query.is_empty() {
+            self.search_state.matches.clear();
+            self.search_state.active_match = None;
+            return;
+        }
+
+        let matches = {
+            let rope = &self.buffers[self.active_idx].rope;
+            SearchEngine::find_all(rope, &query, regex, case, whole)
+        };
+        let total = matches.len();
+        self.search_state.matches = matches;
+        if total == 0 {
+            self.search_state.active_match = None;
+            self.status_message = Some("Not found".to_string());
+            return;
+        }
+        let cursor_char = self.cursor_char_index();
+        let idx = self
+            .search_state
+            .matches
+            .iter()
+            .position(|m| m.start >= cursor_char)
+            .unwrap_or(0);
+        self.search_state.active_match = Some(idx);
+        self.status_message = Some(format!("Match {}/{}", idx + 1, total));
+        self.scroll_to_match(idx);
+    }
+
+    /// Replace the current match with the dialog's replacement, then recompute
+    /// matches and advance to the next (Enter in Replace mode).
+    fn replace_current_from_dialog(&mut self) {
+        if self.buffers[self.active_idx].readonly {
+            self.status_message = Some("Buffer is read-only".to_string());
+            return;
+        }
+        // Ensure search state reflects the dialog and we have matches.
+        if self.search_state.matches.is_empty() || self.search_state.active_match.is_none() {
+            self.run_find_from_dialog();
+        }
+        let replacement = self
+            .pending_find_replace
+            .as_ref()
+            .map(|d| d.replacement.clone())
+            .unwrap_or_default();
+        let idx = match self.search_state.active_match {
+            Some(i) => i,
+            None => return,
+        };
+        let range = match self.search_state.matches.get(idx).cloned() {
+            Some(r) => r,
+            None => return,
+        };
+
+        // Capture the deleted text for undo.
+        let deleted: String = {
+            let full = self.buffers[self.active_idx].rope.to_string();
+            let bs = full
+                .char_indices()
+                .nth(range.start)
+                .map(|(b, _)| b)
+                .unwrap_or(full.len());
+            let be = full
+                .char_indices()
+                .nth(range.end)
+                .map(|(b, _)| b)
+                .unwrap_or(full.len());
+            full[bs..be].to_string()
+        };
+        {
+            let buf = &mut self.buffers[self.active_idx];
+            buf.rope.delete_range(range.start..range.end);
+            buf.rope.insert_str(range.start, &replacement);
+            buf.undo_stack.push(EditOp::Composite(vec![
+                EditOp::Delete {
+                    at: range.start,
+                    text: deleted,
+                },
+                EditOp::Insert {
+                    at: range.start,
+                    text: replacement.clone(),
+                },
+            ]));
+            buf.modified = true;
+        }
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
+
+        // Recompute matches against the edited document (no stale offsets).
+        let (query, case, regex, whole) = (
+            self.search_state.query.clone(),
+            self.search_state.case_sensitive,
+            self.search_state.regex_mode,
+            self.search_state.whole_word,
+        );
+        let matches = {
+            let rope = &self.buffers[self.active_idx].rope;
+            SearchEngine::find_all(rope, &query, regex, case, whole)
+        };
+        let total = matches.len();
+        self.search_state.matches = matches;
+        if total == 0 {
+            self.search_state.active_match = None;
+            self.status_message = Some("Replaced 1 — no more matches".to_string());
+            return;
+        }
+        let next = idx.min(total - 1);
+        self.search_state.active_match = Some(next);
+        self.status_message = Some(format!("Replaced 1 — Match {}/{}", next + 1, total));
+        self.scroll_to_match(next);
+    }
+
+    /// Replace all occurrences (Ctrl+A in Replace mode), reporting the count.
+    fn replace_all_from_dialog(&mut self) {
+        // Sync the dialog query/replacement/options into search_state first.
+        if let Some(d) = self.pending_find_replace.as_ref() {
+            self.search_state.query = d.query.clone();
+            self.search_state.replacement = Some(d.replacement.clone());
+            self.search_state.case_sensitive = d.case_sensitive;
+            self.search_state.regex_mode = d.regex;
+            self.search_state.whole_word = d.whole_word;
+            self.search_state.wrap = d.wrap;
+        }
+        self.replace_all();
+    }
+
     /// Jump to the next search match, wrapping at end-of-document when
     /// `search_state.wrap` is `true`.
     ///
@@ -1853,9 +2108,10 @@ impl App {
             let query = self.search_state.query.clone();
             let regex_mode = self.search_state.regex_mode;
             let case_sensitive = self.search_state.case_sensitive;
+            let whole_word = self.search_state.whole_word;
             let rope = &self.buffers[self.active_idx].rope;
             self.search_state.matches =
-                SearchEngine::find_all(rope, &query, regex_mode, case_sensitive);
+                SearchEngine::find_all(rope, &query, regex_mode, case_sensitive, whole_word);
         }
 
         let total = self.search_state.matches.len();
@@ -1896,9 +2152,10 @@ impl App {
             let query = self.search_state.query.clone();
             let regex_mode = self.search_state.regex_mode;
             let case_sensitive = self.search_state.case_sensitive;
+            let whole_word = self.search_state.whole_word;
             let rope = &self.buffers[self.active_idx].rope;
             self.search_state.matches =
-                SearchEngine::find_all(rope, &query, regex_mode, case_sensitive);
+                SearchEngine::find_all(rope, &query, regex_mode, case_sensitive, whole_word);
         }
 
         let total = self.search_state.matches.len();
@@ -2008,9 +2265,10 @@ impl App {
             let query = self.search_state.query.clone();
             let regex_mode = self.search_state.regex_mode;
             let case_sensitive = self.search_state.case_sensitive;
+            let whole_word = self.search_state.whole_word;
             let rope = &self.buffers[self.active_idx].rope;
             self.search_state.matches =
-                SearchEngine::find_all(rope, &query, regex_mode, case_sensitive);
+                SearchEngine::find_all(rope, &query, regex_mode, case_sensitive, whole_word);
         }
 
         let matches = self.search_state.matches.clone();
@@ -2429,6 +2687,7 @@ impl App {
             || !self.pending_plugin_consent.is_empty()
             || self.pending_plugin_manager
             || self.pending_revert_confirm.is_some()
+            || self.pending_find_replace.is_some()
         {
             return Ok(());
         }
