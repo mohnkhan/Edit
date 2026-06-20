@@ -563,22 +563,14 @@ fn compute_layout(area: Rect, mode: BrowseMode) -> BrowserLayout {
 // ---------------------------------------------------------------------------
 
 /// Approximate display width of a grapheme's leading scalar (1 narrow, 2 wide).
+/// Display width of a grapheme cluster.
+///
+/// Feature 029: delegates to the single shared width helper
+/// ([`crate::ui::width::display_width`]) so combining marks (0), wide CJK (2), and
+/// emoji are measured consistently everywhere. Kept as a thin alias because many
+/// call sites in this module (and `tabbar`) import it.
 pub fn grapheme_width(g: &str) -> u16 {
-    let cp = g.chars().next().map(|c| c as u32).unwrap_or(0);
-    let wide = (0x1100..=0x115F).contains(&cp)
-        || (0x2E80..=0x303E).contains(&cp)
-        || (0x3041..=0x33BF).contains(&cp)
-        || (0x4E00..=0x9FFF).contains(&cp)
-        || (0xAC00..=0xD7AF).contains(&cp)
-        || (0xF900..=0xFAFF).contains(&cp)
-        || (0xFF01..=0xFF60).contains(&cp)
-        || (0x1F300..=0x1F9FF).contains(&cp)
-        || (0x20000..=0x2A6DF).contains(&cp);
-    if wide {
-        2
-    } else {
-        1
-    }
+    crate::ui::width::display_width(g)
 }
 
 /// Truncate `s` to at most `max_cols` display columns, appending `…` when cut.

@@ -152,6 +152,19 @@ mod tests {
         );
     }
 
+    // T029 (Feature 029): Ctrl+W closes the current buffer (was unbound despite the
+    // docs claiming it).
+    #[test]
+    fn ctrl_w_maps_to_close() {
+        let km = KeybindingMap::default_map();
+        let ev = key(
+            KeyCode::Char('w'),
+            KeyModifiers::CONTROL,
+            KeyEventKind::Press,
+        );
+        assert_eq!(dispatch_key(ev, &km), Some(Action::Close));
+    }
+
     // T022 (feature 013): a lone Alt key press activates the menu bar (like F10).
     #[test]
     fn lone_alt_press_maps_to_menu() {

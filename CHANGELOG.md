@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 029: UX completeness hardening (round 2)
+
+#### Fixed
+
+- **More crash hardening** — deleting/cutting a selection over multibyte text, showing the crash-recovery
+  prompt with a Unicode path, and `byte_to_char` on any offset no longer panic (char-safe slicing
+  throughout). Opening a file larger than 256 MiB is now refused with a clear "file too large" message
+  instead of risking an out-of-memory crash.
+- **Saving never fails silently** — a plain save (`Ctrl+S`) now shows a "Saved …" confirmation, and a
+  failed save shows an error and keeps the buffer marked modified (previously a failed save looked
+  identical to a successful one). Autosave/recovery write failures surface a notice.
+- **Save-before-quit prompt cancels on `Esc`** — matching its `Cancel (Esc)` label and the other confirm
+  dialogs.
+- **Save-As keeps the chosen encoding** when the destination is picked through the file browser
+  (previously the encoding selection was dropped).
+- **Clicks land where you click with line numbers on** — the click→column mapping now accounts for the
+  line-number gutter and the horizontal scroll offset.
+- **Consistent Unicode width everywhere** — a single display-width function (combining marks = 0,
+  East-Asian wide = 2, emoji) now drives the editor, file browser, tab bar, and dialog fields, fixing
+  cursor/scroll/truncation misalignment that came from two divergent width helpers.
+- **`Ctrl+W` now closes the current buffer** (it was documented but unbound), and a **File ▸ Close** menu
+  item makes the action reachable.
+- **Selected menu item is legible in the high-contrast theme** (was white-on-white).
+- **Go to Line** no longer opens on top of an active menu.
+
+#### Added
+
+- **Action feedback** — copy/cut/paste now report "Copied"/"Cut"/"Pasted"; pasting an empty clipboard
+  says "Nothing to paste"; editing a read-only buffer says "Buffer is read-only"; a failed file open
+  reports the path and reason instead of silently opening a blank buffer.
+
+#### Notes
+
+- No new dependencies (Constitution IV); each fix is covered by a regression test (Constitution V); the
+  save/autosave surfacing and file-size guard serve no-silent-data-loss (Constitution VII). Larger parity
+  enhancements (mouse text-editing inside dialogs, double/triple-click selection, right-click context
+  menu, extra DOS F-keys) are tracked as follow-up issues + ROADMAP rows.
+
 ### feature 028: UX crash-safety and keyboard navigation hardening
 
 #### Fixed

@@ -219,15 +219,20 @@ letters are assigned automatically (Feature 013).
 - New (`Ctrl+N`)
 - Open… (`Ctrl+O`) — opens the **file browser** (navigate folders, pick a file, or type a path into the
   bordered "Go to path:" field to jump there)
-- Save (`Ctrl+S`) — on an unnamed buffer, opens the Save file browser
+- Save (`Ctrl+S`) — on an unnamed buffer, opens the Save file browser; shows a "Saved …" confirmation on
+  success and a "Save failed: …" message on failure (the buffer stays modified)
 - Save As… — opens the Save **file browser** (navigate to a folder, type a name in the bordered "Name:"
   field)
 - Save As Encoding… (`F12`) — choose output encoding for this file
 - Revert — reload the buffer from its last saved version on disk, discarding changes (confirms when
   there are unsaved changes; no-op for a never-saved buffer). Menu-only, no keybinding.
-- Close
+- Close (`Ctrl+W`) — close the current buffer
 - ----
 - Exit (`Ctrl+Q`)
+
+Files larger than 256 MiB are refused with a "file too large" message rather than loaded (avoids
+out-of-memory). Copy/cut/paste and read-only edits report a brief status message; a failed file open
+reports the path and reason.
 
 The `[Modified]` indicator clears when undo returns the buffer to its saved/opened content and
 reappears on redo or further edits (Feature 014).

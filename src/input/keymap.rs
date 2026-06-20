@@ -134,6 +134,7 @@ impl KeybindingMap {
         map.insert("F12".to_string(), Action::SaveAsEncoding);
         map.insert("Ctrl+N".to_string(), Action::New);
         map.insert("Ctrl+O".to_string(), Action::Open);
+        map.insert("Ctrl+W".to_string(), Action::Close); // Feature 029: close current buffer
         map.insert("Ctrl+Q".to_string(), Action::Quit);
 
         // Edit

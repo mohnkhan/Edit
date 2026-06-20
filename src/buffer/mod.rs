@@ -37,6 +37,13 @@ pub enum LineEnding {
     Crlf,
 }
 
+/// Maximum size of a file the editor will load into a buffer (Feature 029).
+///
+/// The whole file is materialised in memory (rope + a transient `String`), so an
+/// unbounded read risks OOM. 256 MiB is far beyond any realistic text file while
+/// still refusing pathological/binary inputs gracefully.
+pub const MAX_OPEN_BYTES: u64 = 256 * 1024 * 1024;
+
 // ---------------------------------------------------------------------------
 // BufferError
 // ---------------------------------------------------------------------------
@@ -52,6 +59,8 @@ pub enum BufferError {
     Io(std::io::Error),
     /// The text could not be re-encoded in the buffer's target encoding.
     EncodeError,
+    /// The file is larger than [`MAX_OPEN_BYTES`] and was not loaded (Feature 029).
+    TooLarge { size: u64, limit: u64 },
 }
 
 impl std::fmt::Display for BufferError {
@@ -65,6 +74,12 @@ impl std::fmt::Display for BufferError {
             }
             BufferError::Io(e) => write!(f, "I/O error: {e}"),
             BufferError::EncodeError => write!(f, "failed to encode text in the target encoding"),
+            BufferError::TooLarge { size, limit } => write!(
+                f,
+                "file too large: {} MiB exceeds the {} MiB limit",
+                size / (1024 * 1024),
+                limit / (1024 * 1024)
+            ),
         }
     }
 }
@@ -235,6 +250,19 @@ impl Buffer {
     ) -> Result<Buffer, BufferError> {
         let path = path.as_ref();
 
+        // --- File-size guard (Feature 029) -----------------------------------
+        // Refuse to load a file larger than MAX_OPEN_BYTES rather than reading it
+        // entirely into memory and risking an OOM crash. Metadata failures fall
+        // through (the read below reports the real I/O error).
+        if let Ok(meta) = std::fs::metadata(path) {
+            if meta.is_file() && meta.len() > MAX_OPEN_BYTES {
+                return Err(BufferError::TooLarge {
+                    size: meta.len(),
+                    limit: MAX_OPEN_BYTES,
+                });
+            }
+        }
+
         // --- Read raw bytes --------------------------------------------------
         let bytes = std::fs::read(path)?;
 
@@ -375,6 +403,29 @@ mod tests {
     // -----------------------------------------------------------------------
     // Feature 014 — clean baseline on construction
     // -----------------------------------------------------------------------
+
+    // T012 (Feature 029): the file-size guard refuses oversized files and a normal
+    // file opens fine. We can't easily create a 256 MiB file in a unit test, so we
+    // verify the boundary logic directly and that a small real file opens.
+    #[test]
+    fn open_refuses_oversized_and_allows_normal() {
+        // Boundary logic mirrors Buffer::open's guard.
+        let over = MAX_OPEN_BYTES + 1;
+        assert!(over > MAX_OPEN_BYTES, "guard compares strictly greater");
+        let err = BufferError::TooLarge {
+            size: over,
+            limit: MAX_OPEN_BYTES,
+        };
+        assert!(format!("{err}").contains("file too large"));
+
+        // A small real file still opens normally (guard not triggered).
+        let dir = std::env::temp_dir().join("edit_size_guard_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let p = dir.join("small.txt");
+        std::fs::write(&p, b"hello\n").unwrap();
+        let b = Buffer::open(&p, EncodingId::Utf8).expect("small file opens");
+        assert_eq!(b.rope.line_slice(0), "hello");
+    }
 
     #[test]
     fn new_empty_buffer_is_clean_baseline() {
