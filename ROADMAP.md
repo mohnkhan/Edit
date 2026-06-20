@@ -2,6 +2,14 @@
 
 ## Deferred Features
 
+### Bordered-box styling for Find/Replace fields (follow-up to feature 018)
+- **Issue**: #41 (`follow-up`)
+- **Status**: Open (deferred from feature 018, branch `018-field-affordance-help`)
+- **Description**: Feature 018 gave the file-browser fields a bordered, labeled input box with a caret
+  (and made the Open-mode path field visible). The Find/Replace fields already show a label + caret
+  inline; styling them as the same bordered boxes is a consistency follow-up. Spec:
+  `specs/018-field-affordance-help/`.
+
 ### Boxed dialog buttons for interactive/list dialogs (follow-up to feature 016)
 - **Issue**: #38 (`follow-up`)
 - **Status**: Open (deferred from feature 016, branch `016-dialog-buttons`)

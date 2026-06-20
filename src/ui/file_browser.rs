@@ -405,8 +405,9 @@ struct BrowserLayout {
     /// Header (path) row and footer (hints) row.
     header_row: u16,
     footer_row: u16,
-    /// Filename input row (Save mode only).
-    filename_row: u16,
+    /// Feature 018: row of the input-field label, and the bordered field box.
+    field_label_row: u16,
+    field_box: Rect,
 }
 
 fn compute_layout(area: Rect, mode: BrowseMode) -> BrowserLayout {
@@ -423,14 +424,14 @@ fn compute_layout(area: Rect, mode: BrowseMode) -> BrowserLayout {
 
     let header_row = inner_top;
     let footer_row = inner_top + inner_h.saturating_sub(1);
-    // Save reserves one extra row (above the footer) for the filename field.
-    let (filename_row, reserved_below) = match mode {
-        BrowseMode::Save => (footer_row.saturating_sub(1), 2u16),
-        BrowseMode::Open => (footer_row, 1u16),
-    };
+    // Feature 018: both modes reserve a labeled, bordered input box above the
+    // footer — a label row + a 3-row box. The list shrinks to fit.
+    let _ = mode; // both modes use the same field region now
+    let field_box_y = footer_row.saturating_sub(3);
+    let field_box = Rect::new(inner_left, field_box_y, inner_width, 3);
+    let field_label_row = field_box_y.saturating_sub(1);
     let list_top = header_row + 1;
-    // Rows between header and the reserved-below region.
-    let list_rows = inner_h.saturating_sub(1 + reserved_below);
+    let list_rows = field_label_row.saturating_sub(list_top);
 
     BrowserLayout {
         box_rect,
@@ -440,7 +441,8 @@ fn compute_layout(area: Rect, mode: BrowseMode) -> BrowserLayout {
         inner_width,
         header_row,
         footer_row,
-        filename_row,
+        field_label_row,
+        field_box,
     }
 }
 
@@ -583,21 +585,51 @@ impl<'a> Widget for FileBrowserWidget<'a> {
             );
         }
 
-        // Filename field (Save mode).
-        if b.mode == BrowseMode::Save {
-            let label = format!("Name: {}", b.filename);
-            put(
-                buf,
-                l.inner_left,
-                l.filename_row,
-                &truncate_to_width(&label, iw),
-                base.add_modifier(Modifier::BOLD),
-            );
-        }
+        // Feature 018: labeled, bordered input box (both modes) so it's clear the
+        // field is typeable. Save = filename; Open = jump-to path.
+        let field_label = match b.mode {
+            BrowseMode::Save => "Name:",
+            BrowseMode::Open => "Go to path:",
+        };
+        put(
+            buf,
+            l.inner_left,
+            l.field_label_row,
+            field_label,
+            base.add_modifier(Modifier::BOLD),
+        );
+        Block::default()
+            .borders(Borders::ALL)
+            .style(base)
+            .render(l.field_box, buf);
+        // Field text with an always-visible caret, right-anchored so the caret
+        // (end of text) stays visible when the value is long.
+        let box_inner_w = l.field_box.width.saturating_sub(2);
+        let text_with_caret = format!("{}▏", b.filename);
+        let shown = {
+            let total: u16 = text_with_caret.graphemes(true).map(grapheme_width).sum();
+            if total <= box_inner_w {
+                text_with_caret
+            } else {
+                // Keep the tail (caret + latest chars) visible.
+                let mut acc = 0u16;
+                let mut tail = String::new();
+                for g in text_with_caret.graphemes(true).rev() {
+                    let w = grapheme_width(g);
+                    if acc + w > box_inner_w {
+                        break;
+                    }
+                    acc += w;
+                    tail.insert_str(0, g);
+                }
+                tail
+            }
+        };
+        put(buf, l.field_box.x + 1, l.field_box.y + 1, &shown, base);
 
         // Footer hints.
         let hints = match b.mode {
-            BrowseMode::Open => "↑↓ move  Enter open  ← parent  Esc cancel",
+            BrowseMode::Open => "↑↓ move  type path  Enter open  ← parent  Esc cancel",
             BrowseMode::Save => "↑↓ move  type name  Enter save  ← parent  Esc cancel",
         };
         put(
@@ -629,6 +661,49 @@ mod tests {
         fs::write(base.join("alpha.txt"), b"alpha\n").unwrap();
         fs::write(base.join(".hidden"), b"h\n").unwrap();
         base
+    }
+
+    // Feature 018: the editable field renders as a labeled, bordered box with a
+    // caret in BOTH modes (Open's path field was previously invisible).
+    fn render_browser(b: &FileBrowser) -> String {
+        use ratatui::{buffer::Buffer, layout::Rect};
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        FileBrowserWidget {
+            browser: b,
+            theme: crate::ui::theme::theme_by_name("classic"),
+        }
+        .render(area, &mut buf);
+        buf.content().iter().map(|c| c.symbol()).collect()
+    }
+
+    #[test]
+    fn open_mode_shows_path_input_box_with_caret() {
+        let base = temp_tree("open_field");
+        let b = FileBrowser::open(base.clone(), BrowseMode::Open);
+        let s = render_browser(&b);
+        assert!(
+            s.contains("Go to path:"),
+            "Open mode shows a path field label"
+        );
+        assert!(s.contains('▏'), "field shows a caret");
+        assert!(
+            s.contains('┌') && s.contains('│'),
+            "field is a bordered box"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn save_mode_shows_name_input_box() {
+        let base = temp_tree("save_field");
+        let mut b = FileBrowser::open(base.clone(), BrowseMode::Save);
+        b.filename = "report.txt".to_string();
+        let s = render_browser(&b);
+        assert!(s.contains("Name:"), "Save mode shows a name field label");
+        assert!(s.contains("report.txt"), "typed filename shown in the box");
+        assert!(s.contains('┌'), "field is a bordered box");
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

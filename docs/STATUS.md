@@ -8,6 +8,8 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F018-US1 | File dialog: bordered, labeled input box with caret (Open path field now visible) | Complete |
+| F018-US2 | Help redesigned as a grouped, scrollable Key\|Action table (no truncation) | Complete |
 | F017-US1 | Selected text rendered with a highlight (reverse video); Select All shows it | Complete |
 | F017-US2 | Shift+Arrow/Home/End keyboard selection; typing/paste replaces; Copy/Cut act on it | Complete |
 | F017-US3 | Mouse press-drag-release selects; single click clears | Complete |
