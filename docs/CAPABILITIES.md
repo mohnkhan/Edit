@@ -89,6 +89,7 @@ replaces it; `Backspace`/`Delete` delete it; moving without Shift (or a single c
 | `Ctrl+H` | Open the interactive Replace dialog (find + replace-with fields, each a bordered, labeled input box; caret in the focused field) |
 | `F3` | Find next (wraps) |
 | `F2` | Find previous (wraps) |
+| `Ctrl+G` | Go to Line — type a 1-based line number and `Enter` to jump there (Search ▸ Go to Line); out-of-range clamps, `Esc` cancels |
 | `Tab` | Replace dialog: switch between the find and replace fields |
 | `Enter` | Find: search / advance · Replace: replace current match and advance |
 | `Ctrl+A` | Replace dialog: Replace All (Select-All everywhere else) |
@@ -182,7 +183,7 @@ viewport only (the cursor stays put); a press that starts on a scrollbar never s
 
 Built-in accelerators follow DOS/standard convention — File: **N**ew, **O**pen, **S**ave, Save **A**s,
 Save As **E**ncoding, e**X**it; Edit: **U**ndo, **R**edo, **C**ut, C**o**py, **P**aste, **S**elect All;
-Search: **F**ind, Find **N**ext, Find **P**rev, Find **R**eplace; View: **S**plit View, **N**ext Buffer,
+Search: **F**ind, Find **N**ext, Find **P**rev, Find **R**eplace, **G**o to Line; View: **S**plit View, **N**ext Buffer,
 **P**rev Buffer, **T**oggle Line Nos, Soft **W**rap; Options: Toggle **H**ighlight, **P**lugins;
 Help: **H**elp, **A**bout.
 

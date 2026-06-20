@@ -224,6 +224,11 @@ pub struct App {
     /// `Some` while an interactive Find/Replace dialog is open (modal).
     pub pending_find_replace: Option<FindReplaceDialog>,
 
+    // ── Feature 025: Go-to-Line prompt ────────────────────────────────────────
+    /// `Some(digits)` while the Go-to-Line prompt is open (modal); holds the
+    /// in-progress 1-based line number being typed.
+    pub pending_goto_line: Option<String>,
+
     // ── Feature 016: focused dialog button ────────────────────────────────────
     /// Index of the focused button in the currently open confirm/dismiss dialog.
     /// Only one modal is open at a time, so a single field suffices. Reset to the
@@ -433,6 +438,7 @@ impl App {
             watcher_notice,
             pending_revert_confirm: None,
             pending_find_replace: None,
+            pending_goto_line: None,
             dialog_focus: 0,
             dialog_focus_init: false,
             drag_anchor: None,
@@ -630,8 +636,8 @@ impl App {
                     target: ScrollTarget::Plugin,
                 });
             }
-        } else if self.pending_find_replace.is_some() {
-            // Find/Replace has no scrollable content.
+        } else if self.pending_find_replace.is_some() || self.pending_goto_line.is_some() {
+            // Find/Replace and Go-to-Line have no scrollable content.
         } else {
             // Editor — the pane under the cursor column.
             let editor_area = Rect::new(0, 1, w, h.saturating_sub(2));
@@ -1061,6 +1067,34 @@ impl App {
             return Ok(());
         }
 
+        // Feature 025 — Go-to-Line prompt intercept: digits edit the number,
+        // Enter jumps (clamped) to the line start, Esc cancels; everything else is
+        // consumed so the buffer is never modified while the prompt is open.
+        if self.pending_goto_line.is_some() {
+            match &action {
+                Action::InsertChar(c) if c.is_ascii_digit() => {
+                    self.pending_goto_line.as_mut().unwrap().push(*c);
+                }
+                Action::Backspace => {
+                    self.pending_goto_line.as_mut().unwrap().pop();
+                }
+                Action::InsertNewline => {
+                    let entry = self.pending_goto_line.take().unwrap_or_default();
+                    if let Ok(n) = entry.parse::<usize>() {
+                        let count = self.buffers[self.active_idx].rope.line_count();
+                        let line1 = n.clamp(1, count.max(1));
+                        self.set_cursor_lc(line1 - 1, 0);
+                    }
+                    // Empty / non-numeric → closed with no movement.
+                }
+                Action::MenuClose | Action::Quit => {
+                    self.pending_goto_line = None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // T012 — Encoding-dialog intercept: when the dialog is open, only
         // Up/Down (navigate), Enter (confirm), and Esc/MenuClose (cancel) are
         // processed; all other actions are silently consumed.
@@ -1356,6 +1390,17 @@ impl App {
             Action::FindNext => self.find_next(),
             Action::FindPrev => self.find_prev(),
             Action::FindReplace => self.open_replace_dialog(),
+            // Feature 025: open the Go-to-Line prompt (only when no other modal is
+            // already open; the intercept above handles it once open).
+            Action::GoToLine => {
+                if self.open_button_dialog().is_none()
+                    && self.interactive_dialog().is_none()
+                    && self.pending_help.is_none()
+                    && self.pending_goto_line.is_none()
+                {
+                    self.pending_goto_line = Some(String::new());
+                }
+            }
             // Search-option toggles and Tab focus are only meaningful inside an
             // open Find/Replace dialog (handled by the intercept above); inert here.
             Action::ToggleSearchCase
@@ -3610,8 +3655,8 @@ impl App {
                         self.plugin_manager_cursor.saturating_sub(step)
                     };
                 }
-            } else if self.pending_find_replace.is_some() {
-                // Nothing scrollable in the Find/Replace dialog — ignore.
+            } else if self.pending_find_replace.is_some() || self.pending_goto_line.is_some() {
+                // Find/Replace and Go-to-Line have no scrollable content — ignore.
             } else {
                 // Editor: ignore the menu-bar row (0) and status-bar row (last).
                 let (w, term_rows) = self.terminal_size;
@@ -3786,6 +3831,7 @@ impl App {
             || self.pending_plugin_manager
             || self.pending_revert_confirm.is_some()
             || self.pending_find_replace.is_some()
+            || self.pending_goto_line.is_some()
         {
             return Ok(());
         }
@@ -4347,6 +4393,33 @@ mod tests {
                 "exactly one focused button rendered (setup {setup})"
             );
         }
+    }
+
+    // ── Feature 025 — Go-to-Line prompt render ────────────────────────────────
+
+    // T008/L1: the Go-to-Line overlay renders at a normal and a tiny terminal
+    // without panicking, and shows its title at a normal size.
+    #[test]
+    fn goto_line_overlay_renders_without_panic() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let render = |w: u16, h: u16| -> String {
+            let mut a = make_app();
+            a.terminal_size = (w, h);
+            a.pending_goto_line = Some("42".to_string());
+            let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+            t.draw(|f| a.render(f)).unwrap();
+            t.backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol().to_string())
+                .collect()
+        };
+        let big = render(80, 24);
+        assert!(big.contains("Go to Line"), "title shown at a normal size");
+        // Tiny terminal must not panic.
+        let _ = render(10, 3);
+        let _ = render(4, 2);
     }
 
     // ── Feature 023 — mouse-wheel editor scroll ──────────────────────────────
