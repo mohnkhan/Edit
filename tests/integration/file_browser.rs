@@ -119,13 +119,14 @@ fn mouse_double_click_opens_file() {
 
     let mut app = make_app();
     app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
-    // Layout for 80x24, Open mode: box 64x20 at (8,2); list starts at row 4.
-    // entries: index 0 = "..", index 1 = "click.txt" → row 5.
+    // Layout for 80x24, Open mode (feature 020 grew the box to 64x24 at (8,0) to
+    // fit the button row): list starts at row 2.
+    // entries: index 0 = "..", index 1 = "click.txt" → row 3.
     let n_before = app.buffers.len();
     let me = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: 10,
-        row: 5,
+        row: 3,
         modifiers: KeyModifiers::NONE,
     };
     // First click only selects (browser stays open, no file opened).
@@ -166,11 +167,11 @@ fn mouse_double_click_folder_enters_then_stays_open() {
 
     let mut app = make_app();
     app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
-    // entries: index 0 = "..", index 1 = "sub/" → row 5.
+    // entries: index 0 = "..", index 1 = "sub/" → row 3 (box now 64x24 at (8,0)).
     let me = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: 10,
-        row: 5,
+        row: 3,
         modifiers: KeyModifiers::NONE,
     };
     let n_before = app.buffers.len();

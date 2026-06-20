@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F020-US1 | Interactive dialogs (encoding, plugin mgr, Find/Replace, file browser): mouse-clickable boxed buttons | Complete |
+| F020-US2 | Combined list/field + button focus ring; Tab/Shift+Tab cycle; Enter/Space activate | Complete |
+| F020-US3 | All existing dialog keys preserved (list nav, toggles, match nav, Esc) — zero regression | Complete |
 | F019-US1 | Find dialog: search field rendered as a bordered, labeled input box with a caret | Complete |
 | F019-US2 | Replace dialog: both fields as bordered boxes; caret only in the focused field | Complete |
 | F019-US3 | All existing Find/Replace behavior (editing, Tab, toggles, count, Esc) preserved | Complete |
@@ -19,7 +22,7 @@
 | F016-US1 | Mouse-click dialog buttons (confirm/dismiss dialogs); outside-click cancels | Complete |
 | F016-US2 | Boxed buttons with one focused (borders + ▶ marker) | Complete |
 | F016-US3 | Tab/Shift+Tab order + Enter/Space activation; safe default focus; letter shortcuts intact | Complete |
-| F016 (defer) | Boxed buttons for encoding/plugin-manager/Find-Replace/file-browser dialogs | Deferred (#38) |
+| F016 (defer) | Boxed buttons for encoding/plugin-manager/Find-Replace/file-browser dialogs | Complete (feature 020) |
 | F015-US1 | Interactive Find dialog (Ctrl+F): type term, Enter to search, highlight matches, jump to current, "X of Y" | Complete |
 | F015-US2 | Find Next/Prev (F3/F2) cycle matches with wrap; current-match highlight distinct | Complete |
 | F015-US3 | Replace dialog (Ctrl+H): Replace current (Enter) + Replace All (Ctrl+A), undoable, reports count | Complete |

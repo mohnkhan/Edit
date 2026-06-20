@@ -130,6 +130,20 @@ impl FindReplaceDialog {
         }
     }
 
+    /// Set focus to a specific field (Feature 020 focus ring), clamping the caret
+    /// to the newly focused field. Replacement is only valid in Replace mode.
+    pub fn set_focus(&mut self, field: DialogField) {
+        if field == DialogField::Replacement && self.mode != DialogMode::Replace {
+            return;
+        }
+        if self.focus == field {
+            return;
+        }
+        self.focus = field;
+        let len = self.focused().graphemes(true).count();
+        self.caret = self.caret.min(len);
+    }
+
     /// Switch focus between the query and replacement fields (Replace mode only),
     /// clamping the caret to the newly focused field.
     pub fn switch_focus(&mut self) {
@@ -186,11 +200,14 @@ pub struct EncodingSelectDialog {
     pub cursor_idx: usize,
     /// Active color theme.
     pub theme: &'static Theme,
+    /// Feature 020: focused boxed button (`Some(i)`), or `None` when the list is
+    /// focused. Buttons are `OK` (0) / `Cancel` (1).
+    pub button_focus: Option<usize>,
 }
 
 impl Widget for EncodingSelectDialog {
     fn render(self, area: Rect, buf: &mut TuiBuffer) {
-        let dialog_area = centered_rect(40, 11, area);
+        let dialog_area = encoding_dialog_rect(area);
 
         Clear.render(dialog_area, buf);
 
@@ -242,12 +259,37 @@ impl Widget for EncodingSelectDialog {
         );
 
         paragraph.render(dialog_area, buf);
+
+        // Feature 020: boxed OK / Cancel buttons in the bottom interior rows.
+        // `usize::MAX` highlights none (used when the list, not a button, is focused).
+        let labels = ["OK", "Cancel"];
+        let rects = crate::ui::buttons::button_rects(dialog_area, &labels);
+        crate::ui::buttons::render_buttons(
+            buf,
+            &rects,
+            &labels,
+            self.button_focus.unwrap_or(usize::MAX),
+            self.theme,
+        );
     }
 }
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+/// Feature 020: outer rect of the encoding-select dialog, grown to fit a boxed
+/// button row (OK / Cancel). Shared by the renderer ([`EncodingSelectDialog`])
+/// and the app's mouse hit-testing so clicks land on the drawn buttons.
+/// Base box is 40×11 (7 options + blank + hint + 2 borders); +4 rows reserve a
+/// 1-row gap and a 3-row button box.
+pub fn encoding_dialog_rect(area: Rect) -> Rect {
+    centered_rect(ENCODING_DIALOG_W, ENCODING_DIALOG_H, area)
+}
+
+/// Width/height of the encoding dialog (incl. the button row).
+pub(crate) const ENCODING_DIALOG_W: u16 = 40;
+pub(crate) const ENCODING_DIALOG_H: u16 = 15;
 
 /// Compute a centered [`Rect`] of size `(w, h)` within `area`.
 fn centered_rect(w: u16, h: u16, area: Rect) -> Rect {
@@ -338,6 +380,29 @@ mod tests {
         assert_eq!(d.caret, 3);
     }
 
+    // Feature 020 (T017): the encoding dialog grows to fit the button row and is
+    // panic-free with non-empty button rects at a normal size; tiny terminals
+    // clamp without panicking.
+    #[test]
+    fn encoding_dialog_rect_grows_for_buttons() {
+        let area = Rect::new(0, 0, 80, 24);
+        let r = encoding_dialog_rect(area);
+        assert_eq!(r.width, ENCODING_DIALOG_W);
+        assert_eq!(r.height, ENCODING_DIALOG_H);
+        let rects = crate::ui::buttons::button_rects(r, &["OK", "Cancel"]);
+        assert_eq!(rects.len(), 2, "OK/Cancel both fit");
+        // Buttons sit inside the dialog's bottom interior rows.
+        assert!(rects[0].y >= r.y && rects[0].y + rects[0].height <= r.y + r.height);
+    }
+
+    #[test]
+    fn encoding_dialog_rect_tiny_terminal_no_panic() {
+        let r = encoding_dialog_rect(Rect::new(0, 0, 10, 5));
+        // Clamped to the terminal; button layout must not panic (may be empty).
+        assert!(r.width <= 10 && r.height <= 5);
+        let _ = crate::ui::buttons::button_rects(r, &["OK", "Cancel"]);
+    }
+
     #[test]
     fn test_encoding_options_first_is_utf8() {
         assert_eq!(ENCODING_OPTIONS[0].0, EncodingId::Utf8);
@@ -359,6 +424,7 @@ mod tests {
                 let dialog = EncodingSelectDialog {
                     cursor_idx: 0,
                     theme: theme_by_name("classic"),
+                    button_focus: None,
                 };
                 frame.render_widget(dialog, frame.size());
             })
@@ -374,6 +440,7 @@ mod tests {
                 let dialog = EncodingSelectDialog {
                     cursor_idx: 2,
                     theme: theme_by_name("classic"),
+                    button_focus: None,
                 };
                 frame.render_widget(dialog, frame.size());
             })

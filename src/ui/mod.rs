@@ -239,14 +239,13 @@ impl Ui {
             // Feature 019: each field is a labeled, bordered 3-row input box,
             // matching the file-browser input box from feature 018. Layout:
             // (label row + 3-row box) per field, then an options row and a hint row.
-            let n_fields: u16 = if is_replace { 2 } else { 1 };
-            let content_h = n_fields * 4 + 2; // fields + options + hint
-            let dw = 70u16.min(size.width.max(1));
-            let dh = (content_h + 2).min(size.height.max(1)); // +2 outer borders
-            let dx = size.x + size.width.saturating_sub(dw) / 2;
-            // Place near the top so it doesn't hide the current match.
-            let dy = size.y + 1;
-            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
+            // Feature 020: the outer rect grows by a button row (computed in the
+            // shared `find_replace_rect`); content stops above the button area.
+            let dialog_area = find_replace_rect(d, size);
+            let dx = dialog_area.x;
+            let dy = dialog_area.y;
+            let dw = dialog_area.width;
+            let dh = dialog_area.height;
 
             frame.render_widget(ratatui::widgets::Clear, dialog_area);
             frame.render_widget(
@@ -259,7 +258,8 @@ impl Ui {
 
             let inner_x = dx + 1;
             let inner_w = dw.saturating_sub(2);
-            let bottom = dy + dh.saturating_sub(1); // first bottom-border row
+            // Reserve the bottom 4 interior rows for the boxed button row.
+            let bottom = (dy + dh).saturating_sub(1).saturating_sub(4); // first reserved row
             let mut row = dy + 1;
 
             render_find_field(
@@ -305,6 +305,17 @@ impl Ui {
                     ratatui::layout::Rect::new(inner_x, row, inner_w, 1),
                 );
             }
+
+            // Feature 020: boxed buttons (mode-dependent) in the bottom rows.
+            let labels = app.interactive_button_labels();
+            let rects = crate::ui::buttons::button_rects(dialog_area, &labels);
+            crate::ui::buttons::render_buttons(
+                frame.buffer_mut(),
+                &rects,
+                &labels,
+                app.interactive_focus_is_button().unwrap_or(usize::MAX),
+                app.theme,
+            );
         }
 
         // T015 — Encoding select dialog overlay.
@@ -313,6 +324,7 @@ impl Ui {
             let dialog = EncodingSelectDialog {
                 cursor_idx,
                 theme: app.theme,
+                button_focus: app.interactive_focus_is_button(),
             };
             frame.render_widget(dialog, size);
         }
@@ -323,6 +335,7 @@ impl Ui {
             let widget = FileBrowserWidget {
                 browser,
                 theme: app.theme,
+                button_focus: app.interactive_focus_is_button(),
             };
             frame.render_widget(widget, size);
         }
@@ -332,14 +345,17 @@ impl Ui {
             render_help_overlay(frame, app, screen, size);
         }
 
-        // Feature 008 — Plugin manager dialog.
+        // Feature 008 — Plugin manager dialog (Feature 020: + boxed Close button).
         if app.pending_plugin_manager {
             let body = crate::ui::plugin_manager::manager_body(
                 &app.plugin_host,
                 app.plugin_manager_cursor,
             );
-            let dh = (crate::ui::plugin_manager::line_count(&body) + 2).min(size.height);
-            let dw = 70u16.min(size.width);
+            let dialog_area = crate::ui::plugin_manager::manager_rect(
+                &app.plugin_host,
+                app.plugin_manager_cursor,
+                size,
+            );
             let dialog = ratatui::widgets::Paragraph::new(body)
                 .style(
                     ratatui::style::Style::default()
@@ -351,13 +367,38 @@ impl Ui {
                         .title("Plugins")
                         .borders(ratatui::widgets::Borders::ALL),
                 );
-            let dx = size.x + size.width.saturating_sub(dw) / 2;
-            let dy = size.y + size.height.saturating_sub(dh) / 2;
-            let dialog_area = ratatui::layout::Rect::new(dx, dy, dw, dh);
             frame.render_widget(ratatui::widgets::Clear, dialog_area);
             frame.render_widget(dialog, dialog_area);
+            // Boxed Close button in the bottom interior rows.
+            let labels = app.interactive_button_labels();
+            let rects = crate::ui::buttons::button_rects(dialog_area, &labels);
+            crate::ui::buttons::render_buttons(
+                frame.buffer_mut(),
+                &rects,
+                &labels,
+                app.interactive_focus_is_button().unwrap_or(usize::MAX),
+                app.theme,
+            );
         }
     }
+}
+
+/// Feature 020: outer rect of the Find/Replace dialog, grown to fit a boxed
+/// button row (Find / [Replace / Replace All] / Close). Shared by the renderer
+/// and the app's mouse hit-testing so clicks land on the drawn buttons.
+pub fn find_replace_rect(
+    d: &crate::ui::dialog::FindReplaceDialog,
+    area: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    use crate::ui::dialog::DialogMode;
+    let n_fields: u16 = if d.mode == DialogMode::Replace { 2 } else { 1 };
+    let content_h = n_fields * 4 + 2; // fields + options + hint
+    let dw = 70u16.min(area.width.max(1));
+    // +2 outer borders, +4 for the button row (1-row gap + 3-row box).
+    let dh = (content_h + 2 + 4).min(area.height.max(1));
+    let dx = area.x + area.width.saturating_sub(dw) / 2;
+    let dy = area.y + 1; // near the top so it doesn't hide the current match
+    ratatui::layout::Rect::new(dx, dy, dw, dh)
 }
 
 /// Feature 019: build the in-box display string for a Find/Replace field.

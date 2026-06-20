@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 020: Boxed buttons + focus ring for the interactive/list dialogs
+
+#### Added
+
+- **Boxed buttons on the four interactive dialogs** — the encoding selector (`F12`) gains **OK /
+  Cancel**, the plugin manager (Options › Plugins) gains **Close**, Find/Replace (`Ctrl+F` / `Ctrl+H`)
+  gains **Find / [Replace / Replace All] / Close** (mode-dependent), and the file browser (`Ctrl+O` /
+  Save As) gains **Open** (or **Save**) / **Cancel**. Buttons reuse the same boxed style as the
+  feature-016 confirm dialogs.
+- **Combined focus ring** — each dialog now has one focus ring: the list/field group is the first stop
+  and each button is a further stop. `Tab` / `Shift+Tab` cycle the whole ring (wrapping), `Enter` /
+  `Space` activate the focused button, and a left-click activates the clicked button directly (for the
+  file browser, buttons take precedence over the entry hit-test).
+
+#### Notes
+
+- Affordance/navigation only — every button maps onto an action the dialog already performed; no new
+  actions. While the list/field is focused, all existing keys behave exactly as before (`Up/Down`,
+  plugin `Space` toggle, Find/Replace typing, `Alt+C/A/R/W`, `Ctrl+A`, `F3/F2`); `Esc` still closes
+  from any focus. Dialogs open focused on the primary control. Resolves the feature-016 follow-up
+  (issue #38) — no dialog-button deferrals remain.
+
 ### feature 019: Bordered-box styling for the Find/Replace fields
 
 #### Added

@@ -104,6 +104,22 @@ path = "tests/integration/selection.rs"
 name = "file_browser"
 path = "tests/integration/file_browser.rs"
 
+[[test]]
+name = "dialog_encoding_buttons"
+path = "tests/integration/dialog_encoding_buttons.rs"
+
+[[test]]
+name = "dialog_plugin_buttons"
+path = "tests/integration/dialog_plugin_buttons.rs"
+
+[[test]]
+name = "dialog_browser_buttons"
+path = "tests/integration/dialog_browser_buttons.rs"
+
+[[test]]
+name = "dialog_findreplace_buttons"
+path = "tests/integration/dialog_findreplace_buttons.rs"
+
 [[bench]]
 name = "startup"
 harness = false
