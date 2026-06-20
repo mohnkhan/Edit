@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F024-US1 | Clicking a scrollbar track pages the view toward the click (all surfaces) | Complete |
+| F024-US2 | Dragging the thumb scrolls proportionally; editor drag is viewport-only (cursor unchanged) | Complete |
+| F024-US3 | Scrollbar gestures don't disturb text selection (017), wheel (023), buttons, or keyboard | Complete |
 | F023-US1 | Mouse wheel scrolls the editor viewport (3 lines/notch, cursor unchanged, bounded) | Complete |
 | F023-US2 | Mouse wheel scrolls the file browser, Help/About, and encoding/plugin dialogs (modal wins) | Complete |
 | F023-US3 | Wheel handling leaves click/drag-selection and keyboard scrolling unchanged | Complete |

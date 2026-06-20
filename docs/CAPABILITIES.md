@@ -176,6 +176,10 @@ The mouse wheel scrolls whatever is under the cursor (or the open dialog/overlay
 and the encoding/plugin lists. Scrolling is bounded and the scrollbars track it. The wheel does not
 change click/drag or keyboard behavior; a wheel over the menu/status bar is ignored.
 
+The scrollbars are also **clickable and draggable** (Feature 024): click the track above/below the thumb
+to page by one viewport, or drag the thumb to scroll proportionally. In the editor this scrolls the
+viewport only (the cursor stays put); a press that starts on a scrollbar never selects text.
+
 Built-in accelerators follow DOS/standard convention — File: **N**ew, **O**pen, **S**ave, Save **A**s,
 Save As **E**ncoding, e**X**it; Edit: **U**ndo, **R**edo, **C**ut, C**o**py, **P**aste, **S**elect All;
 Search: **F**ind, Find **N**ext, Find **P**rev, Find **R**eplace; View: **S**plit View, **N**ext Buffer,

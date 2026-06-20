@@ -432,6 +432,38 @@ impl FileBrowser {
         compute_layout(area, self.mode).box_rect
     }
 
+    /// Feature 024: the interactive vertical-scrollbar region for the listing, or
+    /// `None` when the list fits. Returns `(bar_rect, content, viewport, offset)`
+    /// where `bar_rect` is the single drawn column (matching the renderer).
+    pub fn list_scrollbar(&self, area: Rect) -> Option<(Rect, usize, usize, usize)> {
+        let l = compute_layout(area, self.mode);
+        let content = self.entries.len();
+        let viewport = l.list_rows as usize;
+        if content <= viewport || l.list_rows == 0 || l.inner_width == 0 {
+            return None;
+        }
+        let col = l.inner_left + l.inner_width - 1;
+        Some((
+            Rect::new(col, l.list_top, 1, l.list_rows),
+            content,
+            viewport,
+            self.scroll,
+        ))
+    }
+
+    /// Feature 024: set the listing scroll offset directly (clamped), keeping the
+    /// selection within the visible window. Used by scrollbar drag/click.
+    pub fn set_scroll(&mut self, offset: usize, viewport: usize) {
+        let max = self.entries.len().saturating_sub(viewport);
+        self.scroll = offset.min(max);
+        // Keep the highlighted row within the visible window.
+        if self.selected < self.scroll {
+            self.selected = self.scroll;
+        } else if viewport > 0 && self.selected >= self.scroll + viewport {
+            self.selected = self.scroll + viewport - 1;
+        }
+    }
+
     /// Map a terminal click to an entry, an inside-but-inert region, or outside.
     pub fn hit_test(&self, area: Rect, col: u16, row: u16) -> BrowserHit {
         let l = compute_layout(area, self.mode);
