@@ -345,6 +345,30 @@ impl Ui {
             frame.render_widget(dialog, size);
         }
 
+        // Feature 025 — Go-to-Line prompt overlay.
+        if let Some(ref entry) = app.pending_goto_line {
+            let base = ratatui::style::Style::default()
+                .fg(app.theme.menubar_fg)
+                .bg(app.theme.menubar_bg);
+            let body = format!("Go to line: {entry}▏");
+            // A compact centered box; width fits the prompt + padding, clamped.
+            let dw = (body.len() as u16 + 4).clamp(20, size.width.max(1));
+            let dh = 3u16.min(size.height.max(1));
+            let dx = size.x + size.width.saturating_sub(dw) / 2;
+            let dy = size.y + size.height.saturating_sub(dh) / 2;
+            let area = ratatui::layout::Rect::new(dx, dy, dw, dh);
+            frame.render_widget(ratatui::widgets::Clear, area);
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new(body).style(base).block(
+                    ratatui::widgets::Block::default()
+                        .title("Go to Line")
+                        .borders(ratatui::widgets::Borders::ALL)
+                        .style(base),
+                ),
+                area,
+            );
+        }
+
         // Feature 012 — File browser overlay (Open / Save As).
         if let Some(ref browser) = app.file_browser {
             use crate::ui::file_browser::FileBrowserWidget;

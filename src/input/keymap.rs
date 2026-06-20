@@ -31,6 +31,8 @@ pub enum Action {
     FindNext,
     FindPrev,
     FindReplace,
+    /// Feature 025: open the Go-to-Line prompt (Ctrl+G / Search ▸ Go to Line).
+    GoToLine,
     /// Feature 015: toggle search options — handled only while a Find/Replace
     /// dialog is open; inert no-ops otherwise.
     ToggleSearchCase,
@@ -147,7 +149,8 @@ impl KeybindingMap {
         map.insert("F3".to_string(), Action::FindNext);
         map.insert("F2".to_string(), Action::FindPrev);
         map.insert("Ctrl+H".to_string(), Action::FindReplace);
-        // Feature 015: in-dialog search-option toggles (free Alt keys).
+        map.insert("Ctrl+G".to_string(), Action::GoToLine); // Feature 025
+                                                            // Feature 015: in-dialog search-option toggles (free Alt keys).
         map.insert("Alt+C".to_string(), Action::ToggleSearchCase);
         map.insert("Alt+A".to_string(), Action::ToggleSearchWrap);
         map.insert("Alt+R".to_string(), Action::ToggleSearchRegex);
@@ -280,6 +283,7 @@ fn plugin_action_from_str(s: &str) -> Option<Action> {
         "find" => Some(Action::Find),
         "findnext" => Some(Action::FindNext),
         "findprev" => Some(Action::FindPrev),
+        "gotoline" => Some(Action::GoToLine),
         "selectall" => Some(Action::SelectAll),
         _ => None,
     }
@@ -314,6 +318,7 @@ fn action_from_str(s: &str) -> Option<Action> {
         "FindNext" => Some(Action::FindNext),
         "FindPrev" => Some(Action::FindPrev),
         "FindReplace" => Some(Action::FindReplace),
+        "GoToLine" => Some(Action::GoToLine),
         "Menu" => Some(Action::Menu),
         "MenuClose" => Some(Action::MenuClose),
         "MenuFile" => Some(Action::MenuFile),

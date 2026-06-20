@@ -137,6 +137,11 @@ static SEARCH_MENU: &[MenuItem] = &[
         action: Action::FindReplace,
         mnemonic: Some('r'),
     },
+    MenuItem {
+        label: "Go to Line",
+        action: Action::GoToLine,
+        mnemonic: Some('g'),
+    },
 ];
 
 /// View menu items.

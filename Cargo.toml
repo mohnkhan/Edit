@@ -140,6 +140,10 @@ path = "tests/integration/mouse_wheel.rs"
 name = "scrollbar_interaction"
 path = "tests/integration/scrollbar_interaction.rs"
 
+[[test]]
+name = "go_to_line"
+path = "tests/integration/go_to_line.rs"
+
 [[bench]]
 name = "startup"
 harness = false

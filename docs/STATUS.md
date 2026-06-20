@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F025-US1 | Go to Line (Ctrl+G / Search menu): jump the cursor to a typed 1-based line, scrolled into view | Complete |
+| F025-US2 | Out-of-range clamps to first/last; Esc and empty/invalid input never move the cursor | Complete |
+| F025-US3 | Prompt is modal (captures input, one at a time); editing/find-replace/other dialogs unchanged | Complete |
 | F024-US1 | Clicking a scrollbar track pages the view toward the click (all surfaces) | Complete |
 | F024-US2 | Dragging the thumb scrolls proportionally; editor drag is viewport-only (cursor unchanged) | Complete |
 | F024-US3 | Scrollbar gestures don't disturb text selection (017), wheel (023), buttons, or keyboard | Complete |

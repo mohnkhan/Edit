@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 025: Go to Line
+
+#### Added
+
+- **Go to Line** — press `Ctrl+G` (or Search ▸ Go to Line) to open a small prompt, type a 1-based line
+  number, and press Enter to jump the cursor to the start of that line (scrolled into view). `Esc`
+  cancels. Out-of-range numbers clamp to the first/last line; empty or non-numeric input does nothing.
+
+#### Notes
+
+- Navigation only — the prompt captures input (the buffer isn't edited while it's open), it's modal (one
+  dialog at a time, and the editor ignores clicks/wheel/scrollbar gestures under it), and editing /
+  find-replace / other dialogs are unchanged. Reuses the existing cursor-move + scroll-into-view path.
+
 ### feature 024: Interactive (clickable + draggable) scrollbars
 
 #### Added
