@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 014: Undo-to-clean state and Revert to saved
+
+#### Added
+
+- **File ▸ Revert** (menu-only) reloads the active buffer from its last saved version on disk,
+  discarding in-editor changes. It asks for confirmation when there are unsaved changes, is a safe
+  no-op (with a notice) for never-saved buffers, and leaves the buffer untouched if the file can't be
+  read.
+
+#### Fixed
+
+- **Undo back to the saved version now clears `[Modified]`.** The dirty indicator is derived from the
+  undo history (a saved-point marker) instead of being forced on by every edit, so undoing to the
+  saved/opened content shows the buffer as clean and redoing marks it modified again — matching DOS
+  EDIT and standard editors. The marker is invalidated on a divergent edit (undo, then retype), so the
+  buffer is never *falsely* shown clean when its content differs from the saved version.
+
 ### Fixed
 
 - **Mouse clicks in the file browser (and menus) on non-80×24 terminals.** `terminal_size` was only

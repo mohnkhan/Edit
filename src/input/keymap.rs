@@ -14,6 +14,8 @@ pub enum Action {
     SaveAsEncoding,
     Open,
     Close,
+    /// Revert the active buffer to its last saved version on disk (Feature 014).
+    Revert,
     Quit,
 
     // Edit operations
@@ -260,6 +262,7 @@ fn action_from_str(s: &str) -> Option<Action> {
         "SaveAsEncoding" => Some(Action::SaveAsEncoding),
         "Open" => Some(Action::Open),
         "Close" => Some(Action::Close),
+        "Revert" => Some(Action::Revert),
         "Quit" => Some(Action::Quit),
         "Cut" => Some(Action::Cut),
         "Copy" => Some(Action::Copy),
