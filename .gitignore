@@ -23,6 +23,9 @@ Makefile.cmake
 *~
 *.bak
 
+# Generated demo intermediate (rebuilt by `make demo-gif`; only the GIF is committed)
+assets/demo.cast
+
 # OS
 .DS_Store
 Thumbs.db

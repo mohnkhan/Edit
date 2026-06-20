@@ -8,6 +8,7 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F035 | Animated demo GIF (`assets/demo.gif` via `examples/demo_cast.rs` + `make demo-gif`) + README revamp with corrected keybindings | Complete |
 | F034 | Crash-safe line access (cursor clamped before render; `line_slice` panic-safe) + always-on crash backtraces + `make debug-run` | Complete |
 | F033 | Fix: menu dropdown no longer hidden behind the tab bar (z-order) | Complete |
 | F032-US1 | Word-wise cursor movement (Ctrl+Left/Right), grapheme/word-boundary aware, crosses lines | Complete |
