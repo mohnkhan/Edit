@@ -136,6 +136,10 @@ path = "tests/integration/file_dialog_filter.rs"
 name = "mouse_wheel"
 path = "tests/integration/mouse_wheel.rs"
 
+[[test]]
+name = "scrollbar_interaction"
+path = "tests/integration/scrollbar_interaction.rs"
+
 [[bench]]
 name = "startup"
 harness = false

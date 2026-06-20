@@ -64,6 +64,46 @@ enum InteractiveDialog {
     FileBrowser,
 }
 
+/// Feature 024: which scroll offset a scrollbar interaction drives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScrollTarget {
+    EditorV(usize),
+    EditorH(usize),
+    FileBrowser,
+    Help,
+    Encoding,
+    Plugin,
+}
+
+/// Feature 024: a scrollbar's axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScrollAxis {
+    Vertical,
+    Horizontal,
+}
+
+/// Feature 024: a drawn, interactive scrollbar region for the active surface.
+#[derive(Debug, Clone, Copy)]
+struct ScrollbarRegion {
+    rect: ratatui::layout::Rect,
+    axis: ScrollAxis,
+    content: usize,
+    viewport: usize,
+    offset: usize,
+    target: ScrollTarget,
+}
+
+/// Feature 024: an in-progress thumb drag, bound to one surface/axis until release.
+#[derive(Debug, Clone, Copy)]
+struct ScrollbarDrag {
+    target: ScrollTarget,
+    axis: ScrollAxis,
+    track_start: u16,
+    track_len: u16,
+    content: usize,
+    viewport: usize,
+}
+
 /// Char index where the cursor should land after **undo**-ing `op`.
 fn undo_target_idx(op: &EditOp) -> usize {
     match op {
@@ -197,6 +237,10 @@ pub struct App {
     /// Anchor (cursor position at the left-button press in the editor) for a
     /// drag selection; `Some` between press and the drags that follow.
     pub drag_anchor: Option<CursorPos>,
+
+    /// Feature 024: in-progress scrollbar thumb drag; `Some` between a thumb press
+    /// and the button release. While set, mouse drags scroll instead of selecting.
+    scrollbar_drag: Option<ScrollbarDrag>,
 
     // ── Feature 018: Help scroll ──────────────────────────────────────────────
     /// First visible row of the Help cheat-sheet (scroll offset); reset on open.
@@ -392,6 +436,7 @@ impl App {
             dialog_focus: 0,
             dialog_focus_init: false,
             drag_anchor: None,
+            scrollbar_drag: None,
             help_scroll: 0,
             plugin_host,
             pending_plugin_consent,
@@ -514,6 +559,182 @@ impl App {
         } else {
             off.saturating_sub(step)
         };
+    }
+
+    /// Feature 024: the interactive scrollbar regions for the currently-active
+    /// surface (modal wins; else the editor pane under cursor column `col`). Only
+    /// includes a bar when it is actually drawn (content overflows), so the
+    /// interactive region equals the drawn one.
+    fn scrollbar_regions(&self, col: u16, _row: u16) -> Vec<ScrollbarRegion> {
+        use ratatui::layout::Rect;
+        let (w, h) = self.terminal_size;
+        let full = Rect::new(0, 0, w, h);
+        let mut out = Vec::new();
+        if let Some(screen) = self.pending_help {
+            let dw = 64u16.min(w.max(1));
+            let dh = 20u16.min(h.max(1));
+            let dx = w.saturating_sub(dw) / 2;
+            let dy = h.saturating_sub(dh) / 2;
+            let body_rows = (dh as usize).saturating_sub(2 + 1 + 4); // borders + footer + button
+            let content = crate::ui::help_total_lines(screen);
+            if body_rows > 0 && content > body_rows && dw >= 2 {
+                out.push(ScrollbarRegion {
+                    rect: Rect::new(dx + dw - 2, dy + 1, 1, body_rows as u16),
+                    axis: ScrollAxis::Vertical,
+                    content,
+                    viewport: body_rows,
+                    offset: self.help_scroll.min(content),
+                    target: ScrollTarget::Help,
+                });
+            }
+        } else if let Some(idx) = self.pending_encoding_select {
+            let rect = crate::ui::dialog::encoding_dialog_rect(full);
+            let body_rows = (rect.height as usize).saturating_sub(2 + 4);
+            let content = crate::ui::dialog::ENCODING_OPTIONS.len();
+            if body_rows > 0 && content > body_rows && rect.width >= 2 {
+                out.push(ScrollbarRegion {
+                    rect: Rect::new(rect.x + rect.width - 2, rect.y + 1, 1, body_rows as u16),
+                    axis: ScrollAxis::Vertical,
+                    content,
+                    viewport: body_rows,
+                    offset: idx,
+                    target: ScrollTarget::Encoding,
+                });
+            }
+        } else if let Some(fb) = self.file_browser.as_ref() {
+            if let Some((rect, content, viewport, offset)) = fb.list_scrollbar(full) {
+                out.push(ScrollbarRegion {
+                    rect,
+                    axis: ScrollAxis::Vertical,
+                    content,
+                    viewport,
+                    offset,
+                    target: ScrollTarget::FileBrowser,
+                });
+            }
+        } else if self.pending_plugin_manager {
+            let rect = crate::ui::plugin_manager::manager_rect(
+                &self.plugin_host,
+                self.plugin_manager_cursor,
+                full,
+            );
+            let body_rows = (rect.height as usize).saturating_sub(2 + 4);
+            let content = self.plugin_host.registry.instances.len();
+            if body_rows > 0 && content > body_rows && rect.width >= 2 {
+                out.push(ScrollbarRegion {
+                    rect: Rect::new(rect.x + rect.width - 2, rect.y + 1, 1, body_rows as u16),
+                    axis: ScrollAxis::Vertical,
+                    content,
+                    viewport: body_rows,
+                    offset: self.plugin_manager_cursor,
+                    target: ScrollTarget::Plugin,
+                });
+            }
+        } else if self.pending_find_replace.is_some() {
+            // Find/Replace has no scrollable content.
+        } else {
+            // Editor — the pane under the cursor column.
+            let editor_area = Rect::new(0, 1, w, h.saturating_sub(2));
+            let (pane, buf_idx) = if matches!(self.split_mode, crate::ui::SplitMode::Vertical) {
+                let half = editor_area.width / 2;
+                if col >= editor_area.x + half {
+                    let idx = if self.buffers.len() > 1 {
+                        self.active_idx.max(1)
+                    } else {
+                        0
+                    };
+                    (
+                        Rect::new(
+                            editor_area.x + half,
+                            editor_area.y,
+                            editor_area.width - half,
+                            editor_area.height,
+                        ),
+                        idx,
+                    )
+                } else {
+                    (
+                        Rect::new(editor_area.x, editor_area.y, half, editor_area.height),
+                        0,
+                    )
+                }
+            } else {
+                (editor_area, self.active_idx)
+            };
+            let (text, vbar, hbar) = crate::ui::editor_panes(pane, self.soft_wrap);
+            let content_v = if self.soft_wrap {
+                self.wrap_cache
+                    .as_ref()
+                    .map(|c| c.total_visual_rows())
+                    .unwrap_or_else(|| self.buffers[buf_idx].rope.line_count())
+            } else {
+                self.buffers[buf_idx].rope.line_count()
+            };
+            let viewport_v = text.height as usize;
+            if vbar.width > 0 && content_v > viewport_v {
+                out.push(ScrollbarRegion {
+                    rect: vbar,
+                    axis: ScrollAxis::Vertical,
+                    content: content_v,
+                    viewport: viewport_v,
+                    offset: self.buffers[buf_idx].scroll_offset.0,
+                    target: ScrollTarget::EditorV(buf_idx),
+                });
+            }
+            if let Some(hbar) = hbar {
+                let gutter: u16 = if self.config.line_numbers { 4 } else { 0 };
+                let viewport_h = text.width.saturating_sub(gutter) as usize;
+                let content_h = crate::ui::max_visible_line_width(&self.buffers[buf_idx], text);
+                if content_h > viewport_h {
+                    out.push(ScrollbarRegion {
+                        rect: hbar,
+                        axis: ScrollAxis::Horizontal,
+                        content: content_h,
+                        viewport: viewport_h,
+                        offset: self.buffers[buf_idx].scroll_offset.1,
+                        target: ScrollTarget::EditorH(buf_idx),
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// Feature 024: write a new scroll `offset` for `target` (already bounded by
+    /// the caller). Editor targets adjust the viewport only (cursor untouched).
+    fn apply_scroll_target(&mut self, target: ScrollTarget, offset: usize, viewport: usize) {
+        match target {
+            ScrollTarget::EditorV(i) => {
+                let content = if self.soft_wrap {
+                    self.wrap_cache
+                        .as_ref()
+                        .map(|c| c.total_visual_rows())
+                        .unwrap_or_else(|| self.buffers[i].rope.line_count())
+                } else {
+                    self.buffers[i].rope.line_count()
+                };
+                self.buffers[i].scroll_offset.0 = offset.min(content.saturating_sub(1));
+            }
+            ScrollTarget::EditorH(i) => {
+                self.buffers[i].scroll_offset.1 = offset;
+            }
+            ScrollTarget::FileBrowser => {
+                if let Some(fb) = self.file_browser.as_mut() {
+                    fb.set_scroll(offset, viewport);
+                }
+            }
+            ScrollTarget::Help => {
+                self.help_scroll = offset;
+            }
+            ScrollTarget::Encoding => {
+                let n = crate::ui::dialog::ENCODING_OPTIONS.len();
+                self.pending_encoding_select = Some(offset.min(n.saturating_sub(1)));
+            }
+            ScrollTarget::Plugin => {
+                let n = self.plugin_host.registry.instances.len();
+                self.plugin_manager_cursor = offset.min(n.saturating_sub(1));
+            }
+        }
     }
 
     // ── Event loop ───────────────────────────────────────────────────────────
@@ -3308,6 +3529,30 @@ impl App {
             return Ok(());
         };
 
+        // Feature 024: while a scrollbar thumb drag is active, mouse drags scroll
+        // (proportional) instead of selecting text. Released below.
+        if ev.kind == NormalizedMouseKind::Drag && self.scrollbar_drag.is_some() {
+            let d = self.scrollbar_drag.unwrap();
+            let click = match d.axis {
+                ScrollAxis::Vertical => ev.row.saturating_sub(d.track_start),
+                ScrollAxis::Horizontal => ev.col.saturating_sub(d.track_start),
+            } as usize;
+            let off = crate::ui::scrollbar::pos_to_offset(
+                d.track_len as usize,
+                d.content,
+                d.viewport,
+                click,
+            );
+            self.apply_scroll_target(d.target, off, d.viewport);
+            return Ok(());
+        }
+
+        // Feature 024: a button release ends any scrollbar drag.
+        if ev.kind == NormalizedMouseKind::Release {
+            self.scrollbar_drag = None;
+            return Ok(());
+        }
+
         // Feature 017: a left-drag in the editor extends the selection from the
         // anchor set on the preceding press (only when no modal/menu is active).
         if ev.kind == NormalizedMouseKind::Drag && ev.button == MouseButton::Left {
@@ -3388,6 +3633,53 @@ impl App {
 
         // Only left-button presses drive the menu / cursor for now.
         if ev.kind != NormalizedMouseKind::Press || ev.button != MouseButton::Left {
+            return Ok(());
+        }
+
+        // Feature 024: a press on a scrollbar — page on the track, drag on the
+        // thumb. Checked BEFORE the editor click / feature-017 drag-anchor and the
+        // modal entry/button handlers, so a bar press never selects or places the
+        // cursor. Bars occupy reserved cells that don't overlap those targets.
+        for r in self.scrollbar_regions(ev.col, ev.row) {
+            let inside = ev.col >= r.rect.x
+                && ev.col < r.rect.x + r.rect.width
+                && ev.row >= r.rect.y
+                && ev.row < r.rect.y + r.rect.height;
+            if !inside {
+                continue;
+            }
+            let (track_start, click, track_len) = match r.axis {
+                ScrollAxis::Vertical => (r.rect.y, ev.row.saturating_sub(r.rect.y), r.rect.height),
+                ScrollAxis::Horizontal => (r.rect.x, ev.col.saturating_sub(r.rect.x), r.rect.width),
+            };
+            let zone = crate::ui::scrollbar::hit_zone(
+                track_len as usize,
+                r.content,
+                r.viewport,
+                r.offset,
+                click as usize,
+            );
+            let max_off = r.content.saturating_sub(r.viewport);
+            match zone {
+                crate::ui::scrollbar::HitZone::Above => {
+                    let off = r.offset.saturating_sub(r.viewport);
+                    self.apply_scroll_target(r.target, off, r.viewport);
+                }
+                crate::ui::scrollbar::HitZone::Below => {
+                    let off = (r.offset + r.viewport).min(max_off);
+                    self.apply_scroll_target(r.target, off, r.viewport);
+                }
+                crate::ui::scrollbar::HitZone::Thumb => {
+                    self.scrollbar_drag = Some(ScrollbarDrag {
+                        target: r.target,
+                        axis: r.axis,
+                        track_start,
+                        track_len,
+                        content: r.content,
+                        viewport: r.viewport,
+                    });
+                }
+            }
             return Ok(());
         }
 

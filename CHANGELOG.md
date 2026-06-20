@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 024: Interactive (clickable + draggable) scrollbars
+
+#### Added
+
+- **Clickable scrollbar track** — clicking a scrollbar above/below (or left/right of) the thumb pages the
+  view by one viewport toward the click, on every surface that shows a feature-021 scrollbar (editor
+  vertical + horizontal, file browser, Help/About, encoding/plugin lists).
+- **Draggable thumb** — pressing the thumb and dragging scrolls the view proportionally to the cursor
+  along the track; releasing ends the drag. In the editor this scrolls the viewport only (the text
+  cursor is not moved).
+
+#### Notes
+
+- Scrollbar interaction only — a press/drag that starts on a scrollbar never places the cursor or starts
+  a text selection, and a press/drag that starts off any scrollbar behaves exactly as before (feature-017
+  text drag-selection, wheel, dialog buttons, keyboard all unchanged). Bounded and panic-free (ends,
+  resize, release-outside, tiny thumb). No new dependencies.
+
 ### feature 023: Mouse-wheel scrolling (app-wide)
 
 #### Added

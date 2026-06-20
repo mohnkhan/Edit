@@ -420,7 +420,7 @@ impl Ui {
 /// The vertical scrollbar always takes the rightmost column; the horizontal
 /// scrollbar takes the bottom row in non-wrap mode only. The bars are inset so
 /// they never overlap at the bottom-right corner.
-fn editor_panes(area: Rect, soft_wrap: bool) -> (Rect, Rect, Option<Rect>) {
+pub(crate) fn editor_panes(area: Rect, soft_wrap: bool) -> (Rect, Rect, Option<Rect>) {
     let vbar_w: u16 = if area.width >= 2 { 1 } else { 0 };
     let hbar_h: u16 = if !soft_wrap && area.height >= 2 { 1 } else { 0 };
     let text_w = area.width - vbar_w;
@@ -438,7 +438,7 @@ fn editor_panes(area: Rect, soft_wrap: bool) -> (Rect, Rect, Option<Rect>) {
 /// Feature 021: maximum display width among the editor's currently visible
 /// logical lines — a cheap, viewport-bounded measure for the horizontal
 /// scrollbar's content length (avoids scanning the whole file each frame).
-fn max_visible_line_width(buf: &crate::buffer::Buffer, text: Rect) -> usize {
+pub(crate) fn max_visible_line_width(buf: &crate::buffer::Buffer, text: Rect) -> usize {
     use unicode_width::UnicodeWidthStr;
     let start = buf.scroll_offset.0;
     let total = buf.rope.line_count();
@@ -680,6 +680,18 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
 ];
+
+/// Feature 024: number of content lines the Help/About overlay renders (for
+/// scrollbar geometry). Mirrors the line-building in [`render_help_overlay`].
+pub(crate) fn help_total_lines(screen: HelpScreen) -> usize {
+    match screen {
+        HelpScreen::About => 10,
+        HelpScreen::Help => {
+            let rows: usize = HELP_SECTIONS.iter().map(|(_, r)| 1 + r.len()).sum();
+            rows + HELP_SECTIONS.len().saturating_sub(1) // blank separators
+        }
+    }
+}
 
 fn render_help_overlay(frame: &mut Frame, app: &App, screen: HelpScreen, size: Rect) {
     use ratatui::style::{Modifier, Style};
