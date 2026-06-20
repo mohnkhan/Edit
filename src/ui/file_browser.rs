@@ -371,6 +371,12 @@ impl FileBrowser {
         compute_layout(area, self.mode).list_rows as usize
     }
 
+    /// Feature 020: outer box rect of the browser, for sharing button geometry
+    /// between the renderer and the app's mouse hit-testing.
+    pub fn box_rect(&self, area: Rect) -> Rect {
+        compute_layout(area, self.mode).box_rect
+    }
+
     /// Map a terminal click to an entry, an inside-but-inert region, or outside.
     pub fn hit_test(&self, area: Rect, col: u16, row: u16) -> BrowserHit {
         let l = compute_layout(area, self.mode);
@@ -412,7 +418,9 @@ struct BrowserLayout {
 
 fn compute_layout(area: Rect, mode: BrowseMode) -> BrowserLayout {
     let bw = 64u16.min(area.width.max(1));
-    let bh = 20u16.min(area.height.max(1));
+    // Feature 020: +4 rows over the original 20 reserve a 1-row gap and a 3-row
+    // boxed-button box (Open|Save / Cancel) along the bottom interior.
+    let bh = 24u16.min(area.height.max(1));
     let bx = area.x + area.width.saturating_sub(bw) / 2;
     let by = area.y + area.height.saturating_sub(bh) / 2;
     let box_rect = Rect::new(bx, by, bw, bh);
@@ -420,7 +428,8 @@ fn compute_layout(area: Rect, mode: BrowseMode) -> BrowserLayout {
     let inner_left = bx + 1;
     let inner_width = bw.saturating_sub(2);
     let inner_top = by + 1;
-    let inner_h = bh.saturating_sub(2);
+    // Reserve the bottom 4 interior rows for the button area (gap + 3-row box).
+    let inner_h = bh.saturating_sub(2).saturating_sub(4);
 
     let header_row = inner_top;
     let footer_row = inner_top + inner_h.saturating_sub(1);
@@ -502,6 +511,9 @@ pub fn truncate_to_width(s: &str, max_cols: u16) -> String {
 pub struct FileBrowserWidget<'a> {
     pub browser: &'a FileBrowser,
     pub theme: &'static Theme,
+    /// Feature 020: focused boxed button (`Some(i)`), or `None` when the browser
+    /// list/field is focused. Buttons are `Open`/`Save` (0) / `Cancel` (1).
+    pub button_focus: Option<usize>,
 }
 
 impl<'a> Widget for FileBrowserWidget<'a> {
@@ -639,6 +651,22 @@ impl<'a> Widget for FileBrowserWidget<'a> {
             &truncate_to_width(hints, iw),
             base,
         );
+
+        // Feature 020: boxed confirm/cancel buttons in the bottom interior rows.
+        // `usize::MAX` highlights none (used when the list/field is focused).
+        let confirm = match b.mode {
+            BrowseMode::Open => "Open",
+            BrowseMode::Save => "Save",
+        };
+        let labels = [confirm, "Cancel"];
+        let rects = crate::ui::buttons::button_rects(box_rect, &labels);
+        crate::ui::buttons::render_buttons(
+            buf,
+            &rects,
+            &labels,
+            self.button_focus.unwrap_or(usize::MAX),
+            self.theme,
+        );
     }
 }
 
@@ -672,6 +700,7 @@ mod tests {
         FileBrowserWidget {
             browser: b,
             theme: crate::ui::theme::theme_by_name("classic"),
+            button_focus: None,
         }
         .render(area, &mut buf);
         buf.content().iter().map(|c| c.symbol()).collect()

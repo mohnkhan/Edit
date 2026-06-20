@@ -76,6 +76,23 @@ pub fn line_count(body: &str) -> u16 {
     body.lines().count().max(1) as u16
 }
 
+/// Feature 020: outer rect of the plugin-manager dialog, grown to fit a boxed
+/// `Close` button row. Shared by the renderer and the app's mouse hit-testing so
+/// clicks land on the drawn button. Height = body lines + 2 borders + 4 (a 1-row
+/// gap and a 3-row button box); width 70, centered in `area`.
+pub fn manager_rect(
+    host: &PluginHost,
+    cursor: usize,
+    area: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    let body = manager_body(host, cursor);
+    let dh = (line_count(&body) + 2 + 4).min(area.height.max(1));
+    let dw = 70u16.min(area.width.max(1));
+    let dx = area.x + area.width.saturating_sub(dw) / 2;
+    let dy = area.y + area.height.saturating_sub(dh) / 2;
+    ratatui::layout::Rect::new(dx, dy, dw, dh)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

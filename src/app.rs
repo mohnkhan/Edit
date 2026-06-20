@@ -52,6 +52,18 @@ enum ButtonDialog {
     PluginConsent,
 }
 
+/// Interactive/list dialogs that carry a combined primary-control + boxed-button
+/// focus ring (Feature 020). Unlike [`ButtonDialog`], focus stop 0 (and, for
+/// Find/Replace in replace mode, stop 1) is the dialog's primary control (its
+/// list or field group); the remaining stops are its buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InteractiveDialog {
+    EncodingSelect,
+    PluginManager,
+    FindReplace,
+    FileBrowser,
+}
+
 /// Char index where the cursor should land after **undo**-ing `op`.
 fn undo_target_idx(op: &EditOp) -> usize {
     match op {
@@ -601,6 +613,30 @@ impl App {
             }
         }
 
+        // Feature 020: focus-ring movement for the interactive/list dialogs.
+        // Tab/Shift+Tab cycle the whole ring (primary control + buttons). All
+        // other keys fall through to the per-dialog guards below, which consult
+        // `dialog_focus` to decide between primary-control behavior and button
+        // activation.
+        {
+            let ring = self.interactive_ring_len();
+            if ring > 1 {
+                match &action {
+                    Action::FocusNextField => {
+                        self.dialog_focus = crate::ui::buttons::next(self.dialog_focus, ring);
+                        self.sync_find_replace_focus();
+                        return Ok(());
+                    }
+                    Action::FocusPrevField => {
+                        self.dialog_focus = crate::ui::buttons::prev(self.dialog_focus, ring);
+                        self.sync_find_replace_focus();
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // When the session restore dialog is active, only Y/y/Enter (confirm)
         // and N/n/Escape/Quit (decline) are forwarded; everything else is
         // dropped silently so the dialog stays visible.
@@ -701,49 +737,76 @@ impl App {
         // edit the dialog fields and drive the search; the buffer is only touched
         // by an explicit Replace/Replace-All. All input is consumed.
         if self.pending_find_replace.is_some() {
-            match action {
-                Action::MenuClose | Action::Quit => self.close_find_replace(),
-                Action::InsertChar(c) => self.pending_find_replace.as_mut().unwrap().insert_char(c),
-                Action::Backspace => self.pending_find_replace.as_mut().unwrap().backspace(),
-                Action::MoveLeft => self.pending_find_replace.as_mut().unwrap().move_left(),
-                Action::MoveRight => self.pending_find_replace.as_mut().unwrap().move_right(),
-                Action::FocusNextField => {
-                    self.pending_find_replace.as_mut().unwrap().switch_focus()
+            let is_replace =
+                self.pending_find_replace.as_ref().unwrap().mode == DialogMode::Replace;
+            // Dialog-global keys (work regardless of which stop is focused):
+            // close, option toggles, and match navigation. Feature 020 keeps
+            // these unchanged from feature 015.
+            match &action {
+                Action::MenuClose | Action::Quit => {
+                    self.close_find_replace();
+                    return Ok(());
                 }
                 Action::ToggleSearchCase => {
                     let d = self.pending_find_replace.as_mut().unwrap();
                     d.case_sensitive = !d.case_sensitive;
                     self.run_find_from_dialog();
+                    return Ok(());
                 }
                 Action::ToggleSearchWrap => {
-                    let d = self.pending_find_replace.as_mut().unwrap();
-                    d.wrap = !d.wrap;
+                    self.pending_find_replace.as_mut().unwrap().wrap ^= true;
+                    return Ok(());
                 }
                 Action::ToggleSearchRegex => {
                     let d = self.pending_find_replace.as_mut().unwrap();
                     d.regex = !d.regex;
                     self.run_find_from_dialog();
+                    return Ok(());
                 }
                 Action::ToggleSearchWholeWord => {
                     let d = self.pending_find_replace.as_mut().unwrap();
                     d.whole_word = !d.whole_word;
                     self.run_find_from_dialog();
+                    return Ok(());
                 }
-                Action::InsertNewline => {
-                    let mode = self.pending_find_replace.as_ref().unwrap().mode;
-                    match mode {
-                        DialogMode::Find => self.run_find_from_dialog(),
-                        DialogMode::Replace => self.replace_current_from_dialog(),
-                    }
+                Action::FindNext => {
+                    self.find_next();
+                    return Ok(());
+                }
+                Action::FindPrev => {
+                    self.find_prev();
+                    return Ok(());
                 }
                 // Ctrl+A → Replace All (only while the Replace dialog is open).
-                Action::SelectAll
-                    if self.pending_find_replace.as_ref().unwrap().mode == DialogMode::Replace =>
-                {
+                Action::SelectAll if is_replace => {
                     self.replace_all_from_dialog();
+                    return Ok(());
                 }
-                Action::FindNext => self.find_next(),
-                Action::FindPrev => self.find_prev(),
+                _ => {}
+            }
+            // Button focused: Enter/Space activate it; text-editing keys are
+            // ignored (they belong to the fields, which are not focused).
+            if let Some(btn) = self.interactive_focus_is_button() {
+                if matches!(&action, Action::InsertNewline | Action::InsertChar(' ')) {
+                    self.activate_interactive_button(btn);
+                }
+                return Ok(());
+            }
+            // A field stop is focused: edit the field / run the per-mode action.
+            match &action {
+                Action::InsertChar(c) => {
+                    self.pending_find_replace.as_mut().unwrap().insert_char(*c)
+                }
+                Action::Backspace => self.pending_find_replace.as_mut().unwrap().backspace(),
+                Action::MoveLeft => self.pending_find_replace.as_mut().unwrap().move_left(),
+                Action::MoveRight => self.pending_find_replace.as_mut().unwrap().move_right(),
+                Action::InsertNewline => {
+                    if is_replace {
+                        self.replace_current_from_dialog();
+                    } else {
+                        self.run_find_from_dialog();
+                    }
+                }
                 _ => {}
             }
             return Ok(());
@@ -754,6 +817,19 @@ impl App {
         // processed; all other actions are silently consumed.
         if let Some(idx) = self.pending_encoding_select {
             let n = crate::ui::dialog::ENCODING_OPTIONS.len();
+            // Esc always cancels, from any focus stop.
+            if matches!(&action, Action::MenuClose) {
+                self.pending_encoding_select = None;
+                return Ok(());
+            }
+            // Button focused (OK/Cancel): Enter/Space activate; arrows no-op.
+            if let Some(btn) = self.interactive_focus_is_button() {
+                if matches!(&action, Action::InsertNewline | Action::InsertChar(' ')) {
+                    self.activate_interactive_button(btn);
+                }
+                return Ok(());
+            }
+            // List focused: existing navigation/confirm behavior (feature 004).
             match &action {
                 Action::MoveUp => {
                     self.pending_encoding_select = Some((idx + n - 1) % n);
@@ -766,9 +842,6 @@ impl App {
                     self.pending_encoding_select = None;
                     self.do_save_as_encoding(enc);
                 }
-                Action::MenuClose => {
-                    self.pending_encoding_select = None;
-                }
                 _ => {}
             }
             return Ok(());
@@ -779,6 +852,20 @@ impl App {
         // the filename/path field, Esc cancels. All other actions are consumed so
         // the browser stays modal over the buffer.
         if self.file_browser.is_some() {
+            // Esc always cancels, from any focus stop.
+            if matches!(&action, Action::MenuClose) {
+                self.file_browser = None;
+                return Ok(());
+            }
+            // Button focused (Open|Save / Cancel): Enter/Space activate; other
+            // navigation/edit keys no-op so they don't mutate the listing.
+            if let Some(btn) = self.interactive_focus_is_button() {
+                if matches!(&action, Action::InsertNewline | Action::InsertChar(' ')) {
+                    self.activate_interactive_button(btn);
+                }
+                return Ok(());
+            }
+            // Browser focused: existing navigation/edit behavior (feature 012).
             let vis = {
                 let (w, h) = self.terminal_size;
                 self.file_browser
@@ -796,10 +883,6 @@ impl App {
                     Action::MoveRight | Action::InsertNewline => outcome = Some(fb.activate()),
                     Action::Backspace => fb.backspace(),
                     Action::InsertChar(c) => fb.push_char(*c),
-                    Action::MenuClose => {
-                        self.file_browser = None;
-                        return Ok(());
-                    }
                     _ => {}
                 }
             }
@@ -848,6 +931,19 @@ impl App {
         // Space/Enter toggle enabled, Esc closes.
         if self.pending_plugin_manager {
             let n = self.plugin_host.registry.instances.len();
+            // Esc/Quit always close, from any focus stop.
+            if matches!(&action, Action::MenuClose | Action::Quit) {
+                self.pending_plugin_manager = false;
+                return Ok(());
+            }
+            // Button focused (Close): Enter/Space activate; arrows no-op.
+            if let Some(btn) = self.interactive_focus_is_button() {
+                if matches!(&action, Action::InsertNewline | Action::InsertChar(' ')) {
+                    self.activate_interactive_button(btn);
+                }
+                return Ok(());
+            }
+            // List focused: existing navigation/toggle behavior (feature 008).
             match &action {
                 Action::MoveUp if n > 0 => {
                     self.plugin_manager_cursor = (self.plugin_manager_cursor + n - 1) % n;
@@ -857,9 +953,6 @@ impl App {
                 }
                 Action::InsertChar(' ') | Action::InsertNewline => {
                     self.plugin_manager_toggle_current();
-                }
-                Action::MenuClose | Action::Quit => {
-                    self.pending_plugin_manager = false;
                 }
                 _ => {}
             }
@@ -2840,6 +2933,178 @@ impl App {
         Some((rect, title, body, labels, focus))
     }
 
+    // ── Feature 020 — interactive/list dialog focus ring ──────────────────────
+    //
+    // The four interactive dialogs (encoding select, plugin manager, Find/Replace,
+    // file browser) reuse `dialog_focus` as a ring index: stop 0 (and stop 1 for
+    // Find/Replace in replace mode) is the primary control; later stops are boxed
+    // buttons. `Tab`/`Shift+Tab` move the index; a button is activated by
+    // Enter/Space or a click. While the primary control is focused, the dialog's
+    // existing keys behave exactly as before.
+
+    /// The currently-open interactive/list dialog, if any. These are mutually
+    /// exclusive in practice; the order is a defensive precedence.
+    fn interactive_dialog(&self) -> Option<InteractiveDialog> {
+        if self.pending_find_replace.is_some() {
+            Some(InteractiveDialog::FindReplace)
+        } else if self.pending_encoding_select.is_some() {
+            Some(InteractiveDialog::EncodingSelect)
+        } else if self.file_browser.is_some() {
+            Some(InteractiveDialog::FileBrowser)
+        } else if self.pending_plugin_manager {
+            Some(InteractiveDialog::PluginManager)
+        } else {
+            None
+        }
+    }
+
+    /// Number of primary-control focus stops that precede the buttons in the ring
+    /// (1 for the list/browser dialogs; 1 in Find mode and 2 in Replace mode).
+    fn interactive_field_stops(&self) -> usize {
+        match self.interactive_dialog() {
+            Some(InteractiveDialog::FindReplace) => {
+                match self.pending_find_replace.as_ref().map(|d| d.mode) {
+                    Some(DialogMode::Replace) => 2,
+                    _ => 1,
+                }
+            }
+            Some(_) => 1,
+            None => 0,
+        }
+    }
+
+    /// Ordered boxed-button labels for the open interactive dialog (tab order
+    /// after the primary control). Mode-aware for Find/Replace and the file
+    /// browser.
+    pub fn interactive_button_labels(&self) -> Vec<&'static str> {
+        match self.interactive_dialog() {
+            Some(InteractiveDialog::EncodingSelect) => vec!["OK", "Cancel"],
+            Some(InteractiveDialog::PluginManager) => vec!["Close"],
+            Some(InteractiveDialog::FileBrowser) => {
+                let save = matches!(
+                    self.file_browser.as_ref().map(|b| b.mode),
+                    Some(crate::ui::file_browser::BrowseMode::Save)
+                );
+                if save {
+                    vec!["Save", "Cancel"]
+                } else {
+                    vec!["Open", "Cancel"]
+                }
+            }
+            Some(InteractiveDialog::FindReplace) => {
+                let replace = matches!(
+                    self.pending_find_replace.as_ref().map(|d| d.mode),
+                    Some(DialogMode::Replace)
+                );
+                if replace {
+                    vec!["Find", "Replace", "Replace All", "Close"]
+                } else {
+                    vec!["Find", "Close"]
+                }
+            }
+            None => vec![],
+        }
+    }
+
+    /// Total focus stops in the ring (primary-control stops + buttons).
+    fn interactive_ring_len(&self) -> usize {
+        self.interactive_field_stops() + self.interactive_button_labels().len()
+    }
+
+    /// `Some(button_index)` when `dialog_focus` is on a button rather than the
+    /// primary control; `None` when the primary control is focused (or no
+    /// interactive dialog is open).
+    pub fn interactive_focus_is_button(&self) -> Option<usize> {
+        self.interactive_dialog()?;
+        let fs = self.interactive_field_stops();
+        if self.dialog_focus >= fs {
+            Some(self.dialog_focus - fs)
+        } else {
+            None
+        }
+    }
+
+    /// Keep `FindReplaceDialog.focus` in sync with the ring's field stops so the
+    /// edited/rendered field matches the focused stop (stop 0 → Query, stop 1 →
+    /// Replacement). No-op when a button stop is focused.
+    fn sync_find_replace_focus(&mut self) {
+        let f = self.dialog_focus;
+        if let Some(d) = self.pending_find_replace.as_mut() {
+            let field = match f {
+                0 => DialogField::Query,
+                1 if d.mode == DialogMode::Replace => DialogField::Replacement,
+                _ => return,
+            };
+            d.set_focus(field);
+        }
+    }
+
+    /// Outer overlay `Rect` for the open interactive dialog — the single geometry
+    /// source shared by the renderer and mouse hit-testing so a click always
+    /// lands on the button that was drawn.
+    pub fn interactive_dialog_rect(&self) -> Option<ratatui::layout::Rect> {
+        let (tw, th) = self.terminal_size;
+        let area = ratatui::layout::Rect::new(0, 0, tw, th);
+        match self.interactive_dialog()? {
+            InteractiveDialog::EncodingSelect => {
+                Some(crate::ui::dialog::encoding_dialog_rect(area))
+            }
+            InteractiveDialog::PluginManager => Some(crate::ui::plugin_manager::manager_rect(
+                &self.plugin_host,
+                self.plugin_manager_cursor,
+                area,
+            )),
+            InteractiveDialog::FileBrowser => {
+                Some(self.file_browser.as_ref().unwrap().box_rect(area))
+            }
+            InteractiveDialog::FindReplace => Some(crate::ui::find_replace_rect(
+                self.pending_find_replace.as_ref().unwrap(),
+                area,
+            )),
+        }
+    }
+
+    /// Run the action bound to button `idx` of the open interactive dialog. Each
+    /// maps onto an action the dialog already performs (no new actions).
+    pub fn activate_interactive_button(&mut self, idx: usize) {
+        match self.interactive_dialog() {
+            Some(InteractiveDialog::EncodingSelect) => {
+                if idx == 0 {
+                    if let Some(sel) = self.pending_encoding_select {
+                        let enc = crate::ui::dialog::ENCODING_OPTIONS[sel].0;
+                        self.pending_encoding_select = None;
+                        self.do_save_as_encoding(enc);
+                    }
+                } else {
+                    self.pending_encoding_select = None;
+                }
+            }
+            Some(InteractiveDialog::PluginManager) => {
+                // Sole button is Close.
+                self.pending_plugin_manager = false;
+            }
+            Some(InteractiveDialog::FileBrowser) => {
+                if idx == 0 {
+                    let outcome = self.file_browser.as_mut().unwrap().activate();
+                    self.apply_browse_outcome(outcome);
+                } else {
+                    self.file_browser = None;
+                }
+            }
+            Some(InteractiveDialog::FindReplace) => {
+                let labels = self.interactive_button_labels();
+                match labels.get(idx).copied() {
+                    Some("Find") => self.run_find_from_dialog(),
+                    Some("Replace") => self.replace_current_from_dialog(),
+                    Some("Replace All") => self.replace_all_from_dialog(),
+                    Some("Close") => self.close_find_replace(),
+                    _ => {}
+                }
+            }
+            None => {}
+        }
+    }
+
     /// File ▸ Revert (Feature 014): reload the active buffer from its last saved
     /// version on disk, discarding in-editor changes. No-op with a notice when the
     /// buffer was never saved; asks for confirmation when there are unsaved changes.
@@ -3009,6 +3274,23 @@ impl App {
         // Only left-button presses drive the menu / cursor for now.
         if ev.kind != NormalizedMouseKind::Press || ev.button != MouseButton::Left {
             return Ok(());
+        }
+
+        // Feature 020 — interactive/list dialog buttons: a click on a boxed
+        // button activates it directly (buttons win over the list/entry hit-test
+        // that follows). Uses the same geometry the renderer drew with.
+        self.ensure_dialog_focus();
+        if self.interactive_dialog().is_some() {
+            if let Some(rect) = self.interactive_dialog_rect() {
+                let labels = self.interactive_button_labels();
+                let rects = crate::ui::buttons::button_rects(rect, &labels);
+                if let Some(i) = crate::ui::buttons::hit_test_buttons(&rects, ev.col, ev.row) {
+                    self.activate_interactive_button(i);
+                    return Ok(());
+                }
+            }
+            // Not on a button: fall through to dialog-specific handling (file
+            // browser entry clicks below; the other dialogs ignore the click).
         }
 
         // Feature 012 — file browser: a single click selects the row; a second
@@ -3510,6 +3792,130 @@ mod tests {
 
     fn make_app() -> App {
         App::new(Config::default(), vec![], EncodingId::Utf8, None, None)
+    }
+
+    // ── Feature 020 — interactive/list dialog focus ring ──────────────────────
+
+    // T009: ring length and field-stop counts per dialog/mode.
+    #[test]
+    fn interactive_ring_math_per_dialog() {
+        use crate::ui::dialog::{DialogMode, FindReplaceDialog};
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        assert_eq!(a.interactive_ring_len(), 0, "no dialog open");
+
+        a.pending_encoding_select = Some(0);
+        assert_eq!(a.interactive_field_stops(), 1);
+        assert_eq!(a.interactive_ring_len(), 3); // List + OK + Cancel
+        a.pending_encoding_select = None;
+
+        a.pending_plugin_manager = true;
+        assert_eq!(a.interactive_ring_len(), 2); // List + Close
+        a.pending_plugin_manager = false;
+
+        a.pending_find_replace = Some(FindReplaceDialog::new(DialogMode::Find, String::new()));
+        assert_eq!(a.interactive_field_stops(), 1);
+        assert_eq!(a.interactive_ring_len(), 3); // Query + Find + Close
+        a.pending_find_replace = Some(FindReplaceDialog::new(DialogMode::Replace, String::new()));
+        assert_eq!(a.interactive_field_stops(), 2);
+        assert_eq!(a.interactive_ring_len(), 6); // Query+Replacement + 4 buttons
+    }
+
+    // T009: dialog_focus → primary-control vs button-index boundary.
+    #[test]
+    fn interactive_focus_is_button_boundary() {
+        let mut a = make_app();
+        a.pending_encoding_select = Some(0); // field_stops 1, ring 3
+        a.dialog_focus = 0;
+        assert_eq!(a.interactive_focus_is_button(), None);
+        a.dialog_focus = 1;
+        assert_eq!(a.interactive_focus_is_button(), Some(0));
+        a.dialog_focus = 2;
+        assert_eq!(a.interactive_focus_is_button(), Some(1));
+    }
+
+    // T040b: dialog rect + button layout recompute without panic across a range
+    // of terminal sizes; at a normal size the rect stays within bounds.
+    #[test]
+    fn interactive_geometry_across_sizes_no_panic() {
+        use crate::ui::dialog::{DialogMode, FindReplaceDialog};
+        let sizes = [(80u16, 24u16), (20, 8), (200, 60), (4, 3), (40, 15)];
+        for (w, h) in sizes {
+            let mut a = make_app();
+            a.terminal_size = (w, h);
+            for setup in 0..3 {
+                a.pending_encoding_select = None;
+                a.pending_plugin_manager = false;
+                a.pending_find_replace = None;
+                match setup {
+                    0 => a.pending_encoding_select = Some(3),
+                    1 => a.pending_plugin_manager = true,
+                    _ => {
+                        a.pending_find_replace =
+                            Some(FindReplaceDialog::new(DialogMode::Replace, "abc".into()))
+                    }
+                }
+                if let Some(r) = a.interactive_dialog_rect() {
+                    let labels = a.interactive_button_labels();
+                    // Must not panic on any size (overflow buttons are dropped).
+                    let rects = crate::ui::buttons::button_rects(r, &labels);
+                    // Horizontal bound always holds (centered_rect clamps width).
+                    assert!(r.x + r.width <= w.max(1), "rect within width");
+                    if w >= 80 && h >= 24 {
+                        assert!(!rects.is_empty(), "buttons fit at a normal size");
+                    }
+                }
+            }
+        }
+    }
+
+    // T040b: a wide/CJK button label is width-measured (no panic, fits its box).
+    #[test]
+    fn wide_label_button_rects_are_width_correct() {
+        // "あ" is double-width; a 2-grapheme label → width 4 → box width 4+4=8.
+        let area = ratatui::layout::Rect::new(0, 0, 60, 10);
+        let rects = crate::ui::buttons::button_rects(area, &["ああ", "OK"]);
+        assert_eq!(rects.len(), 2);
+        assert_eq!(rects[0].width, 8, "double-width label measured correctly");
+    }
+
+    // T040: each interactive dialog renders a boxed button row with exactly one
+    // focused control (the focused button shows the `▶` marker exactly once).
+    #[test]
+    fn interactive_dialogs_render_one_focused_button() {
+        use crate::ui::dialog::{DialogMode, FindReplaceDialog};
+        use ratatui::{backend::TestBackend, Terminal};
+        let render_marker_count = |app: &mut App| -> usize {
+            let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            t.draw(|f| app.render(f)).unwrap();
+            t.backend()
+                .buffer()
+                .content()
+                .iter()
+                .filter(|c| c.symbol() == "▶")
+                .count()
+        };
+        for setup in 0..3 {
+            let mut a = make_app();
+            a.terminal_size = (80, 24);
+            match setup {
+                0 => a.pending_encoding_select = Some(0),
+                1 => a.pending_plugin_manager = true,
+                _ => {
+                    a.pending_find_replace =
+                        Some(FindReplaceDialog::new(DialogMode::Replace, "x".into()))
+                }
+            }
+            // Focus the first button (stop = field_stops) and keep it across the
+            // render (ensure_dialog_focus would otherwise reset focus to 0).
+            a.dialog_focus_init = true;
+            a.dialog_focus = a.interactive_field_stops();
+            assert_eq!(
+                render_marker_count(&mut a),
+                1,
+                "exactly one focused button rendered (setup {setup})"
+            );
+        }
     }
 
     // Feature 018: Help renders a grouped Key|Action table and scrolls.

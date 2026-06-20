@@ -140,9 +140,25 @@ replaces it; `Backspace`/`Delete` delete it; moving without Shift (or a single c
 | `Esc` | Cancel / close the dialog |
 
 Each dialog opens focused on its safe default (Cancel/No/Keep for destructive prompts). Applies to the
-unsaved-changes, session-restore, external-change, revert, and plugin-consent dialogs. (The
-encoding-select, plugin-manager, Find/Replace, and file-browser dialogs keep their existing
-navigation — boxed buttons there are tracked in ROADMAP / issue #38.)
+unsaved-changes, session-restore, external-change, revert, and plugin-consent dialogs.
+
+### Interactive / list dialogs (Feature 020)
+
+The encoding selector, plugin manager, Find/Replace, and file browser also have boxed buttons, reached
+by a **combined focus ring**: the list/field group is the first focus stop and each button is a further
+stop.
+
+| Key / action | Effect |
+|---|---|
+| `Tab` / `Shift+Tab` | Cycle the whole ring — list/field then each button (wraps) |
+| `Enter` / `Space` | While a button is focused: activate it |
+| Mouse left-click | Click a button to activate it (file browser: buttons take precedence over entry clicks) |
+| `Esc` | Close / cancel the dialog from any focus stop |
+
+Buttons per dialog: encoding selector **OK / Cancel**; plugin manager **Close**; Find/Replace **Find /
+[Replace / Replace All] / Close** (mode-dependent); file browser **Open** (or **Save**) **/ Cancel**.
+Each dialog opens focused on its primary control, so existing keyboard flows (arrows, typing, `Space`
+toggle, `Alt+C/A/R/W`, `Ctrl+A`, `F3/F2`) are unchanged.
 
 Built-in accelerators follow DOS/standard convention — File: **N**ew, **O**pen, **S**ave, Save **A**s,
 Save As **E**ncoding, e**X**it; Edit: **U**ndo, **R**edo, **C**ut, C**o**py, **P**aste, **S**elect All;
