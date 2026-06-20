@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 016: Focusable dialog buttons (borders, tab order, mouse)
+
+#### Added
+
+- **Boxed dialog buttons** on the confirm/dismiss dialogs (unsaved-changes Save/Discard/Cancel,
+  session restore, external-change, revert, plugin consent): each choice is drawn in its own box
+  border with one button focused (inverted + `▶` marker).
+- **Mouse navigation of dialogs** — clicking a button activates it; clicking outside cancels (where a
+  safe cancel exists). Dialogs previously ignored the mouse entirely.
+- **Tab order** — `Tab`/`Shift+Tab` move button focus (wrapping); `Enter`/`Space` activate the focused
+  button. Each dialog opens focused on its safe default (Cancel/No/Keep for destructive prompts). The
+  existing letter shortcuts (S/D/C, Y/N) still work.
+- A reusable button component (`src/ui/buttons.rs`) provides the shared layout/render/hit-test so a
+  click always lands on the drawn button.
+- Built via the full Spec Kit pipeline; artifacts under `specs/016-dialog-buttons/`.
+
+#### Notes
+
+- The interactive/list dialogs (encoding select, plugin manager, Find/Replace, file browser) keep
+  their current navigation for now; boxed buttons for them are deferred (issue #38, ROADMAP) as they
+  need a combined field/list + button focus ring.
+- The Revert dialog now defaults focus to **Cancel** (press `Y` or Tab to Revert to confirm) — a safer
+  default for a destructive action.
+
 ### feature 015: Interactive Find and Replace dialogs
 
 #### Added

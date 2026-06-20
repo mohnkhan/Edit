@@ -123,6 +123,21 @@ edit [OPTIONS] [FILE...]
 | `Esc` | Close menu / cancel dialog |
 | Mouse (left-click) | Click a top-level menu title to open it; click a dropdown item to activate it; click outside to close (Feature 011) |
 
+### Dialogs (confirm / dismiss prompts — Feature 016)
+
+| Key / action | Effect |
+|---|---|
+| `Tab` / `Shift+Tab` | Move focus between the dialog's boxed buttons (wraps) |
+| `Enter` / `Space` | Activate the focused button |
+| letter shortcuts (e.g. `S`/`D`/`C`, `Y`/`N`) | Still choose directly |
+| Mouse left-click | Click a button to activate it; click outside the dialog to cancel (where a safe cancel exists) |
+| `Esc` | Cancel / close the dialog |
+
+Each dialog opens focused on its safe default (Cancel/No/Keep for destructive prompts). Applies to the
+unsaved-changes, session-restore, external-change, revert, and plugin-consent dialogs. (The
+encoding-select, plugin-manager, Find/Replace, and file-browser dialogs keep their existing
+navigation — boxed buttons there are tracked in ROADMAP / issue #38.)
+
 Built-in accelerators follow DOS/standard convention — File: **N**ew, **O**pen, **S**ave, Save **A**s,
 Save As **E**ncoding, e**X**it; Edit: **U**ndo, **R**edo, **C**ut, C**o**py, **P**aste, **S**elect All;
 Search: **F**ind, Find **N**ext, Find **P**rev, Find **R**eplace; View: **S**plit View, **N**ext Buffer,

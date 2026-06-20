@@ -93,6 +93,10 @@ name = "find_replace"
 path = "tests/integration/find_replace.rs"
 
 [[test]]
+name = "dialog_buttons"
+path = "tests/integration/dialog_buttons.rs"
+
+[[test]]
 name = "file_browser"
 path = "tests/integration/file_browser.rs"
 

@@ -101,6 +101,7 @@ pub fn key_to_string(key: &KeyEvent) -> String {
         KeyCode::PageUp => "PageUp".to_string(),
         KeyCode::PageDown => "PageDown".to_string(),
         KeyCode::Tab => "Tab".to_string(),
+        KeyCode::BackTab => "BackTab".to_string(),
         KeyCode::Esc => "Esc".to_string(),
         _ => return String::new(),
     };
