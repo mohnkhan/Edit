@@ -41,13 +41,26 @@ bypasses session restore.)
 
 - **Menu bar** (top) — `File`, `Edit`, `Search`, `View`, `Options`, `Help`. Press `F10` to activate
   it, or `Alt+<first letter>` to drop a menu open directly (e.g. `Alt+F` for File). Plugin-provided
-  menus appear between `Options` and `Help`.
+  menus appear between `Options` and `Help`. Menus are fully mouse-operable — click a title to open
+  it and click an item to run it.
+- **Buffer tab bar** (below the menu bar) — appears when **two or more buffers are open**: a one-row
+  strip listing each open file (active tab highlighted, a `●` marks unsaved buffers). Click a tab to
+  switch to it, or click its `✕` to close it. With a single buffer there is no tab bar.
 - **Editor area** (middle) — your text, on the classic blue background under the `classic` theme.
-  An optional line-number gutter can be enabled.
+  An optional line-number gutter can be enabled. The current selection is shown highlighted (reverse
+  video), and scrollbars appear when the content overflows.
 - **Status bar** (bottom) — filename, current encoding (e.g. `UTF-8`), line-ending style (`LF` /
   `CRLF`), cursor position, and transient indicators such as `[WRAP]` (soft-wrap on) or a `[+]`/dirty
   marker for unsaved changes. Search results, save confirmations, and plugin messages also flash
   here.
+
+## Mouse support
+
+`edit` is fully mouse-operable (on any terminal that reports mouse events; everything also works from
+the keyboard). Click to position the cursor, **press-drag-release to select**, double-click to select a
+word, triple-click to select a line, and right-click for a Cut / Copy / Paste / Select All context menu.
+The wheel scrolls the editor, file browser, Help/About, and list dialogs, and the scrollbars are
+clickable and draggable. Mouse support can be turned off with `mouse = false` in `config.toml`.
 
 ## Basic workflow
 
@@ -66,6 +79,8 @@ Type to insert. Editing is grapheme-aware, so multi-codepoint characters behave 
 | Cut / Copy / Paste | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` |
 | Select all | `Ctrl+A` |
 | Extend selection | `Shift+Arrow` |
+| Extend selection by word | `Ctrl+Shift+Left` / `Ctrl+Shift+Right` |
+| Delete previous / next word | `Ctrl+Backspace` / `Ctrl+Delete` |
 | Indent / Dedent selection | `Tab` / `Shift+Tab` |
 
 ### Navigate
@@ -75,14 +90,15 @@ file start/end; `Ctrl+Left`/`Ctrl+Right` move by word; `PgUp`/`PgDn` page throug
 
 ### Find & replace
 
-- `Ctrl+F` — Find (regex supported, matches highlighted)
-- `F3` / `Shift+F3` — Find next / previous
-- `Ctrl+H` — Find and Replace
+- `Ctrl+F` — Find (interactive dialog; regex supported, matches highlighted, "X of Y" indicator)
+- `F3` / `F2` — Find next / previous (wraps)
+- `Ctrl+H` — Find and Replace (interactive dialog)
+- `Ctrl+G` — Go to Line (type a 1-based line number and press `Enter` to jump)
 
 ### Save
 
-- `Ctrl+S` — Save
-- `Ctrl+Shift+S` — Save As
+- `Ctrl+S` / `F5` — Save
+- **File › Save As…** — save to a new path (via the file browser)
 - `F12` — Save As Encoding (choose the output encoding from a dialog; see [Encodings](Encodings.md))
 
 ### Quit

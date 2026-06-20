@@ -34,7 +34,7 @@ edit/
 ## Spec Kit workflow
 
 Features are developed under `specs/NNN-short-name/` using the Spec Kit pipeline (spec → plan →
-tasks → analyze → implement). Features 001–009 are the existing record:
+tasks → analyze → implement). Features 001–035 are the existing record (v0.4.0):
 
 | # | Feature |
 |---|---|
@@ -47,6 +47,32 @@ tasks → analyze → implement). Features 001–009 are the existing record:
 | 007 | External file watch |
 | 008 | Plugin API (Rhai) |
 | 009 | Menu-bar activation |
+| 010 | Working Escape key and File ▸ Open |
+| 011 | Mouse-operable menus + working menu actions |
+| 012 | Navigable file browser for Open / Save |
+| 013 | DOS-style menu mnemonic accelerators |
+| 014 | Undo-to-clean state + Revert to saved |
+| 015 | Interactive Find and Replace dialogs |
+| 016 | Focusable dialog buttons (borders, tab order, mouse) |
+| 017 | Visible text selection (highlight, Shift-select, drag) |
+| 018 | Editable-field affordance + Help redesign |
+| 019 | Bordered-box styling for Find/Replace fields |
+| 020 | Boxed buttons + focus ring for interactive dialogs |
+| 021 | Scroll affordances + dialog button polish |
+| 022 | File dialog — glob filtering + richer entry details |
+| 023 | Mouse-wheel scrolling (app-wide) |
+| 024 | Interactive (clickable + draggable) scrollbars |
+| 025 | Go to Line |
+| 026 | Syntax highlighting for Rust, JSON, and TOML |
+| 027 | Buffer tab bar |
+| 028 | UX crash-safety + keyboard-navigation hardening |
+| 029 | UX completeness hardening (round 2) |
+| 030 | Interaction completeness |
+| 031 | Caret-on-click in dialog text fields |
+| 032 | Word-wise navigation, selection, and deletion |
+| 033 | Fix menu dropdown hidden behind the tab bar |
+| 034 | Crash-safe line access + crash diagnostics |
+| 035 | Animated demo GIF + README revamp |
 
 Pick the next feature number from the `CHANGELOG.md` ledger (max + 1).
 
@@ -85,17 +111,27 @@ the PR merges.
 
 ```sh
 make build        # debug build (cargo build) → target/debug/edit
+make debug-run    # run debug binary with full backtraces + debug logging (FILE=path optional)
 make release      # release build (LTO, stripped) → target/release/edit
-make static       # musl static binary (nightly + musl target)
+make static       # musl static binary for x86_64 (nightly + musl target)
 make check        # cargo test (unit + integration)
 make smoke        # expect-based smoke tests (requires expect + tmux)
-make perf-check   # criterion benchmarks → /tmp/edit-bench.log
+make perf-check   # criterion benchmarks
 make stress-test  # 5-minute stress test (EDIT_STRESS_DURATION_SECS=300)
+make demo-gif     # regenerate the README demo GIF (assets/demo.gif; needs agg)
 make docs-gate    # verify CHANGELOG.md + docs/STATUS.md present
 make package-deb  # .deb via cargo-deb
 make package-rpm  # .rpm via rpmbuild
 make ci-local     # full gate: fmt → clippy → test → smoke → perf-check
 make help         # list targets
+```
+
+Opt-in developer ergonomics (see `docs/dev-tmpfs.md`) keep build artifacts off the SSD:
+
+```sh
+make tmpfs-setup     # redirect target/ into /tmp/edit/<hash>/ (tmpfs)
+make tmpfs-status    # show whether target/ is tmpfs-symlinked + disk usage
+make tmpfs-teardown  # remove the symlink (WIPE=1 also rm -rf the tmpfs subdir)
 ```
 
 > When adding a top-level Make target, update **all three** of: the `.PHONY:` line, the file-header
@@ -106,7 +142,7 @@ make help         # list targets
 | Suite | Command | Description |
 |---|---|---|
 | Unit | `cargo test` | All `#[cfg(test)]` modules in `src/` |
-| Integration | `cargo test --test '*'` | Suites under `tests/integration/` (encoding round-trip, file I/O, recovery, stress, session, encoding select, soft wrap, file watch, plugin API, menu activation) |
+| Integration | `cargo test --test '*'` | 30+ suites under `tests/integration/` registered in `Cargo.toml` — encoding round-trip, file I/O, recovery, stress, session, soft wrap, file watch, plugin API, menu activation/mnemonics, find/replace, selection, dialog buttons, file browser, mouse wheel, scrollbar interaction, go-to-line, buffer tab bar, word editing, UX hardening, and more |
 | Smoke | `make smoke` | `expect`-based scripts in `tests/smoke/` |
 | Stress | `cargo test --test stress -- --ignored` | Continuous-editing / encoding stress (slow, opt-in) |
 | Benchmarks | `make perf-check` | Criterion benches in `benches/` (startup, large_file, keystroke) |

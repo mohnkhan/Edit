@@ -22,11 +22,14 @@ process (GitHub issue + a `ROADMAP.md` row).
 
 There are no open deferred features in `ROADMAP.md` at this time — all tracked items are complete.
 
-## Known limitations (from `docs/STATUS.md`)
+## Known limitations
 
-- **Mouse menu selection** is not yet wired; menu navigation is fully keyboard-driven (all menus are
-  reachable via the keyboard). General mouse support also depends on a terminal that reports mouse
-  events in crossterm's supported protocol.
+- **General mouse support depends on the terminal.** The editor is fully mouse-operable — menus and
+  dropdown items are clickable (feature 011), and clicks position the caret, drag-select, double/
+  triple-click select words/lines, right-click opens a context menu, and scrollbars + the mouse wheel
+  scroll every surface (features 023–031). All of this requires a terminal emulator that reports mouse
+  events in crossterm's supported protocol; where it isn't reported, keyboard navigation still covers
+  every menu and action.
 
 For the authoritative, always-current list see `ROADMAP.md` and the project's GitHub issue tracker
 (items use the `follow-up` label). New deferrals require both an issue and a `ROADMAP.md` row — see
