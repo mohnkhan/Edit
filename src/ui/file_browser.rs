@@ -90,6 +90,10 @@ pub struct FileBrowser {
     pub scroll: usize,
     /// Save mode: the filename being typed. Open mode: optional jump path.
     pub filename: String,
+    /// Feature 031: caret position (grapheme index into `filename`) for
+    /// mid-string editing and click-to-position. Defaults to the start; advances
+    /// as characters are typed (so typing still appends at the end).
+    pub caret: usize,
     pub error: Option<String>,
 }
 
@@ -108,6 +112,7 @@ impl FileBrowser {
             selected: 0,
             scroll: 0,
             filename: String::new(),
+            caret: 0,
             error: None,
         };
         b.reload();
@@ -310,6 +315,7 @@ impl FileBrowser {
             if p.is_absolute() {
                 if p.is_dir() {
                     self.filename.clear();
+                    self.caret = 0;
                     self.enter_dir_abs(p);
                     return Outcome::Navigated;
                 } else if p.is_file() {
@@ -420,19 +426,85 @@ impl FileBrowser {
 
     // ── Filename / path field editing ────────────────────────────────────────
 
+    /// Number of grapheme clusters in the filename field.
+    fn filename_len(&self) -> usize {
+        self.filename.graphemes(true).count()
+    }
+
+    /// Byte offset of grapheme index `g` within the filename (== len at the end).
+    fn caret_byte(&self, g: usize) -> usize {
+        self.filename
+            .grapheme_indices(true)
+            .nth(g)
+            .map(|(b, _)| b)
+            .unwrap_or(self.filename.len())
+    }
+
+    /// Feature 031: insert at the caret (so typing appends when the caret is at the
+    /// end, and inserts mid-string otherwise).
     pub fn push_char(&mut self, c: char) {
-        self.filename.push(c);
+        self.caret = self.caret.min(self.filename_len());
+        let b = self.caret_byte(self.caret);
+        self.filename.insert(b, c);
+        self.caret += 1;
         self.apply_filter(); // Feature 022: live filtering
     }
 
-    /// Backspace: delete the last char of the field, or go to parent when empty.
+    /// Backspace: delete the grapheme before the caret, or go to parent when empty.
     pub fn backspace(&mut self) {
         if self.filename.is_empty() {
             self.enter_parent();
-        } else {
-            self.filename.pop();
-            self.apply_filter(); // Feature 022: live filtering
+            return;
         }
+        self.caret = self.caret.min(self.filename_len());
+        if self.caret == 0 {
+            return; // nothing before the caret
+        }
+        let start = self.caret_byte(self.caret - 1);
+        let end = self.caret_byte(self.caret);
+        self.filename.replace_range(start..end, "");
+        self.caret -= 1;
+        self.apply_filter(); // Feature 022: live filtering
+    }
+
+    // ── Feature 031: caret movement + click-to-position ───────────────────────
+
+    pub fn caret_left(&mut self) {
+        self.caret = self.caret.min(self.filename_len()).saturating_sub(1);
+    }
+
+    pub fn caret_right(&mut self) {
+        self.caret = (self.caret + 1).min(self.filename_len());
+    }
+
+    pub fn caret_home(&mut self) {
+        self.caret = 0;
+    }
+
+    pub fn caret_end(&mut self) {
+        self.caret = self.filename_len();
+    }
+
+    /// Move the caret to the grapheme under a click `col` within the field box.
+    /// `field` is the inner text rect from [`Self::field_text_rect`].
+    pub fn caret_click(&mut self, field: Rect, col: u16) {
+        if col < field.x {
+            self.caret = 0;
+            return;
+        }
+        self.caret = crate::ui::width::field_caret_at(&self.filename, field.width, col - field.x);
+    }
+
+    /// The inner text rect of the Name/path field box (shared with the renderer so
+    /// drawn == clickable): inside the field box's border, one row.
+    pub fn field_text_rect(&self, area: Rect) -> Rect {
+        let l = compute_layout(area, self.mode);
+        Rect::new(
+            l.field_box.x + 1,
+            l.field_box.y + 1,
+            l.field_box.width.saturating_sub(2),
+            1,
+        )
     }
 
     // ── Mouse hit-testing (shares geometry with the widget) ──────────────────
@@ -852,7 +924,22 @@ impl<'a> Widget for FileBrowserWidget<'a> {
         // Field text with an always-visible caret, right-anchored so the caret
         // (end of text) stays visible when the value is long.
         let box_inner_w = l.field_box.width.saturating_sub(2);
-        let text_with_caret = format!("{}▏", b.filename);
+        // Feature 031: embed the caret glyph at the caret grapheme (mid-string),
+        // not only at the end.
+        let text_with_caret = {
+            let caret = b.caret.min(b.filename.graphemes(true).count());
+            let mut s = String::new();
+            for (i, g) in b.filename.graphemes(true).enumerate() {
+                if i == caret {
+                    s.push('▏');
+                }
+                s.push_str(g);
+            }
+            if caret >= b.filename.graphemes(true).count() {
+                s.push('▏');
+            }
+            s
+        };
         let shown = {
             let total: u16 = text_with_caret.graphemes(true).map(grapheme_width).sum();
             if total <= box_inner_w {
@@ -924,6 +1011,38 @@ mod tests {
         fs::write(base.join("alpha.txt"), b"alpha\n").unwrap();
         fs::write(base.join(".hidden"), b"h\n").unwrap();
         base
+    }
+
+    // T009 (Feature 031): the filename field is a caret-aware single-line input.
+    #[test]
+    fn filename_caret_edit_and_move() {
+        let base = temp_tree("caret");
+        let mut b = FileBrowser::open(base, BrowseMode::Save);
+        for c in "report.txt".chars() {
+            b.push_char(c);
+        }
+        assert_eq!(b.filename, "report.txt");
+        assert_eq!(b.caret, 10, "caret follows typing to the end");
+        // Move to start, insert mid-string.
+        b.caret_home();
+        assert_eq!(b.caret, 0);
+        b.push_char('X');
+        assert_eq!(b.filename, "Xreport.txt");
+        assert_eq!(b.caret, 1);
+        // Right twice, backspace removes the grapheme before the caret.
+        b.caret_right();
+        b.caret_right(); // caret = 3 (after "Xre")
+        b.backspace(); // removes 'e' → "Xrport.txt"
+        assert_eq!(b.filename, "Xrport.txt");
+        assert_eq!(b.caret, 2);
+        // End clamps to len; Left/Right clamp at bounds.
+        b.caret_end();
+        assert_eq!(b.caret, b.filename.chars().count());
+        b.caret_right();
+        assert_eq!(b.caret, b.filename.chars().count(), "no overflow");
+        b.caret_home();
+        b.caret_left();
+        assert_eq!(b.caret, 0, "no underflow");
     }
 
     // T019 (Feature 028): PageUp/PageDown move by a page and clamp; no underflow.

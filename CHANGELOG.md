@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 031: Caret-on-click in dialog text fields
+
+Closes #58 (the deferred remainder of #53).
+
+#### Added
+
+- **Click to position the caret** in dialog text fields — the Find/Replace query and replacement fields,
+  the file-browser Name/path field, and the Go-to-Line input. The click maps to the character under the
+  pointer (clamped to the value end), matching the field's visible window (including right-anchored
+  scroll), via the shared display-width helper.
+- **Caret editing in the Name and Go-to-Line fields** (previously append-only): a caret you can move with
+  Left/Right/Home/End, with insert and delete acting at the caret and the caret shown mid-string. In the
+  file browser these act while a filename is being typed; with an empty field, Left/Right keep their
+  navigation meaning (← parent / → open). The Go-to-Line input stays digits-only.
+
+#### Notes
+
+- No new dependencies (Constitution IV); each field is covered by unit + integration tests (V). Existing
+  field behavior (typing/appending, Enter/activation, filtering, navigation, Esc) is unchanged.
+
 ### feature 030: Interaction completeness
 
 Addresses the deferred follow-ups from the feature-029 UX audit (#53–#56).

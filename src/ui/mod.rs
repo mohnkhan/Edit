@@ -393,7 +393,9 @@ impl Ui {
             let base = ratatui::style::Style::default()
                 .fg(app.theme.menubar_fg)
                 .bg(app.theme.menubar_bg);
-            let body = format!("Go to line: {entry}▏");
+            // Feature 031: embed the caret glyph at the caret position (mid-string).
+            let caret = app.pending_goto_line_caret.min(entry.len());
+            let body = format!("Go to line: {}▏{}", &entry[..caret], &entry[caret..]);
             // A compact centered box; width fits the prompt + padding, clamped.
             let dw = (body.len() as u16 + 4).clamp(20, size.width.max(1));
             let dh = 3u16.min(size.height.max(1));
@@ -588,6 +590,32 @@ pub fn find_replace_rect(
     let dx = area.x + area.width.saturating_sub(dw) / 2;
     let dy = area.y + 1; // near the top so it doesn't hide the current match
     ratatui::layout::Rect::new(dx, dy, dw, dh)
+}
+
+/// Feature 031: the inner text rect of each Find/Replace input field, matching
+/// `render_find_field`'s geometry (label row + a 3-row bordered box; the text sits
+/// at the box's middle row). Shared with the click hit-test so drawn == clickable.
+/// Query text is at `dy+3`, replacement (replace mode) at `dy+7`; x = `dx+2`,
+/// width = `dw-4`.
+pub fn find_replace_field_rects(
+    d: &crate::ui::dialog::FindReplaceDialog,
+    area: ratatui::layout::Rect,
+) -> Vec<(crate::ui::dialog::DialogField, ratatui::layout::Rect)> {
+    use crate::ui::dialog::{DialogField, DialogMode};
+    let da = find_replace_rect(d, area);
+    let text_x = da.x + 2;
+    let text_w = da.width.saturating_sub(4);
+    let mut out = vec![(
+        DialogField::Query,
+        ratatui::layout::Rect::new(text_x, da.y + 3, text_w, 1),
+    )];
+    if d.mode == DialogMode::Replace {
+        out.push((
+            DialogField::Replacement,
+            ratatui::layout::Rect::new(text_x, da.y + 7, text_w, 1),
+        ));
+    }
+    out
 }
 
 /// Feature 019: build the in-box display string for a Find/Replace field.
