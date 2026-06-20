@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 035: Animated demo GIF + README revamp
+
+#### Added
+
+- **Demo GIF** — `assets/demo.gif` showcases the editor (UTF-8 typing, word-wise selection, the Search
+  menu, multi-file tabs, and the scrollable Help overlay) in the classic DOS blue, embedded as the README
+  hero. Generated deterministically from the editor's own public API via a scripted asciicast
+  (`examples/demo_cast.rs`) rendered with the authentic CGA/DOS 16-color palette — no PTY/key-delivery
+  flakiness.
+- **`make demo-gif`** — regenerates `assets/demo.gif` from the scripted session (asciicast → `agg`).
+
+#### Changed
+
+- **README revamp** — leads with the animated demo, and the keybindings table is corrected to match the
+  current defaults (F5 Save, F6/Shift+F6 buffer switch, F2/F3 find prev/next, Ctrl+G go-to-line,
+  Ctrl+Backspace/Delete delete-word, Ctrl+Shift+arrows select-word) plus a mouse-support note.
+
+#### Notes
+
+- No new dependencies (`agg` is an external dev tool, not a crate). The intermediate `assets/demo.cast`
+  is gitignored; only the GIF is committed.
+
 ### feature 034: Crash-safe line access + crash diagnostics
 
 #### Fixed

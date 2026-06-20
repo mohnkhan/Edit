@@ -9,6 +9,16 @@
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.3.0-informational)](CHANGELOG.md)
 
+<p align="center">
+  <img src="assets/demo.gif"
+       alt="edit in action — typing UTF-8 text, word-wise selection, the Search menu, multi-file tabs, and the scrollable Help overlay, all in the classic DOS blue"
+       width="760">
+</p>
+
+<p align="center">
+  <em>The DOS editor, reborn for your terminal — UTF-8 native, mouse-aware, plugin-extensible.</em>
+</p>
+
 `edit` recreates the unmistakable blue-screen experience of Microsoft's MS-DOS text editor —
 pull-down menus, F-key bindings, and a status bar — as a single, fast, portable native binary that
 runs on **Linux, FreeBSD, macOS, and MyOS**. Unlike the original, it is **UTF-8/Unicode native from
@@ -16,20 +26,8 @@ the ground up**, written in **Rust** with
 [`ratatui`](https://ratatui.rs) and [`crossterm`](https://github.com/crossterm-rs/crossterm), and
 extensible through a **sandboxed plugin API**.
 
-```text
-┌ File  Edit  Search  View  Options  Help ─────────────────────────────────────┐
-│                                                                               │
-│  Welcome to edit — the DOS editor, reborn for your terminal.                  │
-│                                                                               │
-│  • Arrow keys to move, F10 for the menu bar, Alt+F to drop down File.         │
-│  • Ctrl+S saves, Ctrl+F finds, Ctrl+Q quits.                                  │
-│  • UTF-8 everywhere: 日本語, café, emoji 🚀 — all just work.                   │
-│                                                                               │
-│                                                                               │
-├───────────────────────────────────────────────────────────────────────────┤
-│ readme.txt    UTF-8    Ln 6, Col 12    [WRAP]                  F10=Menu  ◄┘   │
-└───────────────────────────────────────────────────────────────────────────┘
-```
+> The animation above is generated deterministically from the editor itself — run `make demo-gif` to
+> rebuild [`assets/demo.gif`](assets/demo.gif) from a scripted session ([`examples/demo_cast.rs`](examples/demo_cast.rs)).
 
 ---
 
@@ -157,23 +155,33 @@ A curated selection of the defaults — see [`docs/CAPABILITIES.md`](docs/CAPABI
 
 | Category | Key | Action |
 |---|---|---|
-| **File** | `Ctrl+S` / `Ctrl+Shift+S` | Save / Save As |
+| **File** | `Ctrl+S` / `F5` | Save |
 | | `F12` | Save As with encoding selection |
 | | `Ctrl+O` / `Ctrl+N` | Open / New |
+| | `Ctrl+W` | Close buffer |
 | | `Ctrl+Q` | Quit (prompts if unsaved) |
 | **Edit** | `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
 | | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / Copy / Paste |
+| | `F8` / `F9` / `F11` | Cut / Copy / Paste (DOS F-keys) |
 | | `Ctrl+A` | Select all |
-| **Navigate** | `Ctrl+←` / `Ctrl+→` | Word left / right |
-| | `Ctrl+Home` / `Ctrl+End` | Start / end of file |
+| | `Ctrl+Backspace` / `Ctrl+Delete` | Delete word left / right |
+| **Navigate** | `←` `→` `↑` `↓` · `Home` / `End` | Move · line start / end |
+| | `Ctrl+←` / `Ctrl+→` | Word left / right |
 | | `PgUp` / `PgDn` | Page up / down |
+| **Select** | `Shift+←/→/↑/↓` · `Shift+Home/End` | Extend selection |
+| | `Ctrl+Shift+←` / `Ctrl+Shift+→` | Select word left / right |
 | **Search** | `Ctrl+F` / `Ctrl+H` | Find / Find & Replace |
-| | `F3` / `Shift+F3` | Find next / previous |
-| **Buffers** | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous buffer |
-| | `Ctrl+W` / `F6` | Close buffer / next split pane |
+| | `F3` / `F2` | Find next / previous |
+| | `Ctrl+G` | Go to line |
+| **Buffers** | `F6` / `Shift+F6` | Next / previous buffer |
 | **View** | `Alt+Z` | Toggle soft-wrap |
 | **Menus** | `F10` | Activate menu bar |
 | | `Alt+F/E/S/V/O/H` | Open File / Edit / Search / View / Options / Help |
+| | `Esc` | Close menu / cancel dialog |
+
+> 🖱️ **Mouse, too:** click to position the caret, drag to select, double-click a word / triple-click a
+> line, right-click for a context menu, scroll with the wheel, and click menus, tabs, buttons, and
+> scrollbars.
 
 ---
 

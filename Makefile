@@ -1,5 +1,5 @@
 # Makefile for Linux EDIT.COM Clone
-# Targets: build debug-run release check smoke perf-check static package-deb package-rpm docs-gate
+# Targets: build debug-run demo-gif release check smoke perf-check static package-deb package-rpm docs-gate
 #          stress-test ci-local tmpfs-setup tmpfs-status tmpfs-teardown help
 
 BINARY     := edit
@@ -12,7 +12,7 @@ TARGET_DIR := target
 EDIT_TMPFS_HASH := $(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-12)
 EDIT_TMPFS_ROOT := /tmp/edit/$(EDIT_TMPFS_HASH)
 
-.PHONY: build debug-run release check smoke perf-check static package-deb package-rpm docs-gate \
+.PHONY: build debug-run demo-gif release check smoke perf-check static package-deb package-rpm docs-gate \
         stress-test ci-local tmpfs-setup tmpfs-status tmpfs-teardown help
 
 build:
@@ -25,6 +25,16 @@ build:
 # backtrace. Optional: `make debug-run FILE=path/to/file`.
 debug-run: build
 	RUST_BACKTRACE=full RUST_LOG=debug ./target/debug/edit --debug $(FILE)
+
+# Regenerate the README demo GIF (Feature 035). Renders a scripted session to an
+# asciicast via the public API (deterministic — no PTY), then `agg` → GIF.
+# Requires `agg` (cargo install --git https://github.com/asciinema/agg).
+demo-gif:
+	@command -v agg > /dev/null 2>&1 || { echo "ERROR: 'agg' not installed (cargo install --git https://github.com/asciinema/agg)"; exit 1; }
+	@mkdir -p assets
+	$(CARGO) run --quiet --example demo_cast > assets/demo.cast
+	agg --font-size 16 assets/demo.cast assets/demo.gif
+	@echo "Wrote assets/demo.gif"
 
 release:
 	$(CARGO) build --release
@@ -92,6 +102,7 @@ help:
 	@echo "Available targets:"
 	@echo "  build        Build debug binary"
 	@echo "  debug-run    Run the debug binary with full backtraces + debug logging (FILE=path optional)"
+	@echo "  demo-gif     Regenerate the README demo GIF (assets/demo.gif; needs agg)"
 	@echo "  release      Build release binary (stripped)"
 	@echo "  check        Run unit and integration tests"
 	@echo "  smoke        Run expect-based smoke tests (requires expect + tmux)"
