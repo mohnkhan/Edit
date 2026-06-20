@@ -318,6 +318,9 @@ keeps its jump-to-path behavior.
 | Shell | `.sh`, `.bash` |
 | YAML | `.yml`, `.yaml` |
 | Markdown | `.md` |
+| Rust | `.rs` |
+| JSON | `.json` |
+| TOML | `.toml` |
 
 ## Themes
 

@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F026-US1 | Rust (.rs) syntax highlighting (keywords, types, strings, numbers, comments, attributes, macros) | Complete |
+| F026-US2 | JSON (.json) syntax highlighting (keys vs values, numbers, true/false/null, punctuation) | Complete |
+| F026-US3 | TOML (.toml) syntax highlighting (headers, keys, strings, numbers, dates, booleans, comments) | Complete |
 | F025-US1 | Go to Line (Ctrl+G / Search menu): jump the cursor to a typed 1-based line, scrolled into view | Complete |
 | F025-US2 | Out-of-range clamps to first/last; Esc and empty/invalid input never move the cursor | Complete |
 | F025-US3 | Prompt is modal (captures input, one at a time); editing/find-replace/other dialogs unchanged | Complete |

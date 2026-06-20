@@ -2,6 +2,13 @@
 
 ## Deferred Features
 
+### Syntax highlighting beyond the baseline 5 (Constitution Principle VI)
+- **Status**: Rust / JSON / TOML shipped 2026-06-20 (feature 026, branch
+  `026-highlight-rust-json-toml`). The constitution defers "additional syntax-highlighting languages
+  beyond the baseline 5" pending a spec + accepted user story; `specs/026-highlight-rust-json-toml/`
+  is that spec. Further languages can follow the same pattern (`src/highlight/languages/`), each with
+  its own spec.
+
 ### Bordered-box styling for Find/Replace fields (follow-up to feature 018)
 - **Issue**: #41 (`follow-up`)
 - **Status**: Complete as of 2026-06-20 (feature 019, branch `019-find-replace-field-boxes`)
