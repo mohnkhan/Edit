@@ -81,6 +81,23 @@ impl<'a> EditorWidget<'a> {
             .position(|r| c >= r.start && c < r.end)
     }
 
+    /// Whether `(line, gcol)` falls within the buffer's selection (Feature 017).
+    /// Direction-independent: the anchor/active are ordered first.
+    fn selected(&self, line: usize, gcol: usize) -> bool {
+        let sel = match &self.buffer.selection {
+            Some(s) => s,
+            None => return false,
+        };
+        let a = (sel.anchor.line, sel.anchor.grapheme_col);
+        let b = (sel.active.line, sel.active.grapheme_col);
+        let (start, end) = if a <= b { (a, b) } else { (b, a) };
+        if start == end {
+            return false;
+        }
+        let p = (line, gcol);
+        p >= start && p < end
+    }
+
     /// Width of the gutter (including the `|` separator) when line numbers are shown.
     ///
     /// Format: `NNN|` — always 4 columns.
@@ -348,6 +365,7 @@ impl<'a> Widget for EditorWidget<'a> {
             let mut screen_col: usize = 0; // position within the content area
             let mut byte_off: usize = 0; // byte offset within line_str
             let mut char_off: usize = 0; // char offset within line_str
+            let mut gcol: usize = 0; // grapheme column within line (Feature 017)
 
             for grapheme in line_str.graphemes(true) {
                 let gw = UnicodeWidthStr::width(grapheme);
@@ -358,6 +376,7 @@ impl<'a> Widget for EditorWidget<'a> {
                     visual_col += gw;
                     byte_off += gbytes;
                     char_off += grapheme.chars().count();
+                    gcol += 1;
                     continue;
                 }
 
@@ -379,6 +398,7 @@ impl<'a> Widget for EditorWidget<'a> {
                     visual_col += gw;
                     byte_off += gbytes;
                     char_off += grapheme.chars().count();
+                    gcol += 1;
                     continue;
                 }
 
@@ -424,6 +444,12 @@ impl<'a> Widget for EditorWidget<'a> {
                     }
                 }
 
+                // Feature 017: selection highlight (reverse video), distinct from
+                // the search-match colors. The cursor cell keeps its own style.
+                if !is_cursor && self.selected(file_line, gcol) {
+                    style = style.add_modifier(ratatui::style::Modifier::REVERSED);
+                }
+
                 // Write the grapheme. For wide chars (gw == 2) ratatui will
                 // automatically place a space in the second cell.
                 let px = content_x_start + screen_col as u16;
@@ -435,6 +461,7 @@ impl<'a> Widget for EditorWidget<'a> {
                 visual_col += gw;
                 byte_off += gbytes;
                 char_off += grapheme.chars().count();
+                gcol += 1;
             }
 
             // If the cursor is at the end of the line (past all graphemes) and

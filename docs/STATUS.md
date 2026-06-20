@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F017-US1 | Selected text rendered with a highlight (reverse video); Select All shows it | Complete |
+| F017-US2 | Shift+Arrow/Home/End keyboard selection; typing/paste replaces; Copy/Cut act on it | Complete |
+| F017-US3 | Mouse press-drag-release selects; single click clears | Complete |
 | F016-US1 | Mouse-click dialog buttons (confirm/dismiss dialogs); outside-click cancels | Complete |
 | F016-US2 | Boxed buttons with one focused (borders + ▶ marker) | Complete |
 | F016-US3 | Tab/Shift+Tab order + Enter/Space activation; safe default focus; letter shortcuts intact | Complete |

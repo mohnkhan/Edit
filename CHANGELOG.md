@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 017: Visible text selection (highlight, Shift-select, mouse-drag)
+
+#### Added
+
+- **Selection highlight** — selected text is now drawn with reverse video (distinct from the yellow
+  search-match highlight). Select All (`Ctrl+A`) shows the whole buffer highlighted.
+- **Keyboard selection** — `Shift+Arrow` and `Shift+Home`/`Shift+End` extend the selection from the
+  cursor. Moving without Shift clears it; typing or pasting replaces the selection; `Backspace`/`Delete`
+  delete it. `Ctrl+C`/`Ctrl+X` copy/cut the selection (undoable).
+- **Mouse selection** — press-drag-release in the editor selects the text between the press and release
+  points (highlighted live); a single click clears the selection and moves the cursor.
+
+#### Fixed
+
+- Selections were previously **invisible** (never rendered) and could only be created via Select All,
+  which made copy/paste unintuitive.
+
 ### feature 016: Focusable dialog buttons (borders, tab order, mouse)
 
 #### Added
