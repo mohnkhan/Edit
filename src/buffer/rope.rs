@@ -61,7 +61,20 @@ impl EditorRope {
 
     /// Return line `line_idx` as a `String`, with any trailing `\n` / `\r\n`
     /// stripped.
+    ///
+    /// Feature 034: an out-of-range `line_idx` returns an empty string instead of
+    /// panicking (`ropey::Rope::line` panics past the end). A debug build asserts
+    /// so a stale line index is caught at its source (with a backtrace) during
+    /// development, while a release build degrades gracefully (no crash).
     pub fn line_slice(&self, line_idx: usize) -> String {
+        let len = self.0.len_lines();
+        debug_assert!(
+            line_idx < len,
+            "line_slice: line index {line_idx} out of range (len_lines {len})"
+        );
+        if line_idx >= len {
+            return String::new();
+        }
         let line = self.0.line(line_idx);
         let s: String = line.chars().collect();
         // Strip trailing newline characters.
