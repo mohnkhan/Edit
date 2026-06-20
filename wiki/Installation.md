@@ -68,12 +68,18 @@ The Debian package installs the binary to `/usr/bin/edit` and the man page to
 
 | Target | Toolchain | Profile | Notes |
 |---|---|---|---|
-| `x86_64-unknown-linux-gnu` | stable 1.74.0+ | debug, release | Primary development target |
+| `x86_64-unknown-linux-gnu` | stable 1.74.0+ | debug, release | Primary (CI-gated) development target |
 | `aarch64-unknown-linux-gnu` | stable 1.74.0+ | debug, release | Cross-compiled (e.g. via `cross`) |
 | `x86_64-unknown-linux-musl` | nightly | release-static | Static binary, no glibc dependency |
+| `x86_64-unknown-freebsd` | stable 1.74.0+ | debug, release | Supported per project constitution |
+| `x86_64-apple-darwin` | stable 1.74.0+ | debug, release | Supported per project constitution |
+| `aarch64-apple-darwin` | stable 1.74.0+ | debug, release | Supported per project constitution |
 
-There is **no DOS/DPMI runtime dependency** and **no X11/Wayland dependency** — `edit` runs in any
-Linux terminal.
+`edit` is **OS-agnostic, pure-Rust** with no platform-specific runtime dependency, so it builds from
+the same source on every target above. There is **no DOS/DPMI runtime dependency** and **no
+X11/Wayland dependency** — `edit` runs in any terminal. Linux x86_64 is the primary CI-gated target;
+FreeBSD and macOS (and MyOS, where `edit` ships as the built-in editor) are supported per the project
+constitution.
 
 ## Running
 

@@ -25,16 +25,10 @@ recommended for correct rendering.
 
 ### How do I open a CP437 (DOS) file?
 
-Use the dedicated shortcut:
+Force the encoding explicitly with `--encoding`:
 
 ```sh
-edit --legacy-cp437 OLDFILE.TXT
-```
-
-Or, for any supported code page, force the encoding explicitly:
-
-```sh
-edit --encoding cp437 README.DOS
+edit --encoding cp437 OLDFILE.TXT
 edit --encoding cp850 file.txt
 edit --encoding windows-1252 legacy.txt
 ```
@@ -82,9 +76,9 @@ is deleted, the buffer is kept in memory and saving recreates the file. Disable 
 
 ### What languages get syntax highlighting?
 
-C/C++ (`.c .h .cpp .hpp`), Python (`.py`), Shell (`.sh .bash`), YAML (`.yml .yaml`), and Markdown
-(`.md`). Plugins can add more — a plugin highlighter takes precedence over the built-in one for its
-declared extensions.
+C (`.c .h`), Python (`.py`), Shell (`.sh .bash`), YAML (`.yml .yaml`), Markdown (`.md`), Rust
+(`.rs`), JSON (`.json`), and TOML (`.toml`). Plugins can add more — a plugin highlighter takes
+precedence over the built-in one for its declared extensions.
 
 ### How do I recover work after a crash?
 

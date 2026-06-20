@@ -35,11 +35,10 @@ edit --encoding cp437 README.DOS
 edit --encoding windows-1252 legacy.txt
 ```
 
-For the common DOS case there is a dedicated shortcut, `--legacy-cp437`, which enables CP437 → UTF-8
-transcoding on open:
+For the common DOS case, pass `--encoding cp437`, which transcodes CP437 → UTF-8 on open:
 
 ```sh
-edit --legacy-cp437 OLDFILE.TXT
+edit --encoding cp437 OLDFILE.TXT
 ```
 
 Transcoding is powered by `encoding_rs` and `oem_cp` under the hood.
@@ -54,13 +53,8 @@ UTF-16 files are auto-detected by their byte-order mark:
 | UTF-16 BE | `FE FF` | Auto-detected on read; BOM written on encode |
 
 Round-trips are byte-identical, and surrogate pairs (e.g. emoji and other Supplementary Plane
-characters) survive intact. You can also force UTF-16 explicitly:
-
-```sh
-edit --encoding utf-16-le file.txt
-edit --encoding utf-16-be file.txt
-edit --encoding utf-16    file.txt   # defaults to little-endian
-```
+characters) survive intact. UTF-16 is detected from the BOM on read; the `--encoding` flag itself
+accepts only the single-byte code pages (`utf-8`, `cp437`, `cp850`, `iso-8859-1`, `windows-1252`).
 
 ## Encoding support matrix
 
@@ -69,7 +63,7 @@ edit --encoding utf-16    file.txt   # defaults to little-endian
 | UTF-8 | Yes | Yes | Default; BOM stripped on read |
 | UTF-16 LE | Yes | Yes | Auto-detected by BOM (`FF FE`); BOM written on encode |
 | UTF-16 BE | Yes | Yes | Auto-detected by BOM (`FE FF`); BOM written on encode |
-| CP437 | Yes | Yes | DOS code page 437; `--legacy-cp437` flag |
+| CP437 | Yes | Yes | DOS code page 437; `--encoding cp437` |
 | CP850 | Yes | Yes | DOS code page 850 |
 | ISO-8859-1 | Yes | Yes | Latin-1 |
 | Windows-1252 | Yes | Yes | Windows Western European |
