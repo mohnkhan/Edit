@@ -8,6 +8,9 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F032-US1 | Word-wise cursor movement (Ctrl+Left/Right), grapheme/word-boundary aware, crosses lines | Complete |
+| F032-US2 | Word-wise selection (Ctrl+Shift+Left/Right), usable by Copy/Cut | Complete |
+| F032-US3 | Word-wise deletion (Ctrl+Backspace/Delete), one undo step, read-only respected | Complete |
 | F031-US1 | Click to position the caret in the Find/Replace query & replacement fields (#58) | Complete |
 | F031-US2 | File-browser Name field caret editing (Left/Right/Home/End, mid-string insert/delete) + click-to-position (#58) | Complete |
 | F031-US3 | Go-to-Line input caret editing + click-to-position (digits-only preserved) (#58) | Complete |

@@ -51,6 +51,8 @@ edit [OPTIONS] [FILE...]
 | `Ctrl+X` / `F8` | Cut selection |
 | `Ctrl+C` / `F9` | Copy selection |
 | `Ctrl+V` / `F11` | Paste |
+| `Ctrl+Left` / `Ctrl+Right` | Move cursor by word (Feature 032) |
+| `Ctrl+Backspace` / `Ctrl+Delete` | Delete previous / next word (Feature 032) |
 | `Delete` | Delete character at cursor |
 | `Backspace` | Delete character before cursor |
 | `Tab` | Insert tab / indent selection |
@@ -77,6 +79,7 @@ replaces it; `Backspace`/`Delete` delete it; moving without Shift (or a single c
 |---|---|
 | `Shift+Arrow` | Extend selection by a character / line |
 | `Shift+Home` / `Shift+End` | Extend selection to line start / end |
+| `Ctrl+Shift+Left` / `Ctrl+Shift+Right` | Extend selection by word (Feature 032) |
 | `Ctrl+A` | Select all |
 | Mouse press-drag-release | Select the dragged range |
 | Single click | Move cursor, clear selection |

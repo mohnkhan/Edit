@@ -1511,6 +1511,9 @@ impl App {
             Action::MovePageDown => self.move_page_down(),
             Action::MoveDocStart => self.move_doc_start(),
             Action::MoveDocEnd => self.move_doc_end(),
+            // Feature 032: word-wise movement.
+            Action::MoveWordLeft => self.move_word(Direction::Left),
+            Action::MoveWordRight => self.move_word(Direction::Right),
 
             // Feature 017: Shift+navigation — extend the selection while moving.
             Action::SelectLeft => self.move_cursor_selecting(Direction::Left),
@@ -1519,6 +1522,9 @@ impl App {
             Action::SelectDown => self.move_cursor_selecting(Direction::Down),
             Action::SelectLineStart => self.select_line_start(),
             Action::SelectLineEnd => self.select_line_end(),
+            // Feature 032: word-wise selection.
+            Action::SelectWordLeft => self.move_word_selecting(Direction::Left),
+            Action::SelectWordRight => self.move_word_selecting(Direction::Right),
 
             // Text insertion — T026
             Action::InsertChar(c) => self.insert_char(c),
@@ -1527,6 +1533,9 @@ impl App {
             // Deletion — T027
             Action::Backspace => self.delete_backward(),
             Action::Delete => self.delete_forward(),
+            // Feature 032: word-wise deletion.
+            Action::DeleteWordLeft => self.delete_word(Direction::Left),
+            Action::DeleteWordRight => self.delete_word(Direction::Right),
 
             // File browser (Feature 012). Open/Save As show the navigable browser.
             Action::Open => {
@@ -2184,6 +2193,117 @@ impl App {
         let (new_line, new_gcol) = self.next_cursor_pos(dir);
         self.set_cursor_lc(new_line, new_gcol);
         self.update_selection_to_cursor(anchor);
+    }
+
+    // ── Feature 032 — word-wise movement / selection / deletion ───────────────
+
+    /// Compute the word-target `(line, grapheme_col)` one word step in `dir` from
+    /// the cursor, using `grapheme_class` (shared with double-click, feature 030).
+    /// Right = start of the next token (consume the current run + following
+    /// whitespace); Left = start of the preceding token (consume preceding
+    /// whitespace + that token's run). Crosses line boundaries; a buffer end
+    /// returns the cursor unchanged (no-op).
+    fn next_word_pos(&self, dir: Direction) -> (usize, usize) {
+        let buf = &self.buffers[self.active_idx];
+        let line = buf.cursor.line;
+        let gcol = buf.cursor.grapheme_col;
+        let graphemes: Vec<String> = buf
+            .rope
+            .line_slice(line)
+            .graphemes(true)
+            .map(|s| s.to_string())
+            .collect();
+        let len = graphemes.len();
+        match dir {
+            Direction::Right => {
+                if gcol >= len {
+                    if line + 1 < buf.rope.line_count() {
+                        (line + 1, 0)
+                    } else {
+                        (line, len)
+                    }
+                } else {
+                    let mut i = gcol;
+                    let start_class = Self::grapheme_class(&graphemes[i]);
+                    while i < len && Self::grapheme_class(&graphemes[i]) == start_class {
+                        i += 1;
+                    }
+                    // Skip a following whitespace run → start of the next token.
+                    while i < len && Self::grapheme_class(&graphemes[i]) == 1 {
+                        i += 1;
+                    }
+                    (line, i)
+                }
+            }
+            Direction::Left => {
+                if gcol == 0 {
+                    if line > 0 {
+                        (line - 1, buf.rope.grapheme_count_on_line(line - 1))
+                    } else {
+                        (line, 0)
+                    }
+                } else {
+                    let mut i = gcol - 1;
+                    // Skip a preceding whitespace run.
+                    while i > 0 && Self::grapheme_class(&graphemes[i]) == 1 {
+                        i -= 1;
+                    }
+                    // Consume the preceding token run → its start.
+                    let tok_class = Self::grapheme_class(&graphemes[i]);
+                    while i > 0 && Self::grapheme_class(&graphemes[i - 1]) == tok_class {
+                        i -= 1;
+                    }
+                    (line, i)
+                }
+            }
+            _ => (line, gcol),
+        }
+    }
+
+    /// Move the cursor one word in `dir` (clears any selection). (US1)
+    pub fn move_word(&mut self, dir: Direction) {
+        let (l, g) = self.next_word_pos(dir);
+        self.buffers[self.active_idx].selection = None;
+        self.set_cursor_lc(l, g);
+    }
+
+    /// Extend the selection one word in `dir` (Ctrl+Shift+Arrow). (US2)
+    pub fn move_word_selecting(&mut self, dir: Direction) {
+        let anchor = self.selection_anchor_or_cursor();
+        let (l, g) = self.next_word_pos(dir);
+        self.set_cursor_lc(l, g);
+        self.update_selection_to_cursor(anchor);
+    }
+
+    /// Delete one word in `dir` as a single undo step (Ctrl+Backspace/Delete). With
+    /// an active selection, deletes the selection instead. (US3)
+    pub fn delete_word(&mut self, dir: Direction) {
+        if self.deny_if_readonly() {
+            return;
+        }
+        if self.buffers[self.active_idx].selection.is_some() {
+            self.delete_selection();
+            return;
+        }
+        let cursor = self.buffers[self.active_idx].cursor;
+        let (l, g) = self.next_word_pos(dir);
+        if (l, g) == (cursor.line, cursor.grapheme_col) {
+            return; // buffer end — nothing to delete
+        }
+        // Span cursor↔target as a selection, then reuse the char-safe,
+        // single-undo-step delete path (which also places the cursor at the start).
+        let vcol =
+            CursorPos::visual_col_from_grapheme_col(&self.buffers[self.active_idx].rope, l, g);
+        let target = CursorPos {
+            line: l,
+            grapheme_col: g,
+            visual_col: vcol,
+        };
+        self.buffers[self.active_idx].selection = Some(Selection {
+            anchor: cursor,
+            active: target,
+        });
+        self.delete_selection();
     }
 
     /// The current selection's anchor, or the cursor position if there is none.
@@ -5239,6 +5359,103 @@ mod tests {
         assert!(a.buffers[0].modified, "stays modified after a failed save");
     }
 
+    // T003 (Feature 032): next_word_pos finds the right word boundaries, including
+    // across line boundaries and at buffer ends.
+    #[test]
+    fn next_word_pos_boundaries() {
+        let mut a = make_app();
+        a.buffers[0].rope =
+            crate::buffer::rope::EditorRope::from_str("foo  bar_baz, café\nsecond\n");
+        a.active_idx = 0;
+        let put = |a: &mut App, l: usize, g: usize| {
+            a.buffers[0].cursor = crate::buffer::CursorPos {
+                line: l,
+                grapheme_col: g,
+                visual_col: g,
+            };
+        };
+        // Right: start of "foo" → start of "bar_baz" (skip word + spaces).
+        put(&mut a, 0, 0);
+        assert_eq!(a.next_word_pos(Direction::Right), (0, 5));
+        // Right: start of "bar_baz" → the comma (its own token, no spaces to skip).
+        put(&mut a, 0, 5);
+        assert_eq!(a.next_word_pos(Direction::Right), (0, 12));
+        // Left: start of "bar_baz" (5) → start of "foo" (0).
+        put(&mut a, 0, 5);
+        assert_eq!(a.next_word_pos(Direction::Left), (0, 0));
+        // Right at end of line 0 → start of line 1.
+        put(&mut a, 0, 18);
+        assert_eq!(a.next_word_pos(Direction::Right), (1, 0));
+        // Left at column 0 of line 1 → end of line 0.
+        put(&mut a, 1, 0);
+        assert_eq!(a.next_word_pos(Direction::Left), (0, 18));
+        // Buffer ends: no-op.
+        put(&mut a, 0, 0);
+        assert_eq!(a.next_word_pos(Direction::Left), (0, 0));
+        let last = a.buffers[0].rope.line_count() - 1;
+        let last_len = a.buffers[0].rope.grapheme_count_on_line(last);
+        put(&mut a, last, last_len);
+        assert_eq!(a.next_word_pos(Direction::Right), (last, last_len));
+    }
+
+    // T007/T010 (Feature 032): word move clears selection; word-select builds it.
+    #[test]
+    fn move_and_select_by_word() {
+        let mut a = make_app();
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("foo bar baz\n");
+        a.active_idx = 0;
+        a.buffers[0].cursor = crate::buffer::CursorPos::default();
+        // Two word-selects: first → start of "bar" ("foo "), second → start of
+        // "baz" ("foo bar ").
+        a.move_word_selecting(Direction::Right);
+        assert_eq!(a.selection_text().as_deref(), Some("foo "));
+        a.move_word_selecting(Direction::Right);
+        assert_eq!(a.selection_text().as_deref(), Some("foo bar "));
+        assert_eq!(a.buffers[0].cursor.grapheme_col, 8);
+        // A plain word move clears the selection.
+        a.move_word(Direction::Left);
+        assert!(a.buffers[0].selection.is_none());
+    }
+
+    // T013 (Feature 032): word delete is one undo step; respects selection,
+    // buffer ends, and read-only.
+    #[test]
+    fn delete_by_word_behaviors() {
+        let mut a = make_app();
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("foo bar baz\n");
+        a.active_idx = 0;
+        // Cursor after "foo" (gcol 3): Ctrl+Backspace deletes "foo".
+        a.buffers[0].cursor = crate::buffer::CursorPos {
+            line: 0,
+            grapheme_col: 3,
+            visual_col: 3,
+        };
+        a.delete_word(Direction::Left);
+        assert_eq!(a.buffers[0].rope.line_slice(0), " bar baz");
+        // One undo step restores it.
+        a.handle_action(Action::Undo).unwrap();
+        assert_eq!(a.buffers[0].rope.line_slice(0), "foo bar baz");
+        // Delete forward from start removes "foo " (word + trailing whitespace run).
+        a.buffers[0].cursor = crate::buffer::CursorPos::default();
+        a.delete_word(Direction::Right);
+        assert_eq!(a.buffers[0].rope.line_slice(0), "bar baz");
+        // Read-only blocks deletion and reports the message.
+        a.handle_action(Action::Undo).unwrap();
+        a.buffers[0].readonly = true;
+        a.buffers[0].cursor = crate::buffer::CursorPos {
+            line: 0,
+            grapheme_col: 3,
+            visual_col: 3,
+        };
+        a.delete_word(Direction::Left);
+        assert_eq!(
+            a.buffers[0].rope.line_slice(0),
+            "foo bar baz",
+            "read-only: no change"
+        );
+        assert_eq!(a.status_message.as_deref(), Some("Buffer is read-only"));
+    }
+
     // T005 (Feature 030): double-click selects the word under the cursor; triple
     // selects the line; works over multibyte; degenerate cases don't panic.
     #[test]
@@ -6543,5 +6760,31 @@ mod tests {
             saved, content,
             "saved bytes must be identical to original content"
         );
+    }
+}
+
+#[cfg(test)]
+mod f032_dbg2 {
+    use super::*;
+    fn mk() -> App {
+        App::new(Config::default(), vec![], EncodingId::Utf8, None, None)
+    }
+    #[test]
+    fn no_termsize() {
+        let mut a = mk();
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("foo bar baz\n");
+        a.active_idx = 0;
+        a.buffers[0].cursor = crate::buffer::CursorPos {
+            line: 0,
+            grapheme_col: 3,
+            visual_col: 3,
+        };
+        eprintln!(
+            "DBG2 npw={:?} termsize={:?}",
+            a.next_word_pos(Direction::Left),
+            a.terminal_size
+        );
+        a.delete_word(Direction::Left);
+        eprintln!("DBG2 after={:?}", a.buffers[0].rope.line_slice(0));
     }
 }

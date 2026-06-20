@@ -81,6 +81,9 @@ pub enum Action {
     MovePageDown,
     MoveDocStart,
     MoveDocEnd,
+    // Feature 032: word-wise movement.
+    MoveWordLeft,
+    MoveWordRight,
 
     // Feature 017: Shift+navigation — extend the selection while moving.
     SelectLeft,
@@ -89,11 +92,17 @@ pub enum Action {
     SelectDown,
     SelectLineStart,
     SelectLineEnd,
+    // Feature 032: word-wise selection.
+    SelectWordLeft,
+    SelectWordRight,
 
     // Text input / deletion
     InsertChar(char),
     Backspace,
     Delete,
+    // Feature 032: word-wise deletion.
+    DeleteWordLeft,
+    DeleteWordRight,
     InsertNewline,
 
     // Terminal resize event
@@ -144,6 +153,14 @@ impl KeybindingMap {
         map.insert("F8".to_string(), Action::Cut);
         map.insert("F9".to_string(), Action::Copy);
         map.insert("F11".to_string(), Action::Paste);
+
+        // Feature 032: word-wise navigation, selection, and deletion.
+        map.insert("Ctrl+Left".to_string(), Action::MoveWordLeft);
+        map.insert("Ctrl+Right".to_string(), Action::MoveWordRight);
+        map.insert("Ctrl+Shift+Left".to_string(), Action::SelectWordLeft);
+        map.insert("Ctrl+Shift+Right".to_string(), Action::SelectWordRight);
+        map.insert("Ctrl+Backspace".to_string(), Action::DeleteWordLeft);
+        map.insert("Ctrl+Delete".to_string(), Action::DeleteWordRight);
 
         // Edit
         map.insert("Ctrl+X".to_string(), Action::Cut);
@@ -351,6 +368,12 @@ fn action_from_str(s: &str) -> Option<Action> {
         "MoveRight" => Some(Action::MoveRight),
         "MoveLineStart" => Some(Action::MoveLineStart),
         "MoveLineEnd" => Some(Action::MoveLineEnd),
+        "MoveWordLeft" => Some(Action::MoveWordLeft),
+        "MoveWordRight" => Some(Action::MoveWordRight),
+        "SelectWordLeft" => Some(Action::SelectWordLeft),
+        "SelectWordRight" => Some(Action::SelectWordRight),
+        "DeleteWordLeft" => Some(Action::DeleteWordLeft),
+        "DeleteWordRight" => Some(Action::DeleteWordRight),
         "MovePageUp" => Some(Action::MovePageUp),
         "MovePageDown" => Some(Action::MovePageDown),
         "MoveDocStart" => Some(Action::MoveDocStart),

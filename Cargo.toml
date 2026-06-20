@@ -164,6 +164,10 @@ path = "tests/integration/interaction.rs"
 name = "field_caret"
 path = "tests/integration/field_caret.rs"
 
+[[test]]
+name = "word_editing"
+path = "tests/integration/word_editing.rs"
+
 [[bench]]
 name = "startup"
 harness = false
