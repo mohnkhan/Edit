@@ -79,10 +79,15 @@ edit [OPTIONS] [FILE...]
 
 | Key | Action |
 |---|---|
-| `Ctrl+F` | Open Find dialog |
-| `Ctrl+H` | Open Find and Replace dialog |
-| `F3` | Find next |
-| `Shift+F3` | Find previous |
+| `Ctrl+F` | Open the interactive Find dialog (type term, `Enter` to search; matches highlighted, view jumps to the current match, "X of Y" shown) |
+| `Ctrl+H` | Open the interactive Replace dialog (find + replace-with fields) |
+| `F3` | Find next (wraps) |
+| `F2` | Find previous (wraps) |
+| `Tab` | Replace dialog: switch between the find and replace fields |
+| `Enter` | Find: search / advance · Replace: replace current match and advance |
+| `Ctrl+A` | Replace dialog: Replace All (Select-All everywhere else) |
+| `Alt+C` / `Alt+A` / `Alt+R` / `Alt+W` | Toggle case-sensitive / wrap-around / regex / whole-word (while a Find/Replace dialog is open) |
+| `Esc` | Close the Find/Replace dialog and clear match highlights |
 
 ### Multi-File / Buffers
 

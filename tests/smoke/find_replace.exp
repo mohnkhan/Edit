@@ -1,0 +1,57 @@
+#!/usr/bin/env expect
+# Smoke test (Feature 015): open the Find dialog with Ctrl+F, type a term, press
+# Enter to search, Esc to close, then quit. Verifies the interactive Find dialog
+# drives a search without crashing and exits 0.
+#
+# Usage: expect tests/smoke/find_replace.exp
+# Exit codes: 0 = handled Ctrl+F + type + Enter + Esc + quit cleanly; 1 = failure.
+
+set timeout 10
+
+proc fail {msg} {
+    puts stderr "FAIL: $msg"
+    exit 1
+}
+
+spawn ./target/debug/edit
+
+expect {
+    timeout { fail "editor did not start within $timeout seconds" }
+    -re ".+" {}
+}
+after 300
+
+# Type some content to search within.
+send "hello hello world"
+after 200
+
+# ── Ctrl+F opens the Find dialog ──────────────────────────────────────────────
+send "\x06"
+after 300
+send "hello"
+after 200
+send "\r"
+after 300
+
+# ── Esc closes the dialog ─────────────────────────────────────────────────────
+send "\x1b"
+after 200
+
+# ── Quit cleanly with Ctrl+Q ─────────────────────────────────────────────────
+send "\x11"
+after 200
+# A save prompt may appear (buffer is modified) — discard.
+send "d"
+expect {
+    eof     {}
+    timeout { fail "editor did not exit within $timeout seconds after Ctrl+Q" }
+}
+
+catch {wait} result
+set exit_code [lindex $result 3]
+if {$exit_code != 0} {
+    fail "editor exited with non-zero status: $exit_code"
+}
+
+puts "PASS: Find dialog opened via Ctrl+F, searched, and exited cleanly"
+exit 0

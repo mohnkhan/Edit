@@ -89,6 +89,10 @@ name = "undo_clean_revert"
 path = "tests/integration/undo_clean_revert.rs"
 
 [[test]]
+name = "find_replace"
+path = "tests/integration/find_replace.rs"
+
+[[test]]
 name = "file_browser"
 path = "tests/integration/file_browser.rs"
 

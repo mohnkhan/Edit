@@ -31,6 +31,15 @@ pub enum Action {
     FindNext,
     FindPrev,
     FindReplace,
+    /// Feature 015: toggle search options — handled only while a Find/Replace
+    /// dialog is open; inert no-ops otherwise.
+    ToggleSearchCase,
+    ToggleSearchWrap,
+    ToggleSearchRegex,
+    ToggleSearchWholeWord,
+    /// Feature 015: move focus to the next field (Tab) — used by the Replace
+    /// dialog; inert no-op outside a dialog (Tab is otherwise unbound).
+    FocusNextField,
 
     // Menu navigation
     Menu,
@@ -127,6 +136,12 @@ impl KeybindingMap {
         map.insert("F3".to_string(), Action::FindNext);
         map.insert("F2".to_string(), Action::FindPrev);
         map.insert("Ctrl+H".to_string(), Action::FindReplace);
+        // Feature 015: in-dialog search-option toggles (free Alt keys).
+        map.insert("Alt+C".to_string(), Action::ToggleSearchCase);
+        map.insert("Alt+A".to_string(), Action::ToggleSearchWrap);
+        map.insert("Alt+R".to_string(), Action::ToggleSearchRegex);
+        map.insert("Alt+W".to_string(), Action::ToggleSearchWholeWord);
+        map.insert("Tab".to_string(), Action::FocusNextField);
 
         // Help / menu
         map.insert("F1".to_string(), Action::Help);
@@ -263,6 +278,10 @@ fn action_from_str(s: &str) -> Option<Action> {
         "Open" => Some(Action::Open),
         "Close" => Some(Action::Close),
         "Revert" => Some(Action::Revert),
+        "ToggleSearchCase" => Some(Action::ToggleSearchCase),
+        "ToggleSearchWrap" => Some(Action::ToggleSearchWrap),
+        "ToggleSearchRegex" => Some(Action::ToggleSearchRegex),
+        "ToggleSearchWholeWord" => Some(Action::ToggleSearchWholeWord),
         "Quit" => Some(Action::Quit),
         "Cut" => Some(Action::Cut),
         "Copy" => Some(Action::Copy),

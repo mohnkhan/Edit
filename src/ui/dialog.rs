@@ -15,8 +15,135 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::encoding::EncodingId;
 use crate::ui::theme::Theme;
+
+// ---------------------------------------------------------------------------
+// Feature 015 — interactive Find / Replace dialog model
+// ---------------------------------------------------------------------------
+
+/// Whether the Find/Replace dialog is in Find or Replace mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogMode {
+    Find,
+    Replace,
+}
+
+/// Which text field currently has the caret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogField {
+    Query,
+    Replacement,
+}
+
+/// Interactive Find/Replace dialog state (Feature 015). Field editing is
+/// grapheme-aware so multi-byte input is never split.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindReplaceDialog {
+    pub mode: DialogMode,
+    pub query: String,
+    pub replacement: String,
+    pub focus: DialogField,
+    /// Caret position as a grapheme index within the focused field.
+    pub caret: usize,
+    pub case_sensitive: bool,
+    pub wrap: bool,
+    pub regex: bool,
+    pub whole_word: bool,
+}
+
+impl FindReplaceDialog {
+    /// Open a dialog in `mode`, seeded with `query` (caret at end). Default
+    /// options: case-insensitive, wrap on, no regex, no whole-word.
+    pub fn new(mode: DialogMode, query: String) -> Self {
+        let caret = query.graphemes(true).count();
+        FindReplaceDialog {
+            mode,
+            query,
+            replacement: String::new(),
+            focus: DialogField::Query,
+            caret,
+            case_sensitive: false,
+            wrap: true,
+            regex: false,
+            whole_word: false,
+        }
+    }
+
+    /// The text of the currently focused field.
+    fn focused(&self) -> &String {
+        match self.focus {
+            DialogField::Query => &self.query,
+            DialogField::Replacement => &self.replacement,
+        }
+    }
+
+    fn focused_mut(&mut self) -> &mut String {
+        match self.focus {
+            DialogField::Query => &mut self.query,
+            DialogField::Replacement => &mut self.replacement,
+        }
+    }
+
+    /// Byte offset in `s` corresponding to a grapheme index.
+    fn byte_at(s: &str, grapheme_idx: usize) -> usize {
+        s.grapheme_indices(true)
+            .nth(grapheme_idx)
+            .map(|(b, _)| b)
+            .unwrap_or(s.len())
+    }
+
+    /// Insert a character at the caret in the focused field.
+    pub fn insert_char(&mut self, c: char) {
+        let caret = self.caret;
+        let field = self.focused_mut();
+        let b = Self::byte_at(field, caret);
+        field.insert(b, c);
+        self.caret += 1;
+    }
+
+    /// Delete the grapheme before the caret (Backspace).
+    pub fn backspace(&mut self) {
+        if self.caret == 0 {
+            return;
+        }
+        let caret = self.caret;
+        let field = self.focused_mut();
+        let start = Self::byte_at(field, caret - 1);
+        let end = Self::byte_at(field, caret);
+        field.replace_range(start..end, "");
+        self.caret -= 1;
+    }
+
+    /// Move the caret one grapheme left.
+    pub fn move_left(&mut self) {
+        self.caret = self.caret.saturating_sub(1);
+    }
+
+    /// Move the caret one grapheme right (clamped to field length).
+    pub fn move_right(&mut self) {
+        let len = self.focused().graphemes(true).count();
+        if self.caret < len {
+            self.caret += 1;
+        }
+    }
+
+    /// Switch focus between the query and replacement fields (Replace mode only),
+    /// clamping the caret to the newly focused field.
+    pub fn switch_focus(&mut self) {
+        if self.mode != DialogMode::Replace {
+            return;
+        }
+        self.focus = match self.focus {
+            DialogField::Query => DialogField::Replacement,
+            DialogField::Replacement => DialogField::Query,
+        };
+        let len = self.focused().graphemes(true).count();
+        self.caret = self.caret.min(len);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // ENCODING_OPTIONS — T006
@@ -147,6 +274,68 @@ mod tests {
     #[test]
     fn test_encoding_options_has_seven_entries() {
         assert_eq!(ENCODING_OPTIONS.len(), 7);
+    }
+
+    // ── Feature 015 — FindReplaceDialog field editing ──────────────────────────
+
+    #[test]
+    fn frd_insert_and_backspace_at_caret() {
+        let mut d = FindReplaceDialog::new(DialogMode::Find, String::new());
+        for c in "abc".chars() {
+            d.insert_char(c);
+        }
+        assert_eq!(d.query, "abc");
+        assert_eq!(d.caret, 3);
+        d.move_left(); // caret between b and c
+        d.insert_char('X');
+        assert_eq!(d.query, "abXc");
+        assert_eq!(d.caret, 3);
+        d.backspace(); // remove X
+        assert_eq!(d.query, "abc");
+        assert_eq!(d.caret, 2);
+    }
+
+    #[test]
+    fn frd_caret_clamps_and_seed_at_end() {
+        let mut d = FindReplaceDialog::new(DialogMode::Find, "hi".to_string());
+        assert_eq!(d.caret, 2, "seeded caret at end");
+        d.move_right(); // already at end → clamp
+        assert_eq!(d.caret, 2);
+        d.move_left();
+        d.move_left();
+        d.move_left(); // clamp at 0
+        assert_eq!(d.caret, 0);
+        d.backspace(); // nothing to delete
+        assert_eq!(d.query, "hi");
+    }
+
+    #[test]
+    fn frd_tab_switches_focus_in_replace_only() {
+        let mut f = FindReplaceDialog::new(DialogMode::Find, String::new());
+        f.switch_focus();
+        assert_eq!(f.focus, DialogField::Query, "Find mode has no second field");
+
+        let mut r = FindReplaceDialog::new(DialogMode::Replace, String::new());
+        assert_eq!(r.focus, DialogField::Query);
+        r.switch_focus();
+        assert_eq!(r.focus, DialogField::Replacement);
+        for c in "xy".chars() {
+            r.insert_char(c);
+        }
+        assert_eq!(r.replacement, "xy");
+        assert_eq!(r.query, "");
+    }
+
+    #[test]
+    fn frd_multibyte_input_is_grapheme_correct() {
+        let mut d = FindReplaceDialog::new(DialogMode::Find, String::new());
+        for c in "café".chars() {
+            d.insert_char(c);
+        }
+        assert_eq!(d.query, "café");
+        d.backspace(); // remove é cleanly
+        assert_eq!(d.query, "caf");
+        assert_eq!(d.caret, 3);
     }
 
     #[test]

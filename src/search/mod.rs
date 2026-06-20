@@ -58,6 +58,8 @@ pub struct SearchState {
     pub regex_mode: bool,
     /// Whether the search is case-sensitive.
     pub case_sensitive: bool,
+    /// Whether matches must be whole words (word-boundary aware) — Feature 015.
+    pub whole_word: bool,
     /// Whether the search should wrap from end-of-document back to start
     /// (or start-of-document back to end for backward searches).
     pub wrap: bool,
@@ -97,6 +99,7 @@ impl SearchEngine {
         query: &str,
         regex_mode: bool,
         case_sensitive: bool,
+        whole_word: bool,
     ) -> Vec<CharRange> {
         if query.is_empty() {
             return Vec::new();
@@ -104,10 +107,16 @@ impl SearchEngine {
 
         let text = rope.to_string();
 
-        if regex_mode {
+        let matches = if regex_mode {
             Self::find_all_regex(&text, query, case_sensitive)
         } else {
             Self::find_all_plain(&text, query, case_sensitive)
+        };
+
+        if whole_word {
+            filter_whole_word(&text, matches)
+        } else {
+            matches
         }
     }
 
@@ -199,6 +208,29 @@ fn byte_offset_to_char(text: &str, byte_offset: usize) -> usize {
     text[..byte_offset.min(text.len())].chars().count()
 }
 
+/// A "word" character for whole-word matching: alphanumeric or underscore.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Keep only matches whose neighbours are non-word characters (or document
+/// boundaries) — i.e. the match is a whole word. Operates on char indices, so it
+/// is UTF-8 safe (Feature 015, FR-010).
+fn filter_whole_word(text: &str, matches: Vec<CharRange>) -> Vec<CharRange> {
+    if matches.is_empty() {
+        return matches;
+    }
+    let chars: Vec<char> = text.chars().collect();
+    matches
+        .into_iter()
+        .filter(|m| {
+            let before_ok = m.start == 0 || !is_word_char(chars[m.start - 1]);
+            let after_ok = m.end >= chars.len() || !is_word_char(chars[m.end]);
+            before_ok && after_ok
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -219,7 +251,7 @@ mod tests {
     #[test]
     fn find_all_plain_single_match() {
         let r = rope("foo bar foo");
-        let matches = SearchEngine::find_all(&r, "bar", false, true);
+        let matches = SearchEngine::find_all(&r, "bar", false, true, false);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].start, 4);
         assert_eq!(matches[0].end, 7);
@@ -228,7 +260,7 @@ mod tests {
     #[test]
     fn find_all_plain_multiple_matches() {
         let r = rope("foo bar foo");
-        let matches = SearchEngine::find_all(&r, "foo", false, true);
+        let matches = SearchEngine::find_all(&r, "foo", false, true, false);
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].start, 0);
         assert_eq!(matches[0].end, 3);
@@ -239,21 +271,21 @@ mod tests {
     #[test]
     fn find_all_plain_no_match() {
         let r = rope("foo bar foo");
-        let matches = SearchEngine::find_all(&r, "baz", false, true);
+        let matches = SearchEngine::find_all(&r, "baz", false, true, false);
         assert!(matches.is_empty());
     }
 
     #[test]
     fn find_all_plain_case_insensitive() {
         let r = rope("Hello HELLO hello");
-        let matches = SearchEngine::find_all(&r, "hello", false, false);
+        let matches = SearchEngine::find_all(&r, "hello", false, false, false);
         assert_eq!(matches.len(), 3);
     }
 
     #[test]
     fn find_all_plain_case_sensitive_subset() {
         let r = rope("Hello HELLO hello");
-        let matches = SearchEngine::find_all(&r, "hello", false, true);
+        let matches = SearchEngine::find_all(&r, "hello", false, true, false);
         // Only the lowercase "hello"
         assert_eq!(matches.len(), 1);
     }
@@ -261,7 +293,7 @@ mod tests {
     #[test]
     fn find_all_empty_query_returns_empty() {
         let r = rope("foo bar");
-        let matches = SearchEngine::find_all(&r, "", false, true);
+        let matches = SearchEngine::find_all(&r, "", false, true, false);
         assert!(matches.is_empty());
     }
 
@@ -269,7 +301,7 @@ mod tests {
     fn find_all_multibyte_chars() {
         // "café" — char indices differ from byte indices for é.
         let r = rope("café café");
-        let matches = SearchEngine::find_all(&r, "café", false, true);
+        let matches = SearchEngine::find_all(&r, "café", false, true, false);
         assert_eq!(matches.len(), 2);
         // First match: chars 0..4 (c=0, a=1, f=2, é=3)
         assert_eq!(matches[0].start, 0);
@@ -286,14 +318,14 @@ mod tests {
     #[test]
     fn find_all_regex_simple_pattern() {
         let r = rope("abc 123 def 456");
-        let matches = SearchEngine::find_all(&r, r"\d+", true, true);
+        let matches = SearchEngine::find_all(&r, r"\d+", true, true, false);
         assert_eq!(matches.len(), 2);
     }
 
     #[test]
     fn find_all_regex_case_insensitive() {
         let r = rope("Foo FOO foo");
-        let matches = SearchEngine::find_all(&r, "foo", true, false);
+        let matches = SearchEngine::find_all(&r, "foo", true, false, false);
         assert_eq!(matches.len(), 3);
     }
 
@@ -301,7 +333,7 @@ mod tests {
     fn find_all_regex_invalid_pattern_returns_empty() {
         let r = rope("foo bar");
         // Unclosed group is an invalid regex.
-        let matches = SearchEngine::find_all(&r, "(unclosed", true, true);
+        let matches = SearchEngine::find_all(&r, "(unclosed", true, true, false);
         assert!(matches.is_empty());
     }
 
@@ -316,9 +348,57 @@ mod tests {
         assert!(s.replacement.is_none());
         assert!(!s.regex_mode);
         assert!(!s.case_sensitive);
+        assert!(!s.whole_word);
         assert!(!s.wrap);
         assert_eq!(s.direction, SearchDirection::Forward);
         assert!(s.matches.is_empty());
         assert!(s.active_match.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Feature 015 — whole-word matching
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn whole_word_excludes_substrings() {
+        let r = rope("cat category scatter cat.");
+        // Without whole-word: "cat" matches inside category/scatter too.
+        let any = SearchEngine::find_all(&r, "cat", false, false, false);
+        assert_eq!(any.len(), 4);
+        // With whole-word: only the standalone "cat" tokens (start, and before '.').
+        let ww = SearchEngine::find_all(&r, "cat", false, false, true);
+        assert_eq!(ww.len(), 2, "only whole-word 'cat' occurrences");
+    }
+
+    #[test]
+    fn whole_word_boundaries_at_document_ends() {
+        let r = rope("cat");
+        let ww = SearchEngine::find_all(&r, "cat", false, false, true);
+        assert_eq!(ww.len(), 1, "match bounded by start/end of document");
+    }
+
+    #[test]
+    fn whole_word_underscore_is_word_char() {
+        let r = rope("foo foo_bar foo");
+        let ww = SearchEngine::find_all(&r, "foo", false, false, true);
+        // "foo_bar" is excluded ('_' is a word char); two standalone "foo".
+        assert_eq!(ww.len(), 2);
+    }
+
+    #[test]
+    fn whole_word_unicode_safe() {
+        let r = rope("café cafés café");
+        let ww = SearchEngine::find_all(&r, "café", false, false, true);
+        // "cafés" excluded ('s' is a word char); two standalone "café".
+        assert_eq!(ww.len(), 2);
+    }
+
+    #[test]
+    fn whole_word_with_regex_candidates() {
+        let r = rope("a12 123 x12y");
+        // \d+ candidates: "12", "123", "12"; whole-word keeps "12" (in "a12"? 'a' is
+        // word char before) — only "123" is bounded by spaces.
+        let ww = SearchEngine::find_all(&r, r"\d+", true, false, true);
+        assert_eq!(ww.len(), 1);
     }
 }
