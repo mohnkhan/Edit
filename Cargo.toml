@@ -81,6 +81,10 @@ name = "menu_activation"
 path = "tests/integration/menu_activation.rs"
 
 [[test]]
+name = "menu_mnemonics"
+path = "tests/integration/menu_mnemonics.rs"
+
+[[test]]
 name = "file_browser"
 path = "tests/integration/file_browser.rs"
 

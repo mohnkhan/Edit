@@ -1,13 +1,17 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.3.0 (features 008 + 009 complete; 010 + 011 + 012 unreleased)
+**Version**: 0.3.0 (features 008 + 009 complete; 010 + 011 + 012 + 013 unreleased)
 **Last updated**: 2026-06-20
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F013-US1 | Underlined accelerator letter shown on every top-level menu and dropdown item | Complete |
+| F013-US2 | Typing an item's accelerator while its dropdown is open activates it; non-match is inert | Complete |
+| F013-US3 | Top-level letter / `Alt`+letter opens the matching menu; bare `Alt` activates the bar (terminal-permitting) | Complete |
+| F013-US4 | Plugin menu items/menus get auto-assigned, unique, collision-free accelerators | Complete |
 | F012-US1 | Open a file by browsing the directory tree (keyboard + mouse), no path typing required | Complete |
 | F012-US2 | Save to a chosen folder/name by browsing; `Ctrl+S` on an unnamed buffer opens the Save browser | Complete |
 | F012-US3 | Consistent keyboard & mouse navigation; long listings scroll; UTF-8-safe name display | Complete |

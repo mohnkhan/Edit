@@ -9,7 +9,10 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -343,6 +346,21 @@ impl App {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        // Feature 013: on terminals that support it, ask for modifier-only key
+        // reports so a lone Alt can activate the menu bar. Best-effort — ignored
+        // where unsupported (F10 / Alt+letter remain the entry path).
+        let kbd_enhanced = matches!(
+            crossterm::terminal::supports_keyboard_enhancement(),
+            Ok(true)
+        );
+        if kbd_enhanced {
+            let _ = execute!(
+                stdout,
+                PushKeyboardEnhancementFlags(
+                    KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                )
+            );
+        }
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
@@ -365,6 +383,9 @@ impl App {
         }
 
         disable_raw_mode()?;
+        if kbd_enhanced {
+            let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+        }
         execute!(
             terminal.backend_mut(),
             LeaveAlternateScreen,
@@ -719,6 +740,23 @@ impl App {
                     Action::MenuHelp => self.menu_bar.open_menu(5, &menus),
                     Action::MenuOpen(idx) => self.menu_bar.open_menu(idx, &menus),
                     Action::Menu => self.menu_bar.activate_bar(),
+                    // Feature 013: mnemonic accelerator typed while the bar is active.
+                    // In a dropdown, a matching letter activates the item (like Enter)
+                    // and a non-match is an inert no-op (does NOT jump to another menu).
+                    // At the top level, a matching letter opens that menu. Letters never
+                    // edit the buffer while the bar is active (FR-004/FR-007).
+                    Action::InsertChar(c) => match self.menu_bar.state {
+                        MenuState::DropDown { .. } => {
+                            if let Some(selected) = self.menu_bar.select_item_by_mnemonic(&menus, c)
+                            {
+                                return self.handle_action(selected);
+                            }
+                        }
+                        MenuState::TopActive(_) => {
+                            self.menu_bar.open_menu_by_mnemonic(&menus, c);
+                        }
+                        MenuState::Inactive => {}
+                    },
                     // Everything else is consumed (no buffer mutation) while open.
                     _ => {}
                 }

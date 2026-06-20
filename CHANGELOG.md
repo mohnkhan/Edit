@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 013: DOS-style menu mnemonic accelerators
+
+#### Added
+
+- **Underlined accelerator letters** on every top-level menu (File, Edit, Search, View, Options,
+  Help) and every dropdown item, recreating the MS-DOS EDIT.COM look. The underlined letter is the
+  key that activates the entry, and the two never drift.
+- **Letter activation inside an open menu.** With a dropdown open, pressing an item's accelerator
+  (case-insensitive) runs that item immediately — e.g. `Alt+F` then `N` makes a New buffer. A letter
+  that matches no item is an inert no-op (the menu stays open and the buffer is never edited). While
+  the menu bar is active without a dropdown, a top-level letter opens that menu.
+- **Bare `Alt` activates the menu bar** (like `F10`) on terminals that report modifier-only keys
+  (keyboard-enhancement protocol); on terminals without that support it is a no-op and `F10` /
+  `Alt+letter` remain the entry path (graceful degradation).
+- **Plugin menu accelerators** are assigned automatically — unique within their menu and
+  non-colliding with built-in items — so plugin-contributed items and menus are letter-activatable
+  too.
+- Built via the full Spec Kit pipeline; spec/plan/tasks/checklists under `specs/013-menu-mnemonics/`.
+
+---
+
 ### feature 012: Navigable file browser for Open / Save dialogs
 
 #### Added

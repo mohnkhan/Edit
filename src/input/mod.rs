@@ -10,7 +10,7 @@ pub mod mouse;
 
 pub use keymap::{Action, KeybindingMap};
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode};
 
 /// Dispatch a crossterm [`Event`] into an optional [`Action`].
 ///
@@ -34,6 +34,13 @@ fn dispatch_key(key: KeyEvent, keymap: &KeybindingMap) -> Option<Action> {
     // Ignore key-release and key-repeat events on platforms that report them
     if key.kind == KeyEventKind::Release {
         return None;
+    }
+
+    // Feature 013: a lone Alt key (no other key) activates the menu bar like F10.
+    // Only delivered by terminals that report modifier-only keys (keyboard
+    // enhancement); a no-op everywhere else (graceful degradation).
+    if let KeyCode::Modifier(ModifierKeyCode::LeftAlt | ModifierKeyCode::RightAlt) = key.code {
+        return Some(Action::Menu);
     }
 
     // Build a canonical key string for keymap lookup
@@ -104,4 +111,58 @@ pub fn key_to_string(key: &KeyEvent) -> String {
 /// Produce a resize action from terminal dimensions.
 pub fn handle_resize(w: u16, h: u16) -> Action {
     Action::Resize(w, h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyEventState;
+
+    fn key(code: KeyCode, mods: KeyModifiers, kind: KeyEventKind) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: mods,
+            kind,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    // T022 (feature 013): a lone Alt key press activates the menu bar (like F10).
+    #[test]
+    fn lone_alt_press_maps_to_menu() {
+        let km = KeybindingMap::default_map();
+        for m in [ModifierKeyCode::LeftAlt, ModifierKeyCode::RightAlt] {
+            let ev = key(
+                KeyCode::Modifier(m),
+                KeyModifiers::NONE,
+                KeyEventKind::Press,
+            );
+            assert_eq!(dispatch_key(ev, &km), Some(Action::Menu));
+        }
+    }
+
+    #[test]
+    fn lone_alt_release_is_ignored() {
+        let km = KeybindingMap::default_map();
+        let ev = key(
+            KeyCode::Modifier(ModifierKeyCode::LeftAlt),
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        );
+        assert_eq!(dispatch_key(ev, &km), None);
+    }
+
+    #[test]
+    fn alt_letter_still_opens_menu_no_regression() {
+        let km = KeybindingMap::default_map();
+        let ev = key(KeyCode::Char('f'), KeyModifiers::ALT, KeyEventKind::Press);
+        assert_eq!(dispatch_key(ev, &km), Some(Action::MenuFile));
+    }
+
+    #[test]
+    fn plain_letter_still_inserts() {
+        let km = KeybindingMap::default_map();
+        let ev = key(KeyCode::Char('x'), KeyModifiers::NONE, KeyEventKind::Press);
+        assert_eq!(dispatch_key(ev, &km), Some(Action::InsertChar('x')));
+    }
 }
