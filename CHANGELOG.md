@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 033: Fix menu dropdown hidden behind the tab bar
+
+#### Fixed
+
+- **Menu z-order with the tab bar** — with 2+ buffers open, opening a pull-down menu had its first
+  dropdown item hidden behind the tab bar (the tab bar was painted after the menu). The tab bar is now
+  rendered before the menu bar, so the dropdown correctly overlays it.
+
 ### feature 032: Word-wise navigation, selection, and deletion
 
 #### Added
