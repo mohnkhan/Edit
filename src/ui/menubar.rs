@@ -74,6 +74,13 @@ static FILE_MENU: &[MenuItem] = &[
         action: Action::Revert,
         mnemonic: Some('r'),
     },
+    // Feature 029: the Close action existed and was handled but had no menu item
+    // and no keybinding; now reachable here and via Ctrl+W.
+    MenuItem {
+        label: "Close",
+        action: Action::Close,
+        mnemonic: Some('c'),
+    },
     MenuItem {
         label: "Exit",
         action: Action::Quit,
@@ -1714,6 +1721,7 @@ mod tests {
                 ("Save As", Some('a')),
                 ("Save As Encoding...", Some('e')),
                 ("Revert", Some('r')),
+                ("Close", Some('c')),
                 ("Exit", Some('x')),
             ]
         );

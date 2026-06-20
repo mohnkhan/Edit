@@ -282,11 +282,14 @@ pub fn write_recovery(buf: &Buffer, state: &mut AutosaveState) -> io::Result<()>
 /// This helper takes a `&mut Buffer` rather than separate borrows to avoid the
 /// "cannot borrow `buf` as immutable because it is also borrowed as mutable"
 /// error that arises when borrowing `buf` and `buf.autosave` simultaneously.
-pub fn write_recovery_for_buffer(buf: &mut Buffer, _interval_secs: u32) {
+/// Write a crash-recovery snapshot for `buf`. Returns `true` on success (or when
+/// there is nothing to write), `false` if a recovery write failed (Feature 029:
+/// the caller surfaces a non-intrusive notice instead of failing silently).
+pub fn write_recovery_for_buffer(buf: &mut Buffer, _interval_secs: u32) -> bool {
     // Temporarily take the path and content we need.
     let path = match buf.path.clone() {
         Some(p) => p,
-        None => return,
+        None => return true,
     };
     let content = buf.rope.to_string();
     let encoding = buf.encoding;
@@ -313,7 +316,7 @@ pub fn write_recovery_for_buffer(buf: &mut Buffer, _interval_secs: u32) {
 
     if let Err(e) = ensure_recovery_dir() {
         log::error!("Cannot create recovery dir: {}", e);
-        return;
+        return false;
     }
 
     let mut out: Vec<u8> = Vec::with_capacity(256 + content_len);
@@ -326,20 +329,21 @@ pub fn write_recovery_for_buffer(buf: &mut Buffer, _interval_secs: u32) {
         || out.write_all(content_bytes).is_err()
     {
         log::error!("Failed to serialise recovery data");
-        return;
+        return false;
     }
 
     if let Err(e) = std::fs::write(&tmp_path, &out) {
         log::error!("Failed to write tmp recovery file: {}", e);
-        return;
+        return false;
     }
     if let Err(e) = std::fs::rename(&tmp_path, &recovery_path) {
         log::error!("Failed to rename recovery file into place: {}", e);
-        return;
+        return false;
     }
 
     buf.autosave.last_save_at = Instant::now();
     log::debug!("Auto-saved recovery for {:?} ({} bytes)", path, content_len);
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -529,6 +533,18 @@ mod tests {
     // -----------------------------------------------------------------------
     // recovery_path_for — determinism and uniqueness
     // -----------------------------------------------------------------------
+
+    // T016 (Feature 029): write_recovery_for_buffer reports success via its return
+    // value so the app can surface failures. A buffer with no path is a no-op
+    // success; a real saved buffer writes successfully.
+    #[test]
+    fn write_recovery_reports_success() {
+        let mut nameless = Buffer::new_empty();
+        assert!(
+            write_recovery_for_buffer(&mut nameless, 0),
+            "no path → nothing to write → success"
+        );
+    }
 
     #[test]
     fn recovery_path_is_deterministic() {

@@ -104,8 +104,10 @@ pub static HIGH_CONTRAST: Theme = Theme {
     menubar_bg: Color::White,
     menubar_fg: Color::Black,
 
-    // Selected menu item: highlighted with white on black inversion.
-    menu_selected_bg: Color::White,
+    // Selected menu item: the menu renders selected text as `fg = menubar_bg`
+    // (White) on `menu_selected_bg`, so this MUST contrast with White or the
+    // highlighted item is invisible (Feature 029 fix — was White → white-on-white).
+    menu_selected_bg: Color::Black,
 
     // Status bar: same as editor area for visual continuity.
     status_bg: Color::Black,
@@ -184,6 +186,20 @@ mod tests {
     #[test]
     fn classic_name() {
         assert_eq!(CLASSIC.name, "classic");
+    }
+
+    // T029 (Feature 029): the selected menu item must be legible — the menubar
+    // renders it as `fg = menubar_bg` on `menu_selected_bg`, so for any theme that
+    // sets explicit colors the two must differ (high-contrast was White-on-White).
+    #[test]
+    fn selected_menu_item_is_legible_in_color_themes() {
+        for t in [&CLASSIC, &HIGH_CONTRAST] {
+            assert_ne!(
+                t.menu_selected_bg, t.menubar_bg,
+                "{}: selected menu item is invisible (menu_selected_bg == menubar_bg)",
+                t.name
+            );
+        }
     }
 
     #[test]

@@ -313,29 +313,39 @@ impl App {
             km
         };
 
+        // Feature 029: collect startup open failures so they can be surfaced in the
+        // status bar instead of silently becoming a blank buffer.
+        let mut open_errors: Vec<String> = Vec::new();
         let mut buffers: Vec<Buffer> = if files.is_empty() {
             vec![Buffer::new_empty()]
         } else {
-            files
-                .into_iter()
-                .map(|p| {
-                    Buffer::open(p.clone(), default_encoding).unwrap_or_else(|e| {
-                        // New file (NotFound) — open an empty buffer at that path so
-                        // Ctrl+S creates it. All other errors get an untitled buffer.
+            let mut v: Vec<Buffer> = Vec::new();
+            for p in files {
+                match Buffer::open(p.clone(), default_encoding) {
+                    Ok(buf) => v.push(buf),
+                    Err(e)
                         if matches!(&e, crate::buffer::BufferError::Io(io_err)
-                            if io_err.kind() == io::ErrorKind::NotFound)
-                        {
-                            log::info!("New file: {:?}", p);
-                            let mut buf = Buffer::new_empty();
-                            buf.path = Some(p);
-                            buf
-                        } else {
-                            log::error!("Failed to open {:?}: {}", p, e);
-                            Buffer::new_empty()
-                        }
-                    })
-                })
-                .collect()
+                            if io_err.kind() == io::ErrorKind::NotFound) =>
+                    {
+                        // New file (NotFound) — open an empty buffer at that path so
+                        // Ctrl+S creates it.
+                        log::info!("New file: {:?}", p);
+                        let mut buf = Buffer::new_empty();
+                        buf.path = Some(p);
+                        v.push(buf);
+                    }
+                    Err(e) => {
+                        // A real failure (permission, binary, too large, …): record it
+                        // and start with a blank buffer rather than crashing.
+                        log::error!("Failed to open {:?}: {}", p, e);
+                        open_errors.push(format!("Open failed: {} — {}", p.display(), e));
+                    }
+                }
+            }
+            if v.is_empty() {
+                v.push(Buffer::new_empty());
+            }
+            v
         };
 
         // T077 — Auto-detect syntax highlighter for each buffer on startup.
@@ -380,7 +390,11 @@ impl App {
 
         // If a corrupt-session warning was produced but no valid session data
         // arrived, surface the warning in the status bar immediately.
-        let initial_status = if session_warning.is_some() && session.is_none() {
+        // Feature 029: a startup open failure takes precedence in the status bar;
+        // otherwise fall back to the session-restore warning.
+        let initial_status = if let Some(first) = open_errors.first() {
+            Some(first.clone())
+        } else if session_warning.is_some() && session.is_none() {
             session_warning
         } else {
             None
@@ -989,6 +1003,11 @@ impl App {
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'C') => {
                     self.prompt_cancel_quit();
                 }
+                // Feature 029: Esc cancels, matching the "Cancel (Esc)" label and
+                // every other confirm dialog (was previously ignored).
+                Action::MenuClose | Action::Quit => {
+                    self.prompt_cancel_quit();
+                }
                 _ => {}
             }
             return Ok(());
@@ -1507,6 +1526,8 @@ impl App {
                     && self.interactive_dialog().is_none()
                     && self.pending_help.is_none()
                     && self.pending_goto_line.is_none()
+                    && !self.menu_bar.is_active()
+                // Feature 029: don't open over a menu
                 {
                     self.pending_goto_line = Some(String::new());
                 }
@@ -1835,10 +1856,21 @@ impl App {
                 if let Some(path) = self.buffers[self.active_idx].path.clone() {
                     self.self_write_times.insert(path, Instant::now());
                 }
+                // Feature 029: confirm the save (was silent; Save-As already does).
+                let name = self.buffers[self.active_idx]
+                    .path
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "file".to_string());
+                self.status_message = Some(format!("Saved {name}"));
                 log::info!("Buffer saved");
             }
             Err(e) => {
+                // Feature 029: surface the failure (was silent — a failed save
+                // looked identical to a successful one). Buffer stays modified.
                 log::error!("Save failed: {}", e);
+                self.status_message = Some(format!("Save failed: {e}"));
             }
         }
     }
@@ -1921,10 +1953,16 @@ impl App {
             if buf.autosave.enabled && buf.modified {
                 let elapsed = buf.autosave.last_save_at.elapsed().as_secs() as u32;
                 if elapsed >= interval {
-                    crate::buffer::autosave::write_recovery_for_buffer(
+                    let ok = crate::buffer::autosave::write_recovery_for_buffer(
                         &mut self.buffers[self.active_idx],
                         interval,
                     );
+                    // Feature 029: surface a recovery-write failure instead of
+                    // losing crash protection silently.
+                    if !ok {
+                        self.status_message =
+                            Some("Autosave failed — crash recovery may be unavailable".to_string());
+                    }
                 }
             }
         }
@@ -2249,11 +2287,22 @@ impl App {
         line_start + char_offset
     }
 
+    /// Feature 029: if the active buffer is read-only, set a status message and
+    /// return `true` so the caller aborts the edit (previously a silent no-op).
+    fn deny_if_readonly(&mut self) -> bool {
+        if self.buffers[self.active_idx].readonly {
+            self.status_message = Some("Buffer is read-only".to_string());
+            true
+        } else {
+            false
+        }
+    }
+
     // ── T026 — Text insertion ─────────────────────────────────────────────────
 
     /// Insert a single character at the cursor. No-op when buffer is read-only.
     pub fn insert_char(&mut self, c: char) {
-        if self.buffers[self.active_idx].readonly {
+        if self.deny_if_readonly() {
             return;
         }
         // Feature 017: typing replaces the current selection.
@@ -2282,7 +2331,7 @@ impl App {
     /// Insert a newline at the cursor, placing the cursor at column 0 of the
     /// new line.
     pub fn insert_newline(&mut self) {
-        if self.buffers[self.active_idx].readonly {
+        if self.deny_if_readonly() {
             return;
         }
         if self.buffers[self.active_idx].selection.is_some() {
@@ -2315,7 +2364,7 @@ impl App {
     /// Delete the grapheme cluster immediately before the cursor.
     /// No-op at the start of the buffer or when read-only.
     pub fn delete_backward(&mut self) {
-        if self.buffers[self.active_idx].readonly {
+        if self.deny_if_readonly() {
             return;
         }
         // Feature 017: Backspace with a selection deletes the selection.
@@ -2389,7 +2438,7 @@ impl App {
     /// Delete the grapheme cluster at the cursor.
     /// No-op at the end of the buffer or when read-only.
     pub fn delete_forward(&mut self) {
-        if self.buffers[self.active_idx].readonly {
+        if self.deny_if_readonly() {
             return;
         }
         // Feature 017: Delete with a selection deletes the selection.
@@ -2467,33 +2516,46 @@ impl App {
         Some(full.chars().skip(lo).take(hi - lo).collect::<String>())
     }
 
-    pub fn copy_selection(&self) {
+    pub fn copy_selection(&mut self) {
         let text = match self.selection_text() {
             Some(t) => t,
             None => return,
         };
+        // Feature 029: give feedback (was silent on both success and failure).
         match arboard::Clipboard::new() {
-            Ok(mut cb) => {
-                if let Err(e) = cb.set_text(text) {
+            Ok(mut cb) => match cb.set_text(text) {
+                Ok(()) => self.status_message = Some("Copied".to_string()),
+                Err(e) => {
                     log::warn!("Clipboard write failed: {}", e);
+                    self.status_message = Some("Clipboard unavailable".to_string());
                 }
+            },
+            Err(e) => {
+                log::warn!("Clipboard unavailable: {}", e);
+                self.status_message = Some("Clipboard unavailable".to_string());
             }
-            Err(e) => log::warn!("Clipboard unavailable: {}", e),
         }
     }
 
     /// Cut selected text to the clipboard (copy + delete selection).
     pub fn cut_selection(&mut self) {
-        if self.buffers[self.active_idx].readonly {
+        if self.deny_if_readonly() {
+            return;
+        }
+        if self.buffers[self.active_idx].selection.is_none() {
             return;
         }
         self.copy_selection();
         self.delete_selection();
+        // Override the "Copied" set by copy_selection (unless the clipboard failed).
+        if self.status_message.as_deref() == Some("Copied") {
+            self.status_message = Some("Cut".to_string());
+        }
     }
 
     /// Paste text from the system clipboard at the cursor.
     pub fn paste_clipboard(&mut self) {
-        if self.buffers[self.active_idx].readonly {
+        if self.deny_if_readonly() {
             return;
         }
         // Feature 017: paste replaces the current selection.
@@ -2504,15 +2566,22 @@ impl App {
             Ok(mut cb) => match cb.get_text() {
                 Ok(t) => t,
                 Err(e) => {
+                    // Feature 029: empty clipboard / read failure is no longer silent.
                     log::warn!("Clipboard read failed: {}", e);
+                    self.status_message = Some("Nothing to paste".to_string());
                     return;
                 }
             },
             Err(e) => {
                 log::warn!("Clipboard unavailable: {}", e);
+                self.status_message = Some("Clipboard unavailable".to_string());
                 return;
             }
         };
+        if text.is_empty() {
+            self.status_message = Some("Nothing to paste".to_string());
+            return;
+        }
         let char_idx = self.cursor_char_idx();
         let char_count = text.chars().count();
         {
@@ -2529,6 +2598,7 @@ impl App {
         for _ in 0..char_count {
             self.move_cursor(Direction::Right);
         }
+        self.status_message = Some("Pasted".to_string()); // Feature 029: feedback
     }
 
     /// Delete the current selection from the buffer.
@@ -2543,10 +2613,16 @@ impl App {
         if s_idx >= e_idx {
             return;
         }
+        // Feature 029: `char_idx_for` returns CHAR indices; extract the deleted
+        // text by chars (byte-slicing a String with char indices panics on
+        // multibyte content) — same hazard fixed in `copy_selection`/`selection_text`.
         let deleted: String = {
             let buf = &self.buffers[self.active_idx];
             let full = buf.rope.to_string();
-            full[s_idx..e_idx.min(full.len())].to_string()
+            let total = full.chars().count();
+            let lo = s_idx.min(e_idx).min(total);
+            let hi = s_idx.max(e_idx).min(total);
+            full.chars().skip(lo).take(hi - lo).collect()
         };
         {
             let buf = &mut self.buffers[self.active_idx];
@@ -3075,7 +3151,9 @@ impl App {
         let safe_path = match validate_path(&path) {
             Ok(p) => p,
             Err(e) => {
+                // Feature 029: surface rejected paths instead of failing silently.
                 log::warn!("handle_open_file: path rejected ({:?}): {}", path, e);
+                self.status_message = Some(format!("Open failed: {}", path.display()));
                 return;
             }
         };
@@ -3093,10 +3171,18 @@ impl App {
                 self.buffers.push(buf);
                 self.active_idx = self.buffers.len() - 1;
                 self.invalidate_wrap_cache();
+                let name = safe_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| safe_path.display().to_string());
+                self.status_message = Some(format!("Opened {name}"));
                 log::info!("Opened {:?} as buffer {}", safe_path, self.active_idx);
             }
             Err(e) => {
+                // Feature 029: surface the failure (path + reason) instead of a
+                // silent no-op that leaves the user wondering why nothing opened.
                 log::error!("handle_open_file: failed to open {:?}: {}", safe_path, e);
+                self.status_message = Some(format!("Open failed: {} — {}", safe_path.display(), e));
             }
         }
     }
@@ -3666,6 +3752,12 @@ impl App {
 
     /// Write the active buffer to `path` (File ▸ Save As).
     pub fn do_save_as(&mut self, path: PathBuf) {
+        // Feature 029: honor an encoding chosen before the destination was picked
+        // (the Save-As-Encoding → file-browser flow). Previously this path ignored
+        // `pending_save_as_encoding`, silently writing the file in the old encoding.
+        if let Some(enc) = self.pending_save_as_encoding.take() {
+            self.buffers[self.active_idx].encoding = enc;
+        }
         match self.buffers[self.active_idx].save_as(path.clone()) {
             Ok(()) => {
                 self.buffers[self.active_idx].modified = false;
@@ -3707,7 +3799,7 @@ impl App {
 
     /// Undo the most recent edit (Edit ▸ Undo / Ctrl+Z).
     pub fn handle_undo(&mut self) {
-        if self.buffers[self.active_idx].readonly {
+        if self.deny_if_readonly() {
             return;
         }
         let op = {
@@ -3725,7 +3817,7 @@ impl App {
 
     /// Redo the most recently undone edit (Edit ▸ Redo / Ctrl+Y).
     pub fn handle_redo(&mut self) {
-        if self.buffers[self.active_idx].readonly {
+        if self.deny_if_readonly() {
             return;
         }
         let op = {
@@ -4154,6 +4246,12 @@ impl App {
 
         let clicked_row = (row - top) as usize; // 0-based editor row
 
+        // Feature 029: the line-number gutter occupies `gutter` columns on the
+        // left; the text area starts after it. Map the raw terminal column into the
+        // text area (a click on the gutter clamps to column 0 via saturating_sub).
+        let gutter: u16 = if self.config.line_numbers { 4 } else { 0 };
+        let col = col.saturating_sub(gutter);
+
         // Soft-wrap mode: map (visual_row, visual_col) → (logical_line, grapheme_col).
         if self.soft_wrap {
             if let Some(ref cache) = self.wrap_cache {
@@ -4230,12 +4328,16 @@ impl App {
         }
 
         let line_str = buf.rope.line_slice(target_line);
+        // Feature 029: account for the horizontal scroll offset — the first visible
+        // text column is `scroll_offset.1`, so the absolute clicked column is
+        // `scroll_offset.1 + col` (col already has the gutter removed).
+        let target_x: u16 = (buf.scroll_offset.1 as u16).saturating_add(col);
         let mut visual_x: u16 = 0;
         let mut found_gcol: usize = 0;
 
         for (gcol, grapheme) in line_str.graphemes(true).enumerate() {
             let w = unicode_segmentation_width(grapheme);
-            if visual_x + w > col {
+            if visual_x + w > target_x {
                 found_gcol = gcol;
                 break;
             }
@@ -4480,32 +4582,14 @@ impl App {
     }
 }
 
-/// Approximate display width of a grapheme cluster (1 for narrow, 2 for wide).
+/// Display width of a grapheme cluster.
 ///
-/// This is a simple heuristic — for full Unicode width support the `unicode-width`
-/// crate is the correct tool, but that dependency is not yet in the tree.
+/// Feature 029: delegates to the single shared width helper
+/// ([`crate::ui::width::display_width`]) — `unicode-width`-based, so combining
+/// marks are 0, East-Asian wide and emoji are 2. Replaces the old first-scalar
+/// heuristic that mis-measured combining marks and emoji.
 fn unicode_segmentation_width(grapheme: &str) -> u16 {
-    // Treat grapheme clusters whose first scalar is in a common CJK range as
-    // double-width; everything else as single-width.
-    let first = grapheme.chars().next().unwrap_or(' ');
-    let cp = first as u32;
-    if (0x1100..=0x115F).contains(&cp)   // Hangul Jamo
-        || (0x2E80..=0x303E).contains(&cp)  // CJK Radicals / Kangxi
-        || (0x3041..=0x33BF).contains(&cp)  // Hiragana / Katakana / Bopomofo
-        || (0x4E00..=0x9FFF).contains(&cp)  // CJK Unified
-        || (0xAC00..=0xD7AF).contains(&cp)  // Hangul Syllables
-        || (0xF900..=0xFAFF).contains(&cp)  // CJK Compatibility
-        || (0xFE10..=0xFE6F).contains(&cp)  // CJK Compatibility Forms
-        || (0xFF01..=0xFF60).contains(&cp)  // Fullwidth Latin
-        || (0xFFE0..=0xFFE6).contains(&cp)  // Fullwidth Signs
-        || (0x1F300..=0x1F9FF).contains(&cp) // Emoji
-        || (0x20000..=0x2A6DF).contains(&cp)
-    // CJK Extension B
-    {
-        2
-    } else {
-        1
-    }
+    crate::ui::width::display_width(grapheme)
 }
 
 // ---------------------------------------------------------------------------
@@ -4666,6 +4750,185 @@ mod tests {
         // Soft-wrap (no hbar): one buffer 22, two buffers 21.
         a.soft_wrap = true;
         assert_eq!(a.viewport_height(), 21);
+    }
+
+    // T027 (Feature 029): a file-open failure surfaces an "Open failed" status
+    // rather than silently doing nothing.
+    #[test]
+    fn open_failure_surfaces_status() {
+        let mut a = make_app();
+        let before = a.buffers.len();
+        a.handle_open_file(std::path::PathBuf::from(
+            "/nonexistent_edit_dir_xyz/nope.txt",
+        ));
+        assert!(
+            a.status_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("Open failed"),
+            "open failure is surfaced, got {:?}",
+            a.status_message
+        );
+        assert_eq!(a.buffers.len(), before, "no buffer added on failure");
+    }
+
+    // T025 (Feature 029): editing a read-only buffer surfaces a message instead of
+    // a silent no-op; copy with a selection reports "Copied".
+    #[test]
+    fn readonly_edit_and_copy_give_feedback() {
+        let mut a = make_app();
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("abc\n");
+        a.buffers[0].readonly = true;
+        a.handle_action(Action::InsertChar('x')).unwrap();
+        assert_eq!(a.status_message.as_deref(), Some("Buffer is read-only"));
+        assert_eq!(a.buffers[0].rope.line_slice(0), "abc", "no edit applied");
+
+        // Copy with a selection reports feedback (clipboard may be unavailable in
+        // the test env — accept either the success or the unavailable message).
+        a.buffers[0].readonly = false;
+        a.status_message = None;
+        a.select_all();
+        a.copy_selection();
+        let msg = a.status_message.as_deref().unwrap_or("");
+        assert!(
+            msg == "Copied" || msg == "Clipboard unavailable",
+            "copy gives feedback, got {msg:?}"
+        );
+    }
+
+    // T023 (Feature 029): with line numbers on, a click maps past the gutter; a
+    // click within the gutter clamps to column 0; horizontal scroll is added.
+    #[test]
+    fn click_accounts_for_gutter_and_hscroll() {
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        a.config.line_numbers = true;
+        a.soft_wrap = false;
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("abcdefghij\n");
+        a.active_idx = 0;
+        // Gutter is 4 cols; editor_top is row 1 (single buffer). Click at terminal
+        // col 4+3=7 → text column 3.
+        a.handle_mouse_click(7, 1);
+        assert_eq!(a.buffers[0].cursor.grapheme_col, 3);
+        // Click within the gutter (col 2) clamps to column 0.
+        a.handle_mouse_click(2, 1);
+        assert_eq!(a.buffers[0].cursor.grapheme_col, 0);
+        // With a horizontal scroll of 2, a click at col 4+1=5 → text column 2+1=3.
+        a.buffers[0].scroll_offset.1 = 2;
+        a.handle_mouse_click(5, 1);
+        assert_eq!(a.buffers[0].cursor.grapheme_col, 3);
+    }
+
+    // T017 (Feature 029): the save-before-quit prompt cancels on Esc.
+    #[test]
+    fn save_prompt_cancels_on_esc() {
+        let mut a = make_app();
+        a.pending_save_prompt = true;
+        a.handle_action(Action::MenuClose).unwrap();
+        assert!(!a.pending_save_prompt, "Esc cancels the save prompt");
+        assert!(a.running, "cancel does not quit");
+    }
+
+    // T019 (Feature 029): Go-to-Line does not open while a menu is active.
+    #[test]
+    fn goto_line_does_not_open_over_menu() {
+        let mut a = make_app();
+        let menus = a.resolved_menus();
+        a.menu_bar.open_menu(0, &menus);
+        assert!(a.menu_bar.is_active());
+        a.handle_action(Action::GoToLine).unwrap();
+        assert!(
+            a.pending_goto_line.is_none(),
+            "Go-to-Line must not open over an active menu"
+        );
+    }
+
+    // T021 (Feature 029): completing Save-As applies a pending encoding selection.
+    #[test]
+    fn do_save_as_applies_pending_encoding() {
+        let mut a = make_app();
+        let dir = std::env::temp_dir().join("edit_saveas_enc_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("enc.txt");
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("hi\n");
+        a.pending_save_as_encoding = Some(EncodingId::Utf16Le);
+        a.do_save_as(path);
+        assert_eq!(
+            a.buffers[0].encoding,
+            EncodingId::Utf16Le,
+            "encoding applied"
+        );
+        assert!(
+            a.pending_save_as_encoding.is_none(),
+            "pending encoding cleared"
+        );
+    }
+
+    // T014 (Feature 029): plain save reports success; a failed save reports the
+    // error and keeps the buffer modified (no silent success-looking failure).
+    #[test]
+    fn save_reports_success_and_failure() {
+        let mut a = make_app();
+        // Success: a real writable temp path.
+        let dir = std::env::temp_dir().join("edit_save_fb_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let ok_path = dir.join("ok.txt");
+        a.buffers[0].path = Some(ok_path.clone());
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("hi\n");
+        a.buffers[0].modified = true;
+        a.handle_save_action();
+        assert!(
+            a.status_message
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("Saved"),
+            "success shows a Saved message, got {:?}",
+            a.status_message
+        );
+        assert!(!a.buffers[0].modified, "clean after a successful save");
+
+        // Failure: a path whose parent directory does not exist → save errors.
+        a.status_message = None;
+        a.buffers[0].path = Some(std::path::PathBuf::from(
+            "/nonexistent_edit_dir_xyz/cannot/write.txt",
+        ));
+        a.buffers[0].modified = true;
+        a.handle_save_action();
+        assert!(
+            a.status_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("Save failed"),
+            "failure is surfaced, got {:?}",
+            a.status_message
+        );
+        assert!(a.buffers[0].modified, "stays modified after a failed save");
+    }
+
+    // T006 (Feature 029): delete_selection over multibyte text removes the right
+    // characters, records the correct undo text, and never panics.
+    #[test]
+    fn delete_selection_is_char_safe_multibyte() {
+        use crate::buffer::{CursorPos, Selection};
+        let mut a = make_app();
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("éàûü\n");
+        a.active_idx = 0;
+        let cur = |g: usize| CursorPos {
+            line: 0,
+            grapheme_col: g,
+            visual_col: g,
+        };
+        // Select the first two graphemes "éà" and delete.
+        a.buffers[0].selection = Some(Selection {
+            anchor: cur(0),
+            active: cur(2),
+        });
+        a.delete_selection();
+        assert_eq!(a.buffers[0].rope.line_slice(0), "ûü");
+        assert!(a.buffers[0].selection.is_none());
+        // Undo restores the deleted "éà".
+        a.handle_action(Action::Undo).unwrap();
+        assert_eq!(a.buffers[0].rope.line_slice(0), "éàûü");
     }
 
     // T022 (Feature 028): selection_text is char-safe (multibyte) and never panics

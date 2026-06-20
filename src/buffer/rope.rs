@@ -118,10 +118,17 @@ impl EditorRope {
 
     /// Convert a UTF-8 byte index to a char (Unicode scalar) index.
     ///
-    /// Walks the materialised string to count how many chars precede `byte_idx`.
+    /// Counts how many chars precede `byte_idx`. Feature 029: `byte_idx` is
+    /// clamped to `len` and rounded down to the nearest char boundary first, so a
+    /// caller passing an out-of-range or mid-character offset gets a sensible count
+    /// instead of a panic.
     pub fn byte_to_char(&self, byte_idx: usize) -> usize {
         let s = self.0.to_string();
-        s[..byte_idx].chars().count()
+        let mut idx = byte_idx.min(s.len());
+        while idx > 0 && !s.is_char_boundary(idx) {
+            idx -= 1;
+        }
+        s[..idx].chars().count()
     }
 
     // -----------------------------------------------------------------------
@@ -255,6 +262,17 @@ mod tests {
     fn byte_to_char_ascii() {
         let r = EditorRope::from_str("hello");
         assert_eq!(r.byte_to_char(3), 3);
+    }
+
+    // T010 (Feature 029): byte_to_char tolerates non-char-boundary and out-of-range
+    // offsets without panicking.
+    #[test]
+    fn byte_to_char_non_boundary_and_oob() {
+        let r = EditorRope::from_str("é!"); // 'é' = bytes 0..2, '!' = byte 2
+        assert_eq!(r.byte_to_char(0), 0);
+        assert_eq!(r.byte_to_char(1), 0); // mid-'é' rounds down → 0 chars precede
+        assert_eq!(r.byte_to_char(2), 1); // start of '!'
+        assert_eq!(r.byte_to_char(999), 2); // past end clamps to len → 2 chars
     }
 
     #[test]

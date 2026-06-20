@@ -15,6 +15,7 @@ pub mod scrollbar;
 pub mod statusbar;
 pub mod tabbar;
 pub mod theme;
+pub mod width;
 pub mod wrap;
 
 use ratatui::{

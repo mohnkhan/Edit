@@ -337,6 +337,24 @@ mod tests {
 
     // ── Feature 015 — FindReplaceDialog field editing ──────────────────────────
 
+    // T008 (Feature 029): rendering the recovery dialog with a long Unicode path
+    // must not panic (byte-slice truncation used to split a multibyte char).
+    #[test]
+    fn recovery_dialog_long_unicode_path_no_panic() {
+        use ratatui::{buffer::Buffer, layout::Rect};
+        // A path well over 50 chars, all multibyte, so any byte-slice at len-47
+        // would land mid-character.
+        let path = "/home/usér/документы/プロジェクト/café/naïve/ünïcödé/файл.txt".repeat(2);
+        let d = RecoveryDialog::new(
+            1_700_000_000,
+            path,
+            crate::ui::theme::theme_by_name("classic"),
+        );
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf); // must not panic
+    }
+
     #[test]
     fn frd_insert_and_backspace_at_caret() {
         let mut d = FindReplaceDialog::new(DialogMode::Find, String::new());
@@ -852,10 +870,16 @@ impl Widget for RecoveryDialog {
 
         let ts_str = format!("unix:{}", self.timestamp);
         let msg1 = format!("Recovery file found from {}.", ts_str);
-        let path_display = if self.path.len() > 50 {
-            format!("...{}", &self.path[self.path.len() - 47..])
-        } else {
-            self.path.clone()
+        // Feature 029: truncate by characters, not bytes — a byte slice at
+        // `len()-47` can land mid-character on a Unicode path and panic.
+        let path_display = {
+            let chars: Vec<char> = self.path.chars().collect();
+            if chars.len() > 50 {
+                let tail: String = chars[chars.len() - 47..].iter().collect();
+                format!("...{tail}")
+            } else {
+                self.path.clone()
+            }
         };
         let msg2 = format!("File: {}", path_display);
         let hint = "  [Y]es — restore   [N]o — open from disk  ";

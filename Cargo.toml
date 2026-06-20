@@ -152,6 +152,10 @@ path = "tests/integration/buffer_tab_bar.rs"
 name = "ux_hardening"
 path = "tests/integration/ux_hardening.rs"
 
+[[test]]
+name = "ux_round2"
+path = "tests/integration/ux_round2.rs"
+
 [[bench]]
 name = "startup"
 harness = false

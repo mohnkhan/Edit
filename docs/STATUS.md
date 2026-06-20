@@ -8,6 +8,13 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F029-US1 | No-panic on real content: multibyte delete/cut, Unicode recovery path, byte→char, oversized-file guard | Complete |
+| F029-US2 | Saving never silently loses data: "Saved" on success, error + retained modified on failure; autosave-failure notice | Complete |
+| F029-US3 | Dialog consistency: save-before-quit prompt cancels on Esc; Go-to-Line respects modal precedence | Complete |
+| F029-US4 | Save-As through the file browser keeps the chosen encoding | Complete |
+| F029-US5 | Clicks account for gutter + horizontal scroll; one shared display-width (combining=0, wide=2) across all surfaces | Complete |
+| F029-US6 | Action feedback: copy/cut/paste, read-only edits, and file-open failures all report a message | Complete |
+| F029-US7 | Ctrl+W + File ▸ Close close the buffer; selected menu item legible in every color theme | Complete |
 | F028-US1 | Session restore / buffer switch with soft-wrap never panics (renderer clamps slices; wrap cache invalidated on every active-buffer change) | Complete |
 | F028-US2 | A panic restores the terminal (cooked mode, primary screen, cursor) before printing; crash log still written | Complete |
 | F028-US3 | Interactive dialogs open focused on the input field, so Save-As typing works and the caret shows | Complete |
