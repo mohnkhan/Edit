@@ -143,6 +143,11 @@ const DOUBLE_CLICK_MS: u64 = 400;
 /// Lines/rows/items scrolled per mouse-wheel notch (Feature 023).
 const WHEEL_STEP: usize = 3;
 
+/// Items moved per PageUp/PageDown in the small fixed-size list dialogs
+/// (encoding select, plugin manager) — Feature 028. The file browser pages by its
+/// actual visible-row count instead.
+const DIALOG_LIST_PAGE: usize = 5;
+
 // ── Direction enum ────────────────────────────────────────────────────────────
 
 /// Cardinal directions for cursor movement.
@@ -569,6 +574,19 @@ impl App {
         (self.terminal_size.1 as usize).saturating_sub(self.editor_top() as usize + 1 + hbar)
     }
 
+    /// Feature 028: `(max_scroll, page)` for the Help/About overlay, mirroring the
+    /// renderer's geometry (`render_help_overlay`): box height `min(20, term_h)`,
+    /// minus borders, a footer-hint row, and the reserved Close-button rows. Used to
+    /// clamp keyboard scrolling so Home/End and PageUp/Down stay in range.
+    fn help_view_metrics(&self, screen: HelpScreen) -> (usize, usize) {
+        let dh = 20usize.min(self.terminal_size.1 as usize);
+        let inner_h = dh.saturating_sub(2); // borders
+        let body_rows = inner_h.saturating_sub(1 + 4); // footer hint + boxed Close button
+        let total = crate::ui::help_total_lines(screen);
+        let max_scroll = total.saturating_sub(body_rows);
+        (max_scroll, body_rows.max(1))
+    }
+
     /// Feature 023: scroll the editor pane `buf_idx` by `step` rows (viewport
     /// only — the cursor is not moved), clamped to `[0, content_rows-1]`. Content
     /// rows are visual rows in soft-wrap, else logical lines.
@@ -875,11 +893,14 @@ impl App {
             let n = self.dialog_button_labels().len();
             if n > 0 {
                 match &action {
-                    Action::FocusNextField => {
+                    // Feature 028: arrow keys move between buttons too (the button
+                    // row is horizontal, so Right/Down = next, Left/Up = prev),
+                    // consistent with Tab/Shift+Tab.
+                    Action::FocusNextField | Action::MoveRight | Action::MoveDown => {
                         self.dialog_focus = crate::ui::buttons::next(self.dialog_focus, n);
                         return Ok(());
                     }
-                    Action::FocusPrevField => {
+                    Action::FocusPrevField | Action::MoveLeft | Action::MoveUp => {
                         self.dialog_focus = crate::ui::buttons::prev(self.dialog_focus, n);
                         return Ok(());
                     }
@@ -901,6 +922,10 @@ impl App {
         {
             let ring = self.interactive_ring_len();
             if ring > 1 {
+                // Feature 028: when a BUTTON is focused, arrow keys also cycle the
+                // ring (consistent with Tab). When the primary control is focused,
+                // arrows fall through to the list/field below (unchanged behavior).
+                let on_button = self.interactive_focus_is_button().is_some();
                 match &action {
                     Action::FocusNextField => {
                         self.dialog_focus = crate::ui::buttons::next(self.dialog_focus, ring);
@@ -908,6 +933,16 @@ impl App {
                         return Ok(());
                     }
                     Action::FocusPrevField => {
+                        self.dialog_focus = crate::ui::buttons::prev(self.dialog_focus, ring);
+                        self.sync_find_replace_focus();
+                        return Ok(());
+                    }
+                    Action::MoveRight | Action::MoveDown if on_button => {
+                        self.dialog_focus = crate::ui::buttons::next(self.dialog_focus, ring);
+                        self.sync_find_replace_focus();
+                        return Ok(());
+                    }
+                    Action::MoveLeft | Action::MoveUp if on_button => {
                         self.dialog_focus = crate::ui::buttons::prev(self.dialog_focus, ring);
                         self.sync_find_replace_focus();
                         return Ok(());
@@ -1161,12 +1196,19 @@ impl App {
                 return Ok(());
             }
             // List focused: existing navigation/confirm behavior (feature 004).
+            // Feature 028: PageUp/PageDown jump by a page, clamped (no wrap).
             match &action {
                 Action::MoveUp => {
                     self.pending_encoding_select = Some((idx + n - 1) % n);
                 }
                 Action::MoveDown => {
                     self.pending_encoding_select = Some((idx + 1) % n);
+                }
+                Action::MovePageDown => {
+                    self.pending_encoding_select = Some((idx + DIALOG_LIST_PAGE).min(n - 1));
+                }
+                Action::MovePageUp => {
+                    self.pending_encoding_select = Some(idx.saturating_sub(DIALOG_LIST_PAGE));
                 }
                 Action::InsertNewline => {
                     let enc = crate::ui::dialog::ENCODING_OPTIONS[idx].0;
@@ -1210,6 +1252,8 @@ impl App {
                 match &action {
                     Action::MoveUp => fb.move_up(vis),
                     Action::MoveDown => fb.move_down(vis),
+                    Action::MovePageUp => fb.page_up(vis),
+                    Action::MovePageDown => fb.page_down(vis),
                     Action::MoveLeft => fb.enter_parent(),
                     Action::MoveRight | Action::InsertNewline => outcome = Some(fb.activate()),
                     Action::Backspace => fb.backspace(),
@@ -1225,12 +1269,21 @@ impl App {
 
         // Feature 011/018 — Help / About overlay: arrows/PageUp-Down scroll the
         // cheat sheet; Esc/Enter/Quit close; other input is consumed (modal).
-        if self.pending_help.is_some() {
+        // Feature 028: Home/End jump to top/bottom and every scroll is clamped to
+        // the content so keyboard scrolling stays in range.
+        if let Some(screen) = self.pending_help {
+            let (max_scroll, page) = self.help_view_metrics(screen);
             match &action {
-                Action::MoveDown => self.help_scroll = self.help_scroll.saturating_add(1),
+                Action::MoveDown => {
+                    self.help_scroll = (self.help_scroll + 1).min(max_scroll);
+                }
                 Action::MoveUp => self.help_scroll = self.help_scroll.saturating_sub(1),
-                Action::MovePageDown => self.help_scroll = self.help_scroll.saturating_add(8),
-                Action::MovePageUp => self.help_scroll = self.help_scroll.saturating_sub(8),
+                Action::MovePageDown => {
+                    self.help_scroll = (self.help_scroll + page).min(max_scroll);
+                }
+                Action::MovePageUp => self.help_scroll = self.help_scroll.saturating_sub(page),
+                Action::MoveLineStart => self.help_scroll = 0,
+                Action::MoveLineEnd => self.help_scroll = max_scroll,
                 Action::MenuClose | Action::InsertNewline | Action::Quit => {
                     self.pending_help = None;
                 }
@@ -1275,12 +1328,21 @@ impl App {
                 return Ok(());
             }
             // List focused: existing navigation/toggle behavior (feature 008).
+            // Feature 028: PageUp/PageDown jump by a page, clamped (no wrap).
             match &action {
                 Action::MoveUp if n > 0 => {
                     self.plugin_manager_cursor = (self.plugin_manager_cursor + n - 1) % n;
                 }
                 Action::MoveDown if n > 0 => {
                     self.plugin_manager_cursor = (self.plugin_manager_cursor + 1) % n;
+                }
+                Action::MovePageDown if n > 0 => {
+                    self.plugin_manager_cursor =
+                        (self.plugin_manager_cursor + DIALOG_LIST_PAGE).min(n - 1);
+                }
+                Action::MovePageUp if n > 0 => {
+                    self.plugin_manager_cursor =
+                        self.plugin_manager_cursor.saturating_sub(DIALOG_LIST_PAGE);
                 }
                 Action::InsertChar(' ') | Action::InsertNewline => {
                     self.plugin_manager_toggle_current();
@@ -1714,8 +1776,11 @@ impl App {
             return;
         }
 
-        // Replace buffers with restored set.
+        // Replace buffers with restored set. Feature 028: the restored content has
+        // nothing to do with the old buffer the wrap cache was built for, so it MUST
+        // be invalidated here or the soft-wrap renderer slices stale offsets → panic.
         self.buffers = new_buffers;
+        self.invalidate_wrap_cache();
 
         // Feature 007: register watches for newly-restored buffer paths.
         if let Some(ref mut fw) = self.file_watcher {
@@ -2383,15 +2448,28 @@ impl App {
     // ── T102 — Clipboard cut / copy / paste ──────────────────────────────────
 
     /// Copy selected text to the system clipboard.
-    pub fn copy_selection(&self) {
+    /// The active buffer's selected text, or `None` when there is no selection.
+    ///
+    /// Feature 028: `char_idx_for` returns CHAR indices, so this extracts by chars
+    /// (byte-slicing a `String` panics on multibyte boundaries) and clamps a
+    /// reversed/degenerate range to empty rather than panicking — defense-in-depth
+    /// for copy/cut.
+    pub(crate) fn selection_text(&self) -> Option<String> {
         let buf = &self.buffers[self.active_idx];
-        let text = match &buf.selection {
-            Some(sel) => {
-                let (start, end) = sel.ordered_range();
-                let s_idx = self.char_idx_for(start.line, start.grapheme_col);
-                let e_idx = self.char_idx_for(end.line, end.grapheme_col);
-                buf.rope.to_string()[s_idx..e_idx.min(buf.rope.char_count())].to_string()
-            }
+        let sel = buf.selection.as_ref()?;
+        let (start, end) = sel.ordered_range();
+        let s_idx = self.char_idx_for(start.line, start.grapheme_col);
+        let e_idx = self.char_idx_for(end.line, end.grapheme_col);
+        let full = buf.rope.to_string();
+        let total = full.chars().count();
+        let lo = s_idx.min(e_idx).min(total);
+        let hi = s_idx.max(e_idx).min(total);
+        Some(full.chars().skip(lo).take(hi - lo).collect::<String>())
+    }
+
+    pub fn copy_selection(&self) {
+        let text = match self.selection_text() {
+            Some(t) => t,
             None => return,
         };
         match arboard::Clipboard::new() {
@@ -2950,11 +3028,23 @@ impl App {
     // ── T066 — Next / previous buffer ────────────────────────────────────────
 
     /// Cycle forward to the next open buffer, wrapping around.
+    /// Feature 028: invalidate the soft-wrap cache so the next frame rebuilds it
+    /// for the now-active buffer. The cache stores per-line visual byte offsets for
+    /// ONE buffer's content at a given `wrap_text_gen`; whenever the active buffer's
+    /// content identity changes (switch / open / close / session restore) the cache
+    /// must be considered stale, or the renderer would slice the new buffer's lines
+    /// with the old buffer's offsets (the session-restore crash). Bumping the
+    /// generation makes `WrapCache::is_stale` true on the next render-loop check.
+    fn invalidate_wrap_cache(&mut self) {
+        self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
+    }
+
     pub fn next_buffer(&mut self) {
         if self.buffers.len() <= 1 {
             return;
         }
         self.active_idx = (self.active_idx + 1) % self.buffers.len();
+        self.invalidate_wrap_cache();
         self.clamp_scroll();
     }
 
@@ -2968,6 +3058,7 @@ impl App {
         } else {
             self.active_idx - 1
         };
+        self.invalidate_wrap_cache();
         self.clamp_scroll();
     }
 
@@ -3001,6 +3092,7 @@ impl App {
                 }
                 self.buffers.push(buf);
                 self.active_idx = self.buffers.len() - 1;
+                self.invalidate_wrap_cache();
                 log::info!("Opened {:?} as buffer {}", safe_path, self.active_idx);
             }
             Err(e) => {
@@ -3066,6 +3158,7 @@ impl App {
         if self.buffers.len() <= 1 {
             self.buffers[0] = Buffer::new_empty();
             self.active_idx = 0;
+            self.invalidate_wrap_cache();
             self.clamp_scroll();
             return;
         }
@@ -3075,6 +3168,7 @@ impl App {
         } else if self.active_idx >= self.buffers.len() {
             self.active_idx = self.buffers.len() - 1;
         }
+        self.invalidate_wrap_cache();
         self.clamp_scroll();
     }
 
@@ -3094,14 +3188,25 @@ impl App {
 
     // ── Feature 016 — dialog buttons (confirm/dismiss dialogs) ────────────────
 
-    /// Initialize the focused dialog button to the safe default once per dialog
-    /// opening; reset when no button-dialog is open (Feature 016). Called from
-    /// render and before key/mouse handling so focus is correct even without a
-    /// prior frame.
+    /// Initialize the focused dialog control once per dialog opening; reset when no
+    /// dialog is open. Called from render and before key/mouse handling so focus is
+    /// correct even without a prior frame.
+    ///
+    /// - Confirm/dismiss dialogs (Feature 016): focus the safe default button.
+    /// - Interactive dialogs (Feature 020): focus the **primary control** (stop 0 —
+    ///   the field/list), NOT a button. Feature 028 fix: without this, `dialog_focus`
+    ///   carried over from a previous dialog could land on a button when an
+    ///   interactive dialog opened, so typed characters were swallowed and the caret
+    ///   hidden (the Save-As "can't type / can't see what I type" bug).
     fn ensure_dialog_focus(&mut self) {
         if self.open_button_dialog().is_some() {
             if !self.dialog_focus_init {
                 self.dialog_focus = self.dialog_default_focus();
+                self.dialog_focus_init = true;
+            }
+        } else if self.interactive_dialog().is_some() {
+            if !self.dialog_focus_init {
+                self.dialog_focus = 0; // primary control (field/list)
                 self.dialog_focus_init = true;
             }
         } else {
@@ -4561,6 +4666,250 @@ mod tests {
         // Soft-wrap (no hbar): one buffer 22, two buffers 21.
         a.soft_wrap = true;
         assert_eq!(a.viewport_height(), 21);
+    }
+
+    // T022 (Feature 028): selection_text is char-safe (multibyte) and never panics
+    // on a degenerate/reversed range.
+    #[test]
+    fn selection_text_is_char_safe_and_panic_free() {
+        use crate::buffer::{CursorPos, Selection};
+        let mut a = make_app();
+        // Multibyte content: each "é" is 2 bytes; byte-slicing would risk a panic.
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("éàûü\n");
+        a.active_idx = 0;
+        let cur = |g: usize| CursorPos {
+            line: 0,
+            grapheme_col: g,
+            visual_col: g,
+        };
+        // Forward selection of the first two graphemes.
+        a.buffers[0].selection = Some(Selection {
+            anchor: cur(0),
+            active: cur(2),
+        });
+        assert_eq!(a.selection_text().as_deref(), Some("éà"));
+        // Reversed selection yields the same text (ordered internally), no panic.
+        a.buffers[0].selection = Some(Selection {
+            anchor: cur(4),
+            active: cur(2),
+        });
+        assert_eq!(a.selection_text().as_deref(), Some("ûü"));
+        // Degenerate (empty) selection → empty string, no panic.
+        a.buffers[0].selection = Some(Selection {
+            anchor: cur(1),
+            active: cur(1),
+        });
+        assert_eq!(a.selection_text().as_deref(), Some(""));
+        // No selection → None.
+        a.buffers[0].selection = None;
+        assert_eq!(a.selection_text(), None);
+    }
+
+    // T021b (Feature 028): PageUp/PageDown page the encoding-select and plugin-
+    // manager lists, clamped to range (no wrap).
+    #[test]
+    fn page_keys_clamp_encoding_select_list() {
+        let mut a = make_app();
+        let n = crate::ui::dialog::ENCODING_OPTIONS.len();
+        a.pending_encoding_select = Some(0);
+        a.handle_action(Action::MovePageDown).unwrap();
+        assert_eq!(a.pending_encoding_select, Some(DIALOG_LIST_PAGE.min(n - 1)));
+        // Repeated page-downs clamp to the last item.
+        for _ in 0..5 {
+            a.handle_action(Action::MovePageDown).unwrap();
+        }
+        assert_eq!(a.pending_encoding_select, Some(n - 1));
+        for _ in 0..5 {
+            a.handle_action(Action::MovePageUp).unwrap();
+        }
+        assert_eq!(a.pending_encoding_select, Some(0));
+    }
+
+    #[test]
+    fn page_keys_clamp_plugin_manager_list() {
+        let mut a = make_app();
+        // With no plugins installed the list is empty — paging must be a safe no-op.
+        a.pending_plugin_manager = true;
+        a.plugin_manager_cursor = 0;
+        a.handle_action(Action::MovePageDown).unwrap();
+        a.handle_action(Action::MovePageUp).unwrap();
+        assert_eq!(a.plugin_manager_cursor, 0);
+        assert!(
+            a.pending_plugin_manager,
+            "list paging never closes the dialog"
+        );
+    }
+
+    // T017 (Feature 028): Help scrolls from the keyboard with Home/End/Page keys,
+    // clamped to the content.
+    #[test]
+    fn help_keyboard_scroll_clamps() {
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        a.pending_help = Some(HelpScreen::Help);
+        let (max_scroll, _page) = a.help_view_metrics(HelpScreen::Help);
+        assert!(max_scroll > 0, "Help overflows a 24-row terminal");
+        // End → bottom; Home → top.
+        a.handle_action(Action::MoveLineEnd).unwrap();
+        assert_eq!(a.help_scroll, max_scroll);
+        a.handle_action(Action::MoveLineStart).unwrap();
+        assert_eq!(a.help_scroll, 0);
+        // PageDown clamps to max even when pressed many times.
+        for _ in 0..50 {
+            a.handle_action(Action::MovePageDown).unwrap();
+        }
+        assert_eq!(a.help_scroll, max_scroll);
+        // Down never exceeds max; Up returns toward 0.
+        a.handle_action(Action::MoveDown).unwrap();
+        assert_eq!(a.help_scroll, max_scroll);
+        for _ in 0..200 {
+            a.handle_action(Action::MoveUp).unwrap();
+        }
+        assert_eq!(a.help_scroll, 0);
+        // Help is still open (scroll keys don't dismiss it).
+        assert_eq!(a.pending_help, Some(HelpScreen::Help));
+    }
+
+    // T019 (Feature 028): Home/End move the editor cursor to line start/end.
+    #[test]
+    fn home_end_move_cursor_to_line_bounds() {
+        let mut a = make_app();
+        a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("hello world\n");
+        a.active_idx = 0;
+        a.handle_action(Action::MoveLineEnd).unwrap();
+        assert_eq!(
+            a.buffers[0].cursor.grapheme_col,
+            "hello world".chars().count()
+        );
+        a.handle_action(Action::MoveLineStart).unwrap();
+        assert_eq!(a.buffers[0].cursor.grapheme_col, 0);
+    }
+
+    // T014 (Feature 028): arrow keys move focus between buttons in a confirm dialog
+    // (016 ring), consistent with Tab, with wrap-around.
+    #[test]
+    fn arrow_keys_move_confirm_dialog_buttons() {
+        let mut a = make_app();
+        // SavePrompt has 3 buttons (Save/Discard/Cancel); default focus = 2 (Cancel).
+        a.pending_save_prompt = true;
+        a.handle_action(Action::MoveRight).unwrap(); // ensure sets 2, then next → 0
+        assert_eq!(a.dialog_focus, 0);
+        a.handle_action(Action::MoveRight).unwrap(); // → 1
+        assert_eq!(a.dialog_focus, 1);
+        a.handle_action(Action::MoveLeft).unwrap(); // → 0
+        assert_eq!(a.dialog_focus, 0);
+        a.handle_action(Action::MoveLeft).unwrap(); // wrap → 2
+        assert_eq!(a.dialog_focus, 2);
+        // Down/Up behave like Right/Left on the single-row button bar.
+        a.handle_action(Action::MoveDown).unwrap(); // wrap → 0
+        assert_eq!(a.dialog_focus, 0);
+        a.handle_action(Action::MoveUp).unwrap(); // wrap → 2
+        assert_eq!(a.dialog_focus, 2);
+    }
+
+    // T014 (Feature 028): in an interactive dialog with a button focused, arrows
+    // cycle the ring; with the primary control focused, arrows are NOT consumed by
+    // the button ring (they drive the list/field).
+    #[test]
+    fn arrow_keys_cycle_interactive_buttons_when_button_focused() {
+        use crate::ui::file_browser::{BrowseMode, FileBrowser};
+        let mut a = make_app();
+        a.file_browser = Some(FileBrowser::open(
+            std::path::PathBuf::from("."),
+            BrowseMode::Save,
+        ));
+        let ring = a.interactive_ring_len();
+        assert!(ring >= 2, "file browser has a primary control + button(s)");
+        // Focus the first button (stop 1); keep init so ensure won't reset to 0.
+        a.dialog_focus = 1;
+        a.dialog_focus_init = true;
+        a.handle_action(Action::MoveRight).unwrap();
+        assert_eq!(a.dialog_focus, crate::ui::buttons::next(1, ring));
+        a.handle_action(Action::MoveLeft).unwrap();
+        assert_eq!(a.dialog_focus, 1);
+    }
+
+    // T011 (Feature 028): opening an interactive dialog resets focus to the primary
+    // control (stop 0), even if a previous dialog left dialog_focus on a button —
+    // so typing reaches the field (the Save-As typing bug).
+    #[test]
+    fn interactive_dialog_opens_focused_on_primary_control() {
+        use crate::ui::file_browser::{BrowseMode, FileBrowser};
+        let mut a = make_app();
+        // Simulate stale focus left on a button by a prior (now-closed) dialog.
+        a.dialog_focus = 2;
+        a.dialog_focus_init = false;
+        // Open the Save browser.
+        a.file_browser = Some(FileBrowser::open(
+            std::path::PathBuf::from("."),
+            BrowseMode::Save,
+        ));
+        a.ensure_dialog_focus();
+        assert_eq!(a.dialog_focus, 0, "focus resets to the primary field");
+        assert!(
+            a.interactive_focus_is_button().is_none(),
+            "primary control focused, not a button"
+        );
+    }
+
+    // T007 (Feature 028): end-to-end render after a soft-wrap buffer switch with a
+    // stale wrap cache must not panic — the session-restore crash exercised through
+    // the real render path. The render reads `wrap_cache` as-is (the run loop's
+    // rebuild has not happened yet), so the renderer's own clamp must protect it.
+    #[test]
+    fn render_after_softwrap_buffer_switch_with_stale_cache_no_panic() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut a = make_app();
+        a.terminal_size = (80, 24);
+        a.soft_wrap = true;
+        // Buffer 0: long content; buffer 1: short + empty lines.
+        let mut b0 = crate::buffer::Buffer::new_empty();
+        b0.rope = crate::buffer::rope::EditorRope::from_str(
+            "this is a fairly long line that will wrap several times in a narrow pane\n",
+        );
+        let mut b1 = crate::buffer::Buffer::new_empty();
+        b1.rope = crate::buffer::rope::EditorRope::from_str("ab\n\n");
+        a.buffers = vec![b0, b1];
+        a.active_idx = 0;
+        // Build the wrap cache for buffer 0, then switch to buffer 1 WITHOUT a loop
+        // rebuild — the cache now describes the wrong (longer) content.
+        a.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(
+            &a.buffers[0].rope,
+            20,
+            a.wrap_text_gen,
+        ));
+        a.active_idx = 1;
+        let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        t.draw(|f| a.render(f)).unwrap(); // must not panic
+    }
+
+    // T005 (Feature 028): switching/closing the active buffer invalidates the
+    // soft-wrap cache by bumping wrap_text_gen, so the renderer never reuses stale
+    // per-line offsets against the new content.
+    #[test]
+    fn buffer_changes_invalidate_wrap_cache() {
+        let mut a = make_app();
+        a.buffers = vec![
+            crate::buffer::Buffer::new_empty(),
+            crate::buffer::Buffer::new_empty(),
+        ];
+        a.active_idx = 0;
+
+        let g0 = a.wrap_text_gen;
+        a.invalidate_wrap_cache();
+        assert_ne!(a.wrap_text_gen, g0, "invalidate bumps the generation");
+
+        let g1 = a.wrap_text_gen;
+        a.next_buffer();
+        assert_ne!(a.wrap_text_gen, g1, "next_buffer invalidates");
+
+        let g2 = a.wrap_text_gen;
+        a.prev_buffer();
+        assert_ne!(a.wrap_text_gen, g2, "prev_buffer invalidates");
+
+        let g3 = a.wrap_text_gen;
+        a.close_buffer_at(1);
+        assert_ne!(a.wrap_text_gen, g3, "close_buffer_at invalidates");
     }
 
     // T010: close_buffer_at removes the buffer and keeps the right buffer active.

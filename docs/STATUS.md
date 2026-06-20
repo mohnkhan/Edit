@@ -8,6 +8,12 @@
 
 | User Story | Description | Status |
 |---|---|---|
+| F028-US1 | Session restore / buffer switch with soft-wrap never panics (renderer clamps slices; wrap cache invalidated on every active-buffer change) | Complete |
+| F028-US2 | A panic restores the terminal (cooked mode, primary screen, cursor) before printing; crash log still written | Complete |
+| F028-US3 | Interactive dialogs open focused on the input field, so Save-As typing works and the caret shows | Complete |
+| F028-US4 | Arrow keys move focus between dialog buttons (016 + 020 rings), consistent with Tab | Complete |
+| F028-US5 | Help/About scroll with Up/Down/PageUp/PageDown/Home/End (clamped) and dismiss from the keyboard | Complete |
+| F028-US6 | Home/End move the editor cursor to line start/end; lists support PageUp/PageDown (clamped) | Complete |
 | F027-US1 | Buffer tab bar (2+ buffers): one-row strip below the menu bar; click a tab to switch; active highlighted, modified marked | Complete |
 | F027-US2 | Tab `✕` close box: clean buffer closes immediately; modified opens a Save/Discard/Cancel confirm (no silent data loss) | Complete |
 | F027-US3 | Editor geometry accounts for the tab row (cursor/paging/wheel/scrollbars); single-buffer layout unchanged | Complete |

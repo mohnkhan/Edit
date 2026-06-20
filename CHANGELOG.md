@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 028: UX crash-safety and keyboard navigation hardening
+
+#### Fixed
+
+- **Session-restore crash** — restoring a previous session (or switching/opening/closing buffers) with
+  soft-wrap enabled could panic with `end byte index N is out of bounds for string of length 0`. The
+  soft-wrap renderer now clamps every line slice to the current line length (never panics), and the
+  wrap cache is invalidated on every active-buffer change so it can't be reused against the wrong
+  buffer.
+- **Garbled terminal after a crash** — the panic handler now restores the terminal (leaves the
+  alternate screen, disables raw mode + mouse capture, shows the cursor) *before* printing the report,
+  so a crash leaves a usable shell and a readable message. The crash-log file is still written.
+- **Save-As typing did nothing / was invisible** — interactive dialogs now open focused on their input
+  field (not a leftover button), so typed characters reach the field and the caret shows.
+- **Copy/cut hardening** — selection text is now extracted char-safely (no panic on multibyte text or a
+  reversed/empty selection); file-browser scrolling uses saturating arithmetic.
+
+#### Added
+
+- **Arrow-key navigation between dialog buttons** — Left/Right (and Up/Down) now move focus across a
+  dialog's buttons, in both the confirm/dismiss dialogs and the interactive dialog button rings,
+  consistent with Tab/Shift+Tab.
+- **Keyboard scrolling for Help/About** — Up/Down, PageUp/PageDown, and Home/End scroll the overlay
+  (clamped to the content); Esc/Enter still dismiss.
+- **PageUp/PageDown in lists** — the file browser, encoding-select, and plugin-manager lists page by a
+  screenful, clamped to the list bounds.
+
+#### Notes
+
+- No new dependencies (Constitution IV). All fixes are covered by regression tests (Constitution V):
+  renderer no-panic with a stale cache, wrap-cache invalidation, panic-hook terminal restore,
+  interactive-focus reset, arrow-key button movement, Help keyboard scroll clamping, list paging, and
+  char-safe copy. Home/End were already mapped (via the input dispatcher); a regression test now guards
+  that.
+
 ### feature 027: Buffer tab bar
 
 #### Added

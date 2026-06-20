@@ -245,7 +245,14 @@ impl<'a> Widget for EditorWidget<'a> {
                         };
 
                         // Walk graphemes in [seg_start, seg_end).
-                        let seg_str = &line_str[seg_start..seg_end];
+                        // Feature 028: clamp to the current line length so a stale
+                        // wrap cache (offsets computed for different content — e.g.
+                        // right after a session restore or buffer switch) can never
+                        // slice out of bounds. Renders truncated/blank, never panics.
+                        let line_len = line_str.len();
+                        let s = seg_start.min(line_len);
+                        let e = seg_end.min(line_len).max(s);
+                        let seg_str = &line_str[s..e];
                         let mut screen_col = text_offset;
                         let mut byte_in_seg: usize = 0;
 
@@ -478,5 +485,47 @@ impl<'a> Widget for EditorWidget<'a> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::rope::EditorRope;
+    use crate::ui::theme::theme_by_name;
+    use ratatui::layout::Rect;
+
+    fn render_with(buf: &Buffer, soft_wrap: bool, wrap_starts: Option<&[Vec<u32>]>) {
+        let area = Rect::new(0, 0, 40, 10);
+        let mut tb = TuiBuffer::empty(area);
+        let w = EditorWidget::new(buf, theme_by_name("classic"), false, soft_wrap, wrap_starts);
+        w.render(area, &mut tb); // must not panic
+    }
+
+    // T003 (Feature 028): a stale/oversized wrap cache must never make the
+    // soft-wrap renderer slice out of bounds — the headline session-restore crash.
+    #[test]
+    fn render_with_stale_oversized_wrap_cache_does_not_panic() {
+        let mut buf = Buffer::new_empty();
+        // Two short lines + one empty line (the crash repro was an empty line).
+        buf.rope = EditorRope::from_str("ab\n\ncd\n");
+        // Wrap cache built for DIFFERENT, much longer content: segment offsets far
+        // exceed each line's length (e.g. 227 into a 0-length line).
+        let stale: Vec<Vec<u32>> = vec![vec![0, 227], vec![0, 99], vec![0, 5], vec![0]];
+        render_with(&buf, true, Some(&stale));
+    }
+
+    #[test]
+    fn render_empty_buffer_softwrap_does_not_panic() {
+        let buf = Buffer::new_empty();
+        let stale: Vec<Vec<u32>> = vec![vec![0, 50]];
+        render_with(&buf, true, Some(&stale));
+    }
+
+    #[test]
+    fn render_nonwrap_does_not_panic() {
+        let mut buf = Buffer::new_empty();
+        buf.rope = EditorRope::from_str("hello\nworld\n");
+        render_with(&buf, false, None);
     }
 }
