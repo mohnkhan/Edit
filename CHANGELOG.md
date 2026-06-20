@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-21
+
+Second major batch since 0.3.0 — 26 features (010–035) turning the keyboard-only menu prototype into a
+fully mouse-operable, selection-aware editor: working menus and file browser, visible text selection,
+interactive Find/Replace, scrollbars and mouse-wheel/drag support, a multi-buffer tab bar, syntax
+highlighting for Rust/JSON/TOML, Go-to-Line, word-wise editing, plus two rounds of UX-completeness and
+crash-safety hardening. All changes are backward compatible.
+
 ### feature 035: Animated demo GIF + README revamp
 
 #### Added
