@@ -38,7 +38,7 @@ edit [OPTIONS] [FILE...]
 | `Ctrl+N` | New buffer |
 | `Ctrl+S` | Save current file |
 | `F12` | Save As Encoding dialog (select output encoding) |
-| `Ctrl+O` | Open file dialog |
+| `Ctrl+O` | Open file browser |
 | `Ctrl+N` | New file |
 | `Ctrl+Q` | Quit (prompts if unsaved changes) |
 
@@ -123,13 +123,28 @@ navigable/activatable with the same keys *and the mouse* (Features 009 / 011).
 
 ### File
 - New (`Ctrl+N`)
-- Open… (`Ctrl+O`)
-- Save (`Ctrl+S`)
-- Save As…
+- Open… (`Ctrl+O`) — opens the **file browser** (navigate folders, pick a file)
+- Save (`Ctrl+S`) — on an unnamed buffer, opens the Save file browser
+- Save As… — opens the Save **file browser** (navigate to a folder, type a name)
 - Save As Encoding… (`F12`) — choose output encoding for this file
 - Close
 - ----
 - Exit (`Ctrl+Q`)
+
+#### File browser (Open / Save As)
+
+A navigable directory listing replaces the old blind path entry:
+
+| Key / action | Effect |
+|---|---|
+| `↑` / `↓` | Move the selection (list scrolls to keep it visible) |
+| `Enter` / `→` / single mouse click | Enter the highlighted folder, or pick the highlighted file (Open) / confirm (Save) |
+| `←` / `Backspace` (empty field) | Go to the parent directory |
+| type characters | Edit the filename (Save) or an absolute jump-path (Open) |
+| `Esc` / click outside | Cancel |
+
+Folders and files are listed (dot-files shown), sorted parent → folders → files; names render
+UTF-8-correct and truncate without corruption. All chosen paths are validated by the path sanitizer.
 
 ### Edit
 - Undo (`Ctrl+Z`)

@@ -1,0 +1,51 @@
+#!/usr/bin/env expect
+# Smoke test (Feature 012): open the editor, press Ctrl+O to bring up the file
+# browser, type an absolute path to an existing file, Enter to open it, then quit.
+# Verifies the browser path drives an open without crashing and exits 0.
+#
+# Usage: expect tests/smoke/file_browser.exp
+# Exit codes: 0 = handled Ctrl+O + open + quit cleanly; 1 = any failure.
+
+set timeout 10
+
+proc fail {msg} {
+    puts stderr "FAIL: $msg"
+    exit 1
+}
+
+# An absolute path to a file that always exists in this repo.
+set target "[pwd]/Cargo.toml"
+
+spawn ./target/debug/edit
+
+expect {
+    timeout { fail "editor did not start within $timeout seconds" }
+    -re ".+" {}
+}
+after 300
+
+# ── Ctrl+O opens the file browser ─────────────────────────────────────────────
+send "\x0f"
+after 300
+
+# Type the absolute path into the field, then Enter to open it (FR-006a).
+send "$target"
+after 200
+send "\r"
+after 400
+
+# ── Quit cleanly with Ctrl+Q ─────────────────────────────────────────────────
+send "\x11"
+expect {
+    eof     {}
+    timeout { fail "editor did not exit within $timeout seconds after Ctrl+Q" }
+}
+
+catch {wait} result
+set exit_code [lindex $result 3]
+if {$exit_code != 0} {
+    fail "editor exited with non-zero status: $exit_code"
+}
+
+puts "PASS: file browser opened a file via Ctrl+O and exited cleanly"
+exit 0

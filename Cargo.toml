@@ -80,6 +80,10 @@ path = "tests/integration/plugin_api.rs"
 name = "menu_activation"
 path = "tests/integration/menu_activation.rs"
 
+[[test]]
+name = "file_browser"
+path = "tests/integration/file_browser.rs"
+
 [[bench]]
 name = "startup"
 harness = false
