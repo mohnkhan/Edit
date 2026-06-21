@@ -116,6 +116,38 @@ pub(crate) enum Modal {
 // fields, like `pending_save_as_encoding` (flow state) and `dialog_focus`
 // (adjunct focus state). They keep their existing precedence slots in dispatch.
 
+/// Feature 039: the stacked UI layers, from **topmost to bottommost**.
+///
+/// This is the single declared source of stacking precedence. Mouse hit-testing
+/// resolves a click to the topmost *active* layer occupying the cell (see
+/// [`App::top_row_owner`]); the renderer paints in the **reverse** of this order
+/// (editor first, modal last) so the on-screen z-order matches. Keeping both
+/// sides derived from one ordering is what prevents the paint-vs-hit-test drift
+/// that produced the tab-bar/menu-dropdown bugs (033/038).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Layer {
+    /// A foreground [`Modal`] overlay — drawn last, hit-tested first.
+    Modal,
+    /// An open menu dropdown (overlays the tab-bar row and below).
+    MenuDropDown,
+    /// The menu bar itself (row 0).
+    MenuBar,
+    /// The buffer tab bar (row 1, only with 2+ buffers).
+    TabBar,
+    /// The editor text area (bottom of the stack).
+    Editor,
+}
+
+/// The declared layer precedence, topmost first. Consumed by mouse hit-testing
+/// (forward) and the render paint order (reverse).
+const LAYER_PRECEDENCE: [Layer; 5] = [
+    Layer::Modal,
+    Layer::MenuDropDown,
+    Layer::MenuBar,
+    Layer::TabBar,
+    Layer::Editor,
+];
+
 /// Feature 024: which scroll offset a scrollbar interaction drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScrollTarget {
@@ -772,6 +804,35 @@ impl App {
     /// the render, scroll math, and mouse mapping all agree.
     pub fn editor_top(&self) -> u16 {
         1 + if self.tab_bar_visible() { 1 } else { 0 }
+    }
+
+    /// Whether a given layer is currently active (present and able to own clicks).
+    /// `Modal` is excluded here — modal overlays are dispatched earlier in the
+    /// mouse handler and return before the top-bar rows are considered.
+    fn layer_active(&self, layer: Layer) -> bool {
+        match layer {
+            Layer::Modal => self.modal_is_open(),
+            Layer::MenuDropDown => matches!(self.menu_bar.state, MenuState::DropDown { .. }),
+            // The menu *bar* lives on row 0, not the tab-bar row, so it never wins
+            // the tab row by precedence; it is handled by `hit_test_menu` directly.
+            Layer::MenuBar => false,
+            Layer::TabBar => self.tab_bar_visible(),
+            Layer::Editor => true,
+        }
+    }
+
+    /// Feature 039: the topmost active layer occupying the tab-bar row, resolved by
+    /// scanning the single [`LAYER_PRECEDENCE`] order. When this is not
+    /// [`Layer::TabBar`] (i.e. an open dropdown sits above it), the tab bar yields
+    /// those clicks to the higher layer — replacing the former ad-hoc
+    /// `!dropdown_open` guard with a precedence-derived decision so paint and
+    /// hit-test cannot drift (the 033/038 bug class).
+    fn top_row_owner(&self) -> Layer {
+        LAYER_PRECEDENCE
+            .iter()
+            .copied()
+            .find(|&l| self.layer_active(l))
+            .unwrap_or(Layer::Editor)
     }
 
     /// Viewport height in lines (terminal rows minus menubar, statusbar, the
@@ -4869,13 +4930,12 @@ impl App {
         // same geometry as the renderer. A click on the row outside any tab is a
         // no-op. Reached only when no modal is open (guarded above).
         //
-        // Exception: when a menu dropdown is open it overlays the tab row (feature
-        // 033 renders it on top by z-order), so its items — including the first one
-        // on the tab row — own these clicks. Skip the tab-bar interception in that
-        // case and let `hit_test_menu` below route the click, otherwise the first
-        // dropdown item is unreachable by mouse whenever 2+ buffers are open.
-        let dropdown_open = matches!(self.menu_bar.state, MenuState::DropDown { .. });
-        if !dropdown_open && self.tab_bar_visible() && ev.row + 1 == self.editor_top() {
+        // Feature 039: the tab bar handles clicks on its row only when it is the
+        // topmost layer there per `LAYER_PRECEDENCE`. When a menu dropdown is open
+        // it sits above the tab bar (feature 033 paints it on top), so it owns the
+        // tab row — including the first dropdown item — and `hit_test_menu` below
+        // routes the click (otherwise that item is unreachable with 2+ buffers).
+        if self.top_row_owner() == Layer::TabBar && ev.row + 1 == self.editor_top() {
             let area = ratatui::layout::Rect::new(0, ev.row, self.terminal_size.0, 1);
             for r in crate::ui::tabbar::tab_hit_regions(area, &self.buffers, self.active_idx) {
                 if ev.col == r.close_rect.x {
@@ -6877,6 +6937,49 @@ mod tests {
         assert!(!app.menu_bar.is_active());
         // The click must not have changed the active buffer.
         assert_eq!(app.active_idx, 0);
+    }
+
+    // Feature 039 (Phase 2): the tab-bar row's owner is resolved by the single
+    // `LAYER_PRECEDENCE` order, so paint and hit-test agree by construction. This
+    // generalizes the two point regressions above (`repro_menu_click_over_tabs`,
+    // `first_dropdown_item_clickable_with_tab_bar_open`) into the precedence
+    // invariant they were special-casing.
+    #[test]
+    fn top_row_owner_follows_layer_precedence() {
+        let mut app = make_app();
+        app.terminal_size = (80, 24);
+
+        // Single buffer, nothing open: the tab bar is hidden, so the editor owns
+        // the top region.
+        assert!(!app.tab_bar_visible());
+        assert_eq!(app.top_row_owner(), Layer::Editor);
+
+        // 2+ buffers, no dropdown: the tab bar is the topmost active layer.
+        app.buffers.push(crate::buffer::Buffer::new_empty());
+        assert!(app.tab_bar_visible());
+        assert_eq!(app.top_row_owner(), Layer::TabBar);
+
+        // Open a dropdown: it sits ABOVE the tab bar in LAYER_PRECEDENCE and must
+        // win the tab row (this is exactly the 033/038 fix, now precedence-derived).
+        app.menu_bar.state = MenuState::DropDown {
+            top_idx: 0,
+            item_idx: 0,
+        };
+        assert_eq!(app.top_row_owner(), Layer::MenuDropDown);
+
+        // A foreground modal outranks everything (it is dispatched even earlier in
+        // the mouse handler, but the precedence ordering must still reflect that).
+        app.menu_bar.close_menu();
+        app.modal = Modal::Help {
+            screen: HelpScreen::Help,
+            scroll: 0,
+        };
+        assert_eq!(app.top_row_owner(), Layer::Modal);
+
+        // Precedence is strictly ordered top→bottom with no duplicates.
+        for win in LAYER_PRECEDENCE.windows(2) {
+            assert_ne!(win[0], win[1]);
+        }
     }
 
     #[test]

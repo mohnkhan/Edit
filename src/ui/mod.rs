@@ -201,6 +201,11 @@ impl Ui {
         // an open menu's dropdown (which drops from row 0 into the tab-bar row and
         // below) overlays the tab bar instead of being painted over by it
         // (Feature 033: z-order fix — the first dropdown item was hidden).
+        //
+        // Feature 039: this paint order is the REVERSE of `app::LAYER_PRECEDENCE`
+        // (editor → tab bar → menu/dropdown → modal). The same precedence drives
+        // mouse hit-testing (`App::top_row_owner`), so paint and hit-test cannot
+        // disagree about which layer owns the tab-bar row.
         if let Some(area) = tab_bar_area {
             tabbar::render_tab_bar(
                 frame.buffer_mut(),
