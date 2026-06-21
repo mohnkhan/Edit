@@ -436,7 +436,7 @@ impl App {
         // frame size.
         let vh = self.viewport_height().max(1);
 
-        if self.soft_wrap && self.wrap_cache.is_some() {
+        if self.active_buffer().soft_wrap && self.wrap_cache.is_some() {
             let cursor_vr = self.cursor_visual_row();
             let buf = self.active_buffer_mut();
             if cursor_vr < buf.scroll_offset.0 {

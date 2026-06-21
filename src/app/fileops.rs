@@ -322,7 +322,7 @@ impl App {
         self.too_small = w < MIN_WIDTH || h < MIN_HEIGHT;
 
         // Rebuild wrap cache for new terminal width (Feature 005, T022).
-        if self.soft_wrap {
+        if self.active_buffer().soft_wrap {
             let content_w = self.content_width();
             let rope = &self.active_buffer().rope;
             self.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(

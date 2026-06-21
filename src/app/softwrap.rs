@@ -72,40 +72,36 @@ impl App {
         }
     }
 
-    /// Toggle soft-wrap on or off. Handles the width guard, cache rebuild/drop,
-    /// horizontal-scroll reset, and config persistence.
+    /// Toggle soft-wrap for the **active tab** (Feature 044: wrap is per-buffer).
+    /// Handles the width guard, the active-buffer cache rebuild/drop, and the
+    /// active buffer's horizontal-scroll reset. Does not touch other tabs and no
+    /// longer rewrites `config.soft_wrap` (config is only the default seed).
     pub(super) fn handle_toggle_soft_wrap(&mut self) -> io::Result<()> {
         // Width guard (only applied when turning ON).
         let content_w = self.content_width();
-        if !self.soft_wrap && content_w < 10 {
+        if !self.active_buffer().soft_wrap && content_w < 10 {
             self.status_message =
                 Some("Terminal too narrow for soft wrap (min 10 columns)".to_string());
             return Ok(());
         }
 
-        self.soft_wrap = !self.soft_wrap;
-        self.config.soft_wrap = self.soft_wrap;
+        let now_on = !self.active_buffer().soft_wrap;
+        self.active_buffer_mut().soft_wrap = now_on;
+        // Reset the active tab's horizontal scroll either way (wrap on: no h-scroll;
+        // wrap off: start from column 0). Other tabs are untouched.
+        self.active_buffer_mut().scroll_offset.1 = 0;
 
-        if self.soft_wrap {
-            // Build cache; reset horizontal scroll on all buffers.
+        if now_on {
             let rope = &self.active_buffer().rope;
             self.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(
                 rope,
                 content_w,
                 self.wrap_text_gen,
             ));
-            for buf in &mut self.buffers {
-                buf.scroll_offset.1 = 0;
-            }
         } else {
-            // Drop cache; reset horizontal scroll for all buffers.
             self.wrap_cache = None;
-            for buf in &mut self.buffers {
-                buf.scroll_offset.1 = 0;
-            }
         }
 
-        self.save_config_to_disk();
         Ok(())
     }
 }

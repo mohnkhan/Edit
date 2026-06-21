@@ -88,10 +88,14 @@ fn accelerator_is_case_insensitive() {
 #[test]
 fn view_soft_wrap_by_accelerator_toggles() {
     let mut app = plain_app();
-    let before = app.soft_wrap;
+    let before = app.active_buffer().soft_wrap;
     app.handle_action(Action::MenuView).unwrap();
     app.handle_action(Action::InsertChar('w')).unwrap(); // 'Soft Wrap (ext)'
-    assert_ne!(app.soft_wrap, before, "soft wrap toggled via accelerator");
+    assert_ne!(
+        app.active_buffer().soft_wrap,
+        before,
+        "soft wrap toggled via accelerator"
+    );
     assert!(!app.menu_bar.is_active());
 }
 

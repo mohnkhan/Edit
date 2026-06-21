@@ -449,7 +449,7 @@ impl App {
         }
 
         let menus = self.resolved_menus();
-        let toggle_states = [(Action::ToggleSoftWrap, self.soft_wrap)];
+        let toggle_states = [(Action::ToggleSoftWrap, self.active_buffer().soft_wrap)];
         let term_width = self.terminal_size.0;
 
         match hit_test_menu(
@@ -521,7 +521,7 @@ impl App {
         if col >= term_cols.saturating_sub(1) {
             return;
         }
-        if !self.soft_wrap && row == term_rows.saturating_sub(2) {
+        if !self.active_buffer().soft_wrap && row == term_rows.saturating_sub(2) {
             return;
         }
 
@@ -534,7 +534,7 @@ impl App {
         let col = col.saturating_sub(gutter);
 
         // Soft-wrap mode: map (visual_row, visual_col) → (logical_line, grapheme_col).
-        if self.soft_wrap {
+        if self.active_buffer().soft_wrap {
             if let Some(ref cache) = self.wrap_cache {
                 let scroll_vr = self.active_buffer().scroll_offset.0;
                 let visual_row = scroll_vr + clicked_row;

@@ -115,13 +115,14 @@ impl Ui {
             SplitMode::Single => {
                 // Feature 021: reserve the right column (vertical bar) and bottom
                 // row (horizontal bar, non-wrap) and draw scrollbars there.
-                let (text, vbar, hbar) = editor_panes(editor_area, app.soft_wrap);
+                // Feature 044: wrap is per-buffer — use the active buffer's flag.
+                let (text, vbar, hbar) = editor_panes(editor_area, buf.soft_wrap);
                 let wrap_starts = app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice());
                 let editor_widget = EditorWidget::new(
                     buf,
                     app.theme,
                     show_line_numbers,
-                    app.soft_wrap,
+                    buf.soft_wrap,
                     wrap_starts,
                 )
                 .with_matches(&app.search_state.matches, app.search_state.active_match);
@@ -138,14 +139,23 @@ impl Ui {
                     editor_area.width - half_width,
                     editor_area.height,
                 );
-                let (l_text, l_vbar, l_hbar) = editor_panes(left_area, app.soft_wrap);
+                // Feature 044: each pane uses its OWN buffer's wrap flag; the single
+                // active-buffer wrap cache is handed only to the pane that IS the
+                // active buffer (the other pane renders best-effort with no cache).
+                let left_wrap = app.buffers[0].soft_wrap;
+                let left_cache = if app.active_idx == 0 {
+                    app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice())
+                } else {
+                    None
+                };
+                let (l_text, l_vbar, l_hbar) = editor_panes(left_area, left_wrap);
                 frame.render_widget(
                     EditorWidget::new(
                         &app.buffers[0],
                         app.theme,
                         show_line_numbers,
-                        app.soft_wrap,
-                        app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice()),
+                        left_wrap,
+                        left_cache,
                     ),
                     l_text,
                 );
@@ -155,14 +165,20 @@ impl Ui {
                 } else {
                     0
                 };
-                let (r_text, r_vbar, r_hbar) = editor_panes(right_area, app.soft_wrap);
+                let right_wrap = app.buffers[right_buf_idx].soft_wrap;
+                let right_cache = if app.active_idx == right_buf_idx {
+                    app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice())
+                } else {
+                    None
+                };
+                let (r_text, r_vbar, r_hbar) = editor_panes(right_area, right_wrap);
                 frame.render_widget(
                     EditorWidget::new(
                         &app.buffers[right_buf_idx],
                         app.theme,
                         show_line_numbers,
-                        app.soft_wrap,
-                        app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice()),
+                        right_wrap,
+                        right_cache,
                     ),
                     r_text,
                 );
@@ -190,7 +206,7 @@ impl Ui {
             app.theme,
             app.active_idx,
             app.buffers.len(),
-            app.soft_wrap,
+            buf.soft_wrap,
             status_notice,
         );
         frame.render_widget(status_bar, statusbar_area);
@@ -221,7 +237,8 @@ impl Ui {
         // dropdown overlays the content below it, but BEFORE the modal dialog
         // overlays so dialogs stay on top.
         use crate::input::keymap::Action;
-        let toggle_states: &[(Action, bool)] = &[(Action::ToggleSoftWrap, app.soft_wrap)];
+        let toggle_states: &[(Action, bool)] =
+            &[(Action::ToggleSoftWrap, app.active_buffer().soft_wrap)];
         // Feature 009: render the composite menu list (built-in + active plugin menus).
         let menus = resolve_menus(&app.plugin_host.registry.menu_items());
         let menubar = MenuBarWidget::new(app.theme, &app.menu_bar, toggle_states, &menus);
@@ -545,12 +562,19 @@ fn render_editor_scrollbars(
     hbar: Option<Rect>,
 ) {
     // Vertical: lines (or total visual rows in soft-wrap) vs visible rows.
+    // Feature 044: wrap is per-buffer; the single wrap cache belongs to the active
+    // buffer, so only consult it when this pane IS the active buffer.
     let viewport_v = text.height as usize;
-    let content_v = if app.soft_wrap {
-        app.wrap_cache
-            .as_ref()
-            .map(|c| c.total_visual_rows())
-            .unwrap_or_else(|| buf.rope.line_count())
+    let content_v = if buf.soft_wrap {
+        let cache_applies = std::ptr::eq(buf, app.active_buffer());
+        if cache_applies {
+            app.wrap_cache
+                .as_ref()
+                .map(|c| c.total_visual_rows())
+                .unwrap_or_else(|| buf.rope.line_count())
+        } else {
+            buf.rope.line_count()
+        }
     } else {
         buf.rope.line_count()
     };

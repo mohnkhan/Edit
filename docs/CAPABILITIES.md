@@ -128,7 +128,7 @@ tabs truncate/scroll to keep the active tab visible.
 
 | Key | Action |
 |---|---|
-| `Alt+Z` | Toggle soft-wrap mode (non-DOS extension) |
+| `Alt+Z` | Toggle soft-wrap for the active tab (per-tab; non-DOS extension) |
 
 ### Menu
 
