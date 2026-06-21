@@ -406,11 +406,10 @@ impl App {
                 self.plugin_manager_cursor(),
                 area,
             )),
-            InteractiveDialog::FileBrowser => Some(self.file_browser().unwrap().box_rect(area)),
-            InteractiveDialog::FindReplace => Some(crate::ui::find_replace_rect(
-                self.find_replace().unwrap(),
-                area,
-            )),
+            InteractiveDialog::FileBrowser => self.file_browser().map(|fb| fb.box_rect(area)),
+            InteractiveDialog::FindReplace => self
+                .find_replace()
+                .map(|d| crate::ui::find_replace_rect(d, area)),
         }
     }
 
@@ -435,8 +434,9 @@ impl App {
             }
             Some(InteractiveDialog::FileBrowser) => {
                 if idx == 0 {
-                    let outcome = self.file_browser_mut().unwrap().activate();
-                    self.apply_browse_outcome(outcome);
+                    if let Some(outcome) = self.file_browser_mut().map(|fb| fb.activate()) {
+                        self.apply_browse_outcome(outcome);
+                    }
                 } else {
                     self.close_modal();
                 }

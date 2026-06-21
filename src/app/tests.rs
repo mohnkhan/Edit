@@ -1,3 +1,6 @@
+// Feature 042: test code may use unwrap/expect freely (re-allow the app-tree deny).
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use super::*;
 use crate::config::Config;
 use crate::encoding::EncodingId;

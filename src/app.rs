@@ -3,6 +3,13 @@
 //! [`App`] owns all editor state and drives the main event loop.
 
 #![allow(dead_code, unused_variables, unused_imports)]
+// Feature 042 (#72): forbid panic-prone `unwrap()`/`expect()` on fallible values in the editor's
+// core input/dialog code. This inner attribute propagates to all `src/app/*` submodules, so a new
+// guarded unwrap anywhere in the App tree fails `clippy -D warnings`. Test code re-allows it (see the
+// `#![allow]` at the top of `src/app/tests.rs` and the `#[allow]` on the inline debug modules below).
+// Out of scope by design (FR-006): `Regex::new("<literal>").unwrap()` in `highlight/languages/*` and
+// best-effort `let _ =` cleanup live in other modules and are unaffected.
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io;
 use std::path::PathBuf;
@@ -1318,6 +1325,7 @@ fn unicode_segmentation_width(grapheme: &str) -> u16 {
 mod tests;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod f032_dbg2 {
     use super::*;
     fn mk() -> App {
@@ -1344,6 +1352,7 @@ mod f032_dbg2 {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod f034_repro2 {
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};

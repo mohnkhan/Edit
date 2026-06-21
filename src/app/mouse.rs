@@ -58,7 +58,9 @@ impl App {
         // Feature 024: while a scrollbar thumb drag is active, mouse drags scroll
         // (proportional) instead of selecting text. Released below.
         if ev.kind == NormalizedMouseKind::Drag && self.scrollbar_drag.is_some() {
-            let d = self.scrollbar_drag.unwrap();
+            let Some(d) = self.scrollbar_drag else {
+                return Ok(());
+            };
             let click = match d.axis {
                 ScrollAxis::Vertical => ev.row.saturating_sub(d.track_start),
                 ScrollAxis::Horizontal => ev.col.saturating_sub(d.track_start),
@@ -298,9 +300,10 @@ impl App {
                                         fr.width,
                                         ev.col - fr.x,
                                     );
-                                    let d = self.find_replace_mut().unwrap();
-                                    d.set_focus(field);
-                                    d.caret = caret;
+                                    if let Some(d) = self.find_replace_mut() {
+                                        d.set_focus(field);
+                                        d.caret = caret;
+                                    }
                                     self.dialog_focus = match field {
                                         crate::ui::dialog::DialogField::Query => 0,
                                         crate::ui::dialog::DialogField::Replacement => 1,
@@ -328,15 +331,20 @@ impl App {
             let area = ratatui::layout::Rect::new(0, 0, w, h);
             // Feature 031 (#58): a click inside the Name/path field box positions
             // the caret there (checked before the list/outside hit-test).
-            {
-                let fb = self.file_browser().unwrap();
-                let fr = fb.field_text_rect(area);
+            if let Some(fr) = self.file_browser().map(|fb| fb.field_text_rect(area)) {
                 if ev.row == fr.y && ev.col >= fr.x && ev.col < fr.x + fr.width {
-                    self.file_browser_mut().unwrap().caret_click(fr, ev.col);
+                    if let Some(fb) = self.file_browser_mut() {
+                        fb.caret_click(fr, ev.col);
+                    }
                     return Ok(());
                 }
             }
-            let hit = self.file_browser().unwrap().hit_test(area, ev.col, ev.row);
+            let Some(hit) = self
+                .file_browser()
+                .map(|fb| fb.hit_test(area, ev.col, ev.row))
+            else {
+                return Ok(());
+            };
             match hit {
                 BrowserHit::Entry(idx) => {
                     let now = Instant::now();
@@ -346,12 +354,16 @@ impl App {
                     });
                     if double {
                         self.last_browser_click = None;
-                        let outcome = self.file_browser_mut().unwrap().activate_index(idx);
-                        self.apply_browse_outcome(outcome);
+                        let outcome = self.file_browser_mut().map(|fb| fb.activate_index(idx));
+                        if let Some(outcome) = outcome {
+                            self.apply_browse_outcome(outcome);
+                        }
                     } else {
                         // First click: just move the highlight to the row.
                         self.last_browser_click = Some((idx, now));
-                        self.file_browser_mut().unwrap().selected = idx;
+                        if let Some(fb) = self.file_browser_mut() {
+                            fb.selected = idx;
+                        }
                     }
                 }
                 BrowserHit::Outside => {
