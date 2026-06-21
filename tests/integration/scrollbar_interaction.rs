@@ -80,17 +80,16 @@ fn track_click_scrolls_file_browser() {
         fs::write(base.join(format!("f{i:02}.txt")), b"x").unwrap();
     }
     let mut a = app();
-    a.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    a.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
     let (rect, _c, _v, _o) = a
-        .file_browser
-        .as_ref()
+        .file_browser()
         .unwrap()
         .list_scrollbar(Rect::new(0, 0, 80, 24))
         .expect("listing overflows → a bar exists");
     // Click near the bottom of the track → page down.
     press(&mut a, rect.x, rect.y + rect.height - 1);
     assert!(
-        a.file_browser.as_ref().unwrap().scroll > 0,
+        a.file_browser().unwrap().scroll > 0,
         "file-browser track click scrolled the listing"
     );
     let _ = fs::remove_dir_all(&base);

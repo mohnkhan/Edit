@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 039: Centralize editor UI state (Modal enum + single layer precedence)
+
+Behavior-preserving internal refactor of `src/app.rs` — no user-visible change. It removes the two
+structural root causes behind most recent UI bugs (the mode-flag soup and render-vs-hit-test ordering
+drift), so those bug classes can't easily recur.
+
+#### Changed
+
+- **One overlay can ever be open, by construction.** The ~14 independent `pending_*`/`file_browser`
+  flags are collapsed into a single `Modal` enum, so two overlays open at once is now unrepresentable
+  rather than something prevented only by careful dispatch ordering. Keyboard dispatch
+  (`handle_action`), mouse dispatch (`handle_mouse_event`), and rendering (`Ui::render`) all derive the
+  active overlay from this one value via typed accessors (`find_replace()`, `file_browser()`,
+  `goto_line_digits()`, `help_screen()`, …). The dead `menu_active` flag is removed.
+  *(The asynchronous external-file-change prompt and the startup plugin-consent queue remain separate
+  fields by design — they can be pending underneath a user dialog, which a single value cannot
+  represent; this preserves the prior stacking behavior exactly.)*
+- **Stacking order is declared once.** A single `LAYER_PRECEDENCE` (Modal > MenuDropDown > MenuBar >
+  TabBar > Editor) drives both mouse hit-testing (`top_row_owner`) and the render paint order
+  (reverse), replacing the ad-hoc `!dropdown_open` tab-bar special-case so paint and hit-test cannot
+  drift (the class of bugs 033/038).
+- **Go-to-Line geometry is single-sourced.** The dialog box and input-field rects come from one shared
+  `goto_line_rect`/`goto_line_field_rect`, used by both the renderer and the click hit-test, so the
+  clickable region always matches the drawn region. Reference-taking active-buffer accesses are
+  standardized on `active_buffer()`/`active_buffer_mut()`.
+
+#### Notes
+
+- Verified behavior-preserving: the full pre-existing test suite passes unchanged (only mechanical
+  field→accessor renames in tests), plus a new generic layer-precedence invariant test that subsumes
+  the two prior point regressions (`repro_menu_click_over_tabs`,
+  `first_dropdown_item_clickable_with_tab_bar_open`). `cargo fmt --check` and `cargo clippy -D warnings`
+  are clean.
+
 ### feature 038: Fix first dropdown menu item unreachable by mouse with the tab bar open
 
 #### Fixed

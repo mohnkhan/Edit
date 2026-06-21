@@ -23,7 +23,7 @@ fn open_save_prompt() -> App {
     let mut a = app();
     a.handle_action(Action::InsertChar('x')).unwrap();
     a.handle_action(Action::Quit).unwrap();
-    assert!(a.pending_save_prompt, "save prompt should be open");
+    assert!(a.is_save_prompt_open(), "save prompt should be open");
     a
 }
 
@@ -55,7 +55,7 @@ fn save_prompt_buttons_and_safe_default() {
 fn enter_activates_default_cancel() {
     let mut a = open_save_prompt();
     a.handle_action(Action::InsertNewline).unwrap(); // Enter on default (Cancel)
-    assert!(!a.pending_save_prompt, "prompt closed");
+    assert!(!a.is_save_prompt_open(), "prompt closed");
     assert!(a.running, "Cancel keeps the editor running");
 }
 
@@ -83,7 +83,7 @@ fn tab_wraps_through_all_three() {
 fn letter_shortcuts_still_work() {
     let mut a = open_save_prompt();
     a.handle_action(Action::InsertChar('c')).unwrap(); // Cancel shortcut
-    assert!(!a.pending_save_prompt);
+    assert!(!a.is_save_prompt_open());
     assert!(a.running);
 
     let mut b = open_save_prompt();
@@ -110,7 +110,7 @@ fn click_cancel_button_closes_prompt() {
     let rects = edit::ui::buttons::button_rects(rect, &labels);
     let c = rects[2]; // Cancel
     click(&mut a, c.x + 1, c.y + 1);
-    assert!(!a.pending_save_prompt);
+    assert!(!a.is_save_prompt_open());
     assert!(a.running);
 }
 
@@ -118,7 +118,7 @@ fn click_cancel_button_closes_prompt() {
 fn click_outside_cancels() {
     let mut a = open_save_prompt();
     click(&mut a, 0, 0); // far outside the centered dialog
-    assert!(!a.pending_save_prompt, "outside click cancels");
+    assert!(!a.is_save_prompt_open(), "outside click cancels");
     assert!(a.running);
 }
 
@@ -129,7 +129,7 @@ fn click_inside_not_on_button_is_inert() {
     // Top-left interior cell (body area), not a button.
     click(&mut a, rect.x + 1, rect.y + 1);
     assert!(
-        a.pending_save_prompt,
+        a.is_save_prompt_open(),
         "inside-not-on-button keeps prompt open"
     );
 }

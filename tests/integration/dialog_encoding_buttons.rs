@@ -31,7 +31,7 @@ fn app_with_file(name: &str) -> (App, PathBuf) {
     );
     a.terminal_size = (80, 24);
     a.handle_action(Action::SaveAsEncoding).unwrap();
-    assert!(a.pending_encoding_select.is_some(), "encoding dialog open");
+    assert!(a.encoding_select_row().is_some(), "encoding dialog open");
     (a, path)
 }
 
@@ -72,13 +72,13 @@ fn click_ok_applies_selected_encoding() {
     let (mut a, path) = app_with_file("ok");
     // Highlight UTF-16 LE (index 1) via the list.
     a.handle_action(Action::MoveDown).unwrap();
-    assert_eq!(a.pending_encoding_select, Some(1));
+    assert_eq!(a.encoding_select_row(), Some(1));
     let rect = a.interactive_dialog_rect().unwrap();
     let labels = a.interactive_button_labels();
     let rects = edit::ui::buttons::button_rects(rect, &labels);
     let ok = rects[0];
     click(&mut a, ok.x + 1, ok.y + 1);
-    assert!(a.pending_encoding_select.is_none(), "dialog closed by OK");
+    assert!(a.encoding_select_row().is_none(), "dialog closed by OK");
     // OK == Enter on the list: UTF-16 LE BOM written.
     let bytes = fs::read(&path).unwrap();
     assert_eq!(&bytes[0..2], &[0xFF, 0xFE], "UTF-16 LE BOM written");
@@ -94,10 +94,7 @@ fn click_cancel_closes_without_change() {
     let rects = edit::ui::buttons::button_rects(rect, &labels);
     let cancel = rects[1];
     click(&mut a, cancel.x + 1, cancel.y + 1);
-    assert!(
-        a.pending_encoding_select.is_none(),
-        "dialog closed by Cancel"
-    );
+    assert!(a.encoding_select_row().is_none(), "dialog closed by Cancel");
     assert_eq!(fs::read(&path).unwrap(), before, "no re-encode on Cancel");
     let _ = fs::remove_file(&path);
 }
@@ -109,9 +106,9 @@ fn list_keys_unchanged_while_list_focused() {
     let (mut a, _p) = app_with_file("listkeys");
     a.handle_action(Action::MoveDown).unwrap();
     a.handle_action(Action::MoveDown).unwrap();
-    assert_eq!(a.pending_encoding_select, Some(2));
+    assert_eq!(a.encoding_select_row(), Some(2));
     a.handle_action(Action::MoveUp).unwrap();
-    assert_eq!(a.pending_encoding_select, Some(1));
+    assert_eq!(a.encoding_select_row(), Some(1));
 }
 
 #[test]
@@ -121,7 +118,7 @@ fn arrows_are_noop_while_button_focused() {
     a.handle_action(Action::FocusNextField).unwrap(); // focus OK
     assert!(a.interactive_focus_is_button().is_some());
     a.handle_action(Action::MoveDown).unwrap(); // should NOT move the list
-    assert_eq!(a.pending_encoding_select, Some(1), "selection unchanged");
+    assert_eq!(a.encoding_select_row(), Some(1), "selection unchanged");
 }
 
 #[test]
@@ -129,7 +126,7 @@ fn esc_closes_from_any_focus() {
     let (mut a, _p) = app_with_file("esc");
     a.handle_action(Action::FocusNextField).unwrap(); // focus a button
     a.handle_action(Action::MenuClose).unwrap();
-    assert!(a.pending_encoding_select.is_none(), "Esc closes");
+    assert!(a.encoding_select_row().is_none(), "Esc closes");
 }
 
 #[test]
@@ -137,6 +134,6 @@ fn space_on_focused_ok_activates() {
     let (mut a, path) = app_with_file("spaceok");
     a.handle_action(Action::FocusNextField).unwrap(); // focus OK (selection 0 = UTF-8)
     a.handle_action(Action::InsertChar(' ')).unwrap();
-    assert!(a.pending_encoding_select.is_none(), "Space activates OK");
+    assert!(a.encoding_select_row().is_none(), "Space activates OK");
     let _ = fs::remove_file(&path);
 }

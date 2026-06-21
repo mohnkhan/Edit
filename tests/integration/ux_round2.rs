@@ -19,9 +19,11 @@ fn app() -> App {
 #[test]
 fn save_prompt_esc_cancels() {
     let mut a = app();
-    a.pending_save_prompt = true;
+    // Open the save-before-quit prompt the real way (modify, then quit).
+    a.handle_action(Action::InsertChar('x')).unwrap();
+    a.handle_action(Action::Quit).unwrap();
     a.handle_action(Action::MenuClose).unwrap();
-    assert!(!a.pending_save_prompt);
+    assert!(!a.is_save_prompt_open());
     assert!(a.running);
 }
 

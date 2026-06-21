@@ -47,7 +47,7 @@ fn save_prompt_letter_shortcut_still_works() {
     a.handle_action(Action::Quit).unwrap();
     // The 'C' shortcut still cancels (label change is informational only).
     a.handle_action(Action::InsertChar('c')).unwrap();
-    assert!(!a.pending_save_prompt, "Cancel shortcut still works");
+    assert!(!a.is_save_prompt_open(), "Cancel shortcut still works");
     assert!(a.running);
 }
 
@@ -79,14 +79,14 @@ fn find_replace_labels_carry_keys_and_dispatch_by_index() {
     assert!(has_key(&labels, "(Enter)") && has_key(&labels, "(Esc)"));
     // Dispatch is by index: button 3 (Close) closes regardless of label text.
     a.activate_interactive_button(3);
-    assert!(a.pending_find_replace.is_none(), "index-3 button is Close");
+    assert!(a.find_replace().is_none(), "index-3 button is Close");
 }
 
 #[test]
 fn file_browser_labels_carry_keys() {
     let base = tree("fb");
     let mut a = app();
-    a.file_browser = Some(FileBrowser::open(base, BrowseMode::Open));
+    a.open_file_browser(FileBrowser::open(base, BrowseMode::Open));
     let labels = a.interactive_button_labels();
     assert!(has_key(&labels, "Open (Enter)") || has_key(&labels, "(Enter)"));
     assert!(has_key(&labels, "(Esc)"));

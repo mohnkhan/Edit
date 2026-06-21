@@ -2,6 +2,14 @@
 
 ## Deferred Features
 
+### Finish active-buffer accessor standardization (follow-up to feature 039)
+- **Issue**: #68 (`follow-up`)
+- **Status**: Deferred (feature 039 converted the reference-taking sites; ~71 field-level index
+  accesses remain).
+- **Description**: Route the remaining `self.buffers[self.active_idx].<field>` reads/writes through
+  `active_buffer()`/`active_buffer_mut()` (FR-008). Deferred from 039 to avoid borrow-checker churn in
+  a behavior-preserving refactor; the remainder is cosmetic. Effort: small, compiler-guided.
+
 ### Mouse interaction inside dialogs (follow-up to feature 029)
 - **Issue**: #53 (`follow-up`)
 - **Status**: List-row clicks **shipped** 2026-06-20 (feature 030 — encoding & plugin-manager dialogs

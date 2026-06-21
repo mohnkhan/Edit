@@ -67,6 +67,87 @@ enum InteractiveDialog {
     FileBrowser,
 }
 
+/// The single foreground modal layer (Feature 039). At most one overlay is ever
+/// open — the enum makes any other combination unrepresentable, replacing the prior
+/// bag of independent `Option`/`bool` flags. Key dispatch, mouse dispatch, and paint
+/// all derive which overlay is active from this one value.
+///
+/// State that legitimately coexists with editing (`menu_bar`, pointer drags) or that
+/// is adjunct focus/flow state (`dialog_focus`, `pending_save_as_encoding`) stays in
+/// its own field — see `data-model.md`.
+#[derive(Default)]
+pub(crate) enum Modal {
+    /// No overlay open — normal editing (possibly with the menu bar active).
+    #[default]
+    None,
+    /// Right-click editor context menu (Feature 030).
+    ContextMenu(crate::ui::contextmenu::ContextMenu),
+    /// Session-restore confirmation (Feature 003).
+    SessionRestore(crate::session::SessionData),
+    /// Unsaved-changes save-before-quit prompt.
+    SavePrompt,
+    /// Revert confirmation for the given (modified) buffer index (Feature 014).
+    RevertConfirm(usize),
+    /// Tab `[x]` close confirmation for the given buffer index (Feature 027).
+    CloseConfirm(usize),
+    /// Interactive Find/Replace dialog (Feature 015).
+    FindReplace(FindReplaceDialog),
+    /// Go-to-Line prompt: in-progress 1-based digits + caret index (Feature 025/031).
+    GotoLine { digits: String, caret: usize },
+    /// Encoding selection dialog: highlighted row in `ENCODING_OPTIONS` (US4).
+    EncodingSelect { row: usize },
+    /// Navigable Open/Save file browser (Feature 012).
+    FileBrowser(FileBrowser),
+    /// Help/About overlay + scroll offset (Feature 011/018).
+    Help { screen: HelpScreen, scroll: usize },
+    /// Options ▸ Plugins manager overlay + list cursor (Feature 008).
+    PluginManager { cursor: usize },
+}
+
+// Note (Feature 039): two overlays are intentionally NOT `Modal` variants because
+// they are set *asynchronously* and can be pending *underneath* a user-opened
+// overlay (a priority stack the original relied on — preserving FR-010):
+//   * `pending_external_change` — the file watcher (`handle_tick`, every 500ms)
+//     can detect a change while a dialog is open; it preempts by precedence and
+//     the dialog survives underneath until it is dismissed.
+//   * `pending_plugin_consent` — a startup queue that can sit behind a
+//     session-restore prompt and surface once it closes.
+// A single `Modal` value cannot hold both at once, so these stay independent
+// fields, like `pending_save_as_encoding` (flow state) and `dialog_focus`
+// (adjunct focus state). They keep their existing precedence slots in dispatch.
+
+/// Feature 039: the stacked UI layers, from **topmost to bottommost**.
+///
+/// This is the single declared source of stacking precedence. Mouse hit-testing
+/// resolves a click to the topmost *active* layer occupying the cell (see
+/// [`App::top_row_owner`]); the renderer paints in the **reverse** of this order
+/// (editor first, modal last) so the on-screen z-order matches. Keeping both
+/// sides derived from one ordering is what prevents the paint-vs-hit-test drift
+/// that produced the tab-bar/menu-dropdown bugs (033/038).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Layer {
+    /// A foreground [`Modal`] overlay — drawn last, hit-tested first.
+    Modal,
+    /// An open menu dropdown (overlays the tab-bar row and below).
+    MenuDropDown,
+    /// The menu bar itself (row 0).
+    MenuBar,
+    /// The buffer tab bar (row 1, only with 2+ buffers).
+    TabBar,
+    /// The editor text area (bottom of the stack).
+    Editor,
+}
+
+/// The declared layer precedence, topmost first. Consumed by mouse hit-testing
+/// (forward) and the render paint order (reverse).
+const LAYER_PRECEDENCE: [Layer; 5] = [
+    Layer::Modal,
+    Layer::MenuDropDown,
+    Layer::MenuBar,
+    Layer::TabBar,
+    Layer::Editor,
+];
+
 /// Feature 024: which scroll offset a scrollbar interaction drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScrollTarget {
@@ -162,6 +243,10 @@ pub enum Direction {
 
 /// Top-level application state.
 pub struct App {
+    /// Feature 039: the single foreground overlay (at most one open at a time).
+    /// Replaces the former bag of `pending_*`/`file_browser` flags. Key/mouse/paint
+    /// all derive the active overlay from this field.
+    modal: Modal,
     /// Loaded configuration (merged with CLI flags).
     pub config: Config,
     /// Active keybinding map.
@@ -178,26 +263,16 @@ pub struct App {
     pub theme: &'static Theme,
     /// Split-view mode — Single (default) or Vertical (T067).
     pub split_mode: crate::ui::SplitMode,
-    /// Whether the menu bar is currently active (legacy flag; superseded by menu_bar.is_active()).
-    pub menu_active: bool,
     /// Pull-down menu state machine (T041).
     pub menu_bar: MenuBarState,
-    /// Whether the unsaved-changes save prompt is pending.
-    pub pending_save_prompt: bool,
     /// Whether the terminal is too small to render the editor.
     pub too_small: bool,
     /// Current search-and-replace session state (T055).
     pub search_state: SearchState,
     /// Transient message shown in the status bar (e.g. "Match 2/5").
     pub status_message: Option<String>,
-    /// Session data pending user confirmation; `Some` = restore dialog is visible.
-    pub pending_session_restore: Option<crate::session::SessionData>,
     /// Default encoding resolved from config/CLI at startup.
     pub default_encoding: EncodingId,
-    /// Index into ENCODING_OPTIONS of the highlighted row; `Some` = dialog is open.
-    pub pending_encoding_select: Option<usize>,
-    /// The navigable file browser (Open/Save); `Some` = a file dialog is open (Feature 012).
-    pub file_browser: Option<FileBrowser>,
     /// Last file-browser entry click (index + time) for double-click detection.
     /// A single click selects the row; a second click on the same row within
     /// [`DOUBLE_CLICK_MS`] activates it (enter folder / open file) — Feature 012.
@@ -205,8 +280,6 @@ pub struct App {
     /// Feature 030: last editor left-press `(col, row, count, time)` for
     /// double/triple-click detection (count 1=single, 2=word, 3=line).
     pub last_editor_click: Option<(u16, u16, u8, Instant)>,
-    /// Which Help overlay is open, if any (Feature 011).
-    pub pending_help: Option<HelpScreen>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
     pub pending_save_as_encoding: Option<EncodingId>,
     /// Whether soft-wrap visual rendering is active (Feature 005).
@@ -226,31 +299,6 @@ pub struct App {
     /// One-shot status-bar notice (e.g., file-deleted notice); cleared after one render frame.
     pub watcher_notice: Option<String>,
 
-    // ── Feature 014: Revert confirmation ──────────────────────────────────────
-    /// Set to the buffer index awaiting a Revert confirmation (buffer is modified);
-    /// `Some` shows a modal confirm dialog. Cleared on confirm/cancel.
-    pub pending_revert_confirm: Option<usize>,
-
-    // ── Feature 027: tab `[x]` close confirmation ─────────────────────────────
-    /// Set to the buffer index awaiting a close confirmation (the clicked tab's
-    /// buffer is modified). `Some` shows the [`ButtonDialog::CloseConfirm`] modal.
-    pub pending_close_confirm: Option<usize>,
-
-    /// Feature 030 (US3): the open editor right-click context menu, if any.
-    pub pending_context_menu: Option<crate::ui::contextmenu::ContextMenu>,
-
-    // ── Feature 015: interactive Find / Replace dialog ────────────────────────
-    /// `Some` while an interactive Find/Replace dialog is open (modal).
-    pub pending_find_replace: Option<FindReplaceDialog>,
-
-    // ── Feature 025: Go-to-Line prompt ────────────────────────────────────────
-    /// `Some(digits)` while the Go-to-Line prompt is open (modal); holds the
-    /// in-progress 1-based line number being typed.
-    pub pending_goto_line: Option<String>,
-    /// Feature 031: caret position (index into the digit string) for the
-    /// Go-to-Line input — supports mid-string edit and click-to-position.
-    pub pending_goto_line_caret: usize,
-
     // ── Feature 016: focused dialog button ────────────────────────────────────
     /// Index of the focused button in the currently open confirm/dismiss dialog.
     /// Only one modal is open at a time, so a single field suffices. Reset to the
@@ -269,19 +317,12 @@ pub struct App {
     /// and the button release. While set, mouse drags scroll instead of selecting.
     scrollbar_drag: Option<ScrollbarDrag>,
 
-    // ── Feature 018: Help scroll ──────────────────────────────────────────────
-    /// First visible row of the Help cheat-sheet (scroll offset); reset on open.
-    pub help_scroll: usize,
-
     // ── Feature 008: plugin subsystem ────────────────────────────────────────
     /// The Rhai plugin host owning the engine and registry for this session.
     pub plugin_host: crate::plugin::PluginHost,
     /// Plugins awaiting a first-run consent decision; the front item is prompted.
+    /// Async queue kept as a field (not a `Modal` variant) — see the note on `Modal`.
     pub pending_plugin_consent: Vec<crate::plugin::PluginMeta>,
-    /// When true, the Options > Plugins manager overlay is open.
-    pub pending_plugin_manager: bool,
-    /// Cursor index within the plugin manager list.
-    pub plugin_manager_cursor: usize,
 }
 
 // ── App impl ─────────────────────────────────────────────────────────────────
@@ -444,6 +485,9 @@ impl App {
         let status_message = initial_status;
 
         Self {
+            // Feature 039: a pending session-restore is the only overlay that can
+            // be open at construction time.
+            modal: session.map(Modal::SessionRestore).unwrap_or(Modal::None),
             config,
             keymap,
             buffers,
@@ -452,19 +496,13 @@ impl App {
             terminal_size: (80, 24),
             theme,
             split_mode: crate::ui::SplitMode::Single,
-            menu_active: false,
             menu_bar: MenuBarState::new(),
-            pending_save_prompt: false,
             too_small: false,
             search_state: SearchState::default(),
             status_message,
-            pending_session_restore: session,
             default_encoding,
-            pending_encoding_select: None,
-            file_browser: None,
             last_browser_click: None,
             last_editor_click: None,
-            pending_help: None,
             pending_save_as_encoding: None,
             soft_wrap: soft_wrap_initial,
             wrap_cache: None,
@@ -473,21 +511,12 @@ impl App {
             self_write_times: std::collections::HashMap::new(),
             pending_external_change: None,
             watcher_notice,
-            pending_revert_confirm: None,
-            pending_close_confirm: None,
-            pending_context_menu: None,
-            pending_find_replace: None,
-            pending_goto_line: None,
-            pending_goto_line_caret: 0,
             dialog_focus: 0,
             dialog_focus_init: false,
             drag_anchor: None,
             scrollbar_drag: None,
-            help_scroll: 0,
             plugin_host,
             pending_plugin_consent,
-            pending_plugin_manager: false,
-            plugin_manager_cursor: 0,
         }
     }
 
@@ -558,6 +587,219 @@ impl App {
         &mut self.buffers[self.active_idx]
     }
 
+    // ── Feature 039: foreground modal accessors ──────────────────────────────
+    // The single source of truth for "which overlay is open". All key/mouse/paint
+    // dispatch reads through these; nothing reads a per-overlay flag any more.
+
+    /// The current foreground overlay (read-only). Crate-internal: `Modal` is a
+    /// private type, so integration tests use the typed `*()`/`*_is_open()`
+    /// accessors below instead of matching on this directly.
+    pub(crate) fn modal(&self) -> &Modal {
+        &self.modal
+    }
+
+    /// True iff a foreground overlay is open (≠ `Modal::None`).
+    pub fn modal_is_open(&self) -> bool {
+        !matches!(self.modal, Modal::None)
+    }
+
+    /// Close any open overlay (set to `Modal::None`). Idempotent. The pre-render
+    /// `clamp_all_cursors()` still runs, preserving the cursor-bounds invariant.
+    pub(crate) fn close_modal(&mut self) {
+        self.modal = Modal::None;
+    }
+
+    /// The open Find/Replace dialog, if that overlay is open.
+    pub fn find_replace(&self) -> Option<&FindReplaceDialog> {
+        match &self.modal {
+            Modal::FindReplace(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Mutable access to the open Find/Replace dialog.
+    pub fn find_replace_mut(&mut self) -> Option<&mut FindReplaceDialog> {
+        match &mut self.modal {
+            Modal::FindReplace(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Open the interactive Find/Replace dialog with the given dialog state.
+    pub fn open_find_replace(&mut self, dialog: FindReplaceDialog) {
+        self.modal = Modal::FindReplace(dialog);
+    }
+
+    /// The open file browser, if that overlay is open.
+    pub fn file_browser(&self) -> Option<&FileBrowser> {
+        match &self.modal {
+            Modal::FileBrowser(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    /// Mutable access to the open file browser.
+    pub fn file_browser_mut(&mut self) -> Option<&mut FileBrowser> {
+        match &mut self.modal {
+            Modal::FileBrowser(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    /// Open the file browser (Open/Save) with the given browser state.
+    pub fn open_file_browser(&mut self, browser: FileBrowser) {
+        self.modal = Modal::FileBrowser(browser);
+    }
+
+    /// The open editor context menu, if that overlay is open.
+    pub fn context_menu(&self) -> Option<&crate::ui::contextmenu::ContextMenu> {
+        match &self.modal {
+            Modal::ContextMenu(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// True iff the save-before-quit prompt is the open overlay.
+    pub fn is_save_prompt_open(&self) -> bool {
+        matches!(self.modal, Modal::SavePrompt)
+    }
+
+    /// True iff the session-restore prompt is the open overlay.
+    pub fn is_session_restore_open(&self) -> bool {
+        matches!(self.modal, Modal::SessionRestore(_))
+    }
+
+    /// Buffer index awaiting a Revert confirmation, if that overlay is open.
+    pub fn revert_confirm_target(&self) -> Option<usize> {
+        match self.modal {
+            Modal::RevertConfirm(i) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Buffer index awaiting a tab-close confirmation, if that overlay is open.
+    pub fn close_confirm_target(&self) -> Option<usize> {
+        match self.modal {
+            Modal::CloseConfirm(i) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Highlighted row of the encoding-select dialog, if that overlay is open.
+    pub fn encoding_select_row(&self) -> Option<usize> {
+        match self.modal {
+            Modal::EncodingSelect { row } => Some(row),
+            _ => None,
+        }
+    }
+
+    /// Open (or re-point) the encoding-select dialog at `row`.
+    pub fn set_encoding_select(&mut self, row: usize) {
+        self.modal = Modal::EncodingSelect { row };
+    }
+
+    /// True iff the plugin-manager overlay is open.
+    pub fn is_plugin_manager_open(&self) -> bool {
+        matches!(self.modal, Modal::PluginManager { .. })
+    }
+
+    /// Open the Options ▸ Plugins manager overlay (cursor at the top).
+    pub fn open_plugin_manager(&mut self) {
+        self.modal = Modal::PluginManager { cursor: 0 };
+    }
+
+    /// Open the Go-to-Line prompt with the given in-progress digits and caret.
+    pub fn open_goto_line(&mut self, digits: String, caret: usize) {
+        self.modal = Modal::GotoLine { digits, caret };
+    }
+
+    /// Open the Help/About overlay at the given screen (scroll reset to top).
+    pub fn open_help(&mut self, screen: HelpScreen) {
+        self.modal = Modal::Help { screen, scroll: 0 };
+    }
+
+    /// The Go-to-Line digits (in progress), if that prompt is open.
+    pub fn goto_line_digits(&self) -> Option<&str> {
+        match &self.modal {
+            Modal::GotoLine { digits, .. } => Some(digits.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Feature 039 (FR-006): the Go-to-Line dialog box rect — the single geometry
+    /// source shared by the renderer and mouse hit-testing, so a click can never
+    /// diverge from the drawn box. `None` when the prompt is closed.
+    pub(crate) fn goto_line_rect(&self) -> Option<ratatui::layout::Rect> {
+        let digits = self.goto_line_digits()?;
+        let (w, h) = self.terminal_size;
+        // Width fits "Go to line: " (12) + digits + the caret glyph + borders,
+        // clamped to the terminal; centered. (Equivalent to the prior render-side
+        // `body.len() + 4`, since the caret glyph "▏" is 3 bytes.)
+        let dw = ((19 + digits.len()) as u16).clamp(20, w.max(1));
+        let dh = 3u16.min(h.max(1));
+        let dx = w.saturating_sub(dw) / 2;
+        let dy = h.saturating_sub(dh) / 2;
+        Some(ratatui::layout::Rect::new(dx, dy, dw, dh))
+    }
+
+    /// The digit-input field rect inside the Go-to-Line box (where a caret click
+    /// lands). Derived from [`Self::goto_line_rect`] so render and hit-test agree.
+    pub(crate) fn goto_line_field_rect(&self) -> Option<ratatui::layout::Rect> {
+        let rect = self.goto_line_rect()?;
+        let value_x = rect.x + 1 + "Go to line: ".len() as u16;
+        let field_w = rect.width.saturating_sub(2 + 12);
+        Some(ratatui::layout::Rect::new(value_x, rect.y + 1, field_w, 1))
+    }
+
+    /// The Go-to-Line caret index (0 when the prompt is not open).
+    pub fn goto_line_caret(&self) -> usize {
+        match self.modal {
+            Modal::GotoLine { caret, .. } => caret,
+            _ => 0,
+        }
+    }
+
+    /// The open Help/About overlay screen, if that overlay is open.
+    pub fn help_screen(&self) -> Option<HelpScreen> {
+        match self.modal {
+            Modal::Help { screen, .. } => Some(screen),
+            _ => None,
+        }
+    }
+
+    /// The Help overlay scroll offset (0 when Help is not open).
+    pub fn help_scroll(&self) -> usize {
+        match self.modal {
+            Modal::Help { scroll, .. } => scroll,
+            _ => 0,
+        }
+    }
+
+    /// Mutable Help scroll offset, if the Help overlay is open.
+    pub(crate) fn help_scroll_mut(&mut self) -> Option<&mut usize> {
+        match &mut self.modal {
+            Modal::Help { scroll, .. } => Some(scroll),
+            _ => None,
+        }
+    }
+
+    /// Plugin-manager list cursor (0 when the overlay is not open — callers read
+    /// it only inside manager-open contexts).
+    pub(crate) fn plugin_manager_cursor(&self) -> usize {
+        match self.modal {
+            Modal::PluginManager { cursor } => cursor,
+            _ => 0,
+        }
+    }
+
+    /// Mutable plugin-manager list cursor, if the overlay is open.
+    pub(crate) fn plugin_manager_cursor_mut(&mut self) -> Option<&mut usize> {
+        match &mut self.modal {
+            Modal::PluginManager { cursor } => Some(cursor),
+            _ => None,
+        }
+    }
+
     // ── T011 — Encoding dialog helpers ───────────────────────────────────────
 
     /// Return the index in [`ENCODING_OPTIONS`] that matches `enc`, or 0 if not found.
@@ -587,6 +829,35 @@ impl App {
     /// the render, scroll math, and mouse mapping all agree.
     pub fn editor_top(&self) -> u16 {
         1 + if self.tab_bar_visible() { 1 } else { 0 }
+    }
+
+    /// Whether a given layer is currently active (present and able to own clicks).
+    /// `Modal` is excluded here — modal overlays are dispatched earlier in the
+    /// mouse handler and return before the top-bar rows are considered.
+    fn layer_active(&self, layer: Layer) -> bool {
+        match layer {
+            Layer::Modal => self.modal_is_open(),
+            Layer::MenuDropDown => matches!(self.menu_bar.state, MenuState::DropDown { .. }),
+            // The menu *bar* lives on row 0, not the tab-bar row, so it never wins
+            // the tab row by precedence; it is handled by `hit_test_menu` directly.
+            Layer::MenuBar => false,
+            Layer::TabBar => self.tab_bar_visible(),
+            Layer::Editor => true,
+        }
+    }
+
+    /// Feature 039: the topmost active layer occupying the tab-bar row, resolved by
+    /// scanning the single [`LAYER_PRECEDENCE`] order. When this is not
+    /// [`Layer::TabBar`] (i.e. an open dropdown sits above it), the tab bar yields
+    /// those clicks to the higher layer — replacing the former ad-hoc
+    /// `!dropdown_open` guard with a precedence-derived decision so paint and
+    /// hit-test cannot drift (the 033/038 bug class).
+    fn top_row_owner(&self) -> Layer {
+        LAYER_PRECEDENCE
+            .iter()
+            .copied()
+            .find(|&l| self.layer_active(l))
+            .unwrap_or(Layer::Editor)
     }
 
     /// Viewport height in lines (terminal rows minus menubar, statusbar, the
@@ -643,7 +914,7 @@ impl App {
         let (w, h) = self.terminal_size;
         let full = Rect::new(0, 0, w, h);
         let mut out = Vec::new();
-        if let Some(screen) = self.pending_help {
+        if let Some(screen) = self.help_screen() {
             let dw = 64u16.min(w.max(1));
             let dh = 20u16.min(h.max(1));
             let dx = w.saturating_sub(dw) / 2;
@@ -656,11 +927,11 @@ impl App {
                     axis: ScrollAxis::Vertical,
                     content,
                     viewport: body_rows,
-                    offset: self.help_scroll.min(content),
+                    offset: self.help_scroll().min(content),
                     target: ScrollTarget::Help,
                 });
             }
-        } else if let Some(idx) = self.pending_encoding_select {
+        } else if let Modal::EncodingSelect { row: idx } = self.modal {
             let rect = crate::ui::dialog::encoding_dialog_rect(full);
             let body_rows = (rect.height as usize).saturating_sub(2 + 4);
             let content = crate::ui::dialog::ENCODING_OPTIONS.len();
@@ -674,7 +945,7 @@ impl App {
                     target: ScrollTarget::Encoding,
                 });
             }
-        } else if let Some(fb) = self.file_browser.as_ref() {
+        } else if let Some(fb) = self.file_browser() {
             if let Some((rect, content, viewport, offset)) = fb.list_scrollbar(full) {
                 out.push(ScrollbarRegion {
                     rect,
@@ -685,10 +956,10 @@ impl App {
                     target: ScrollTarget::FileBrowser,
                 });
             }
-        } else if self.pending_plugin_manager {
+        } else if self.is_plugin_manager_open() {
             let rect = crate::ui::plugin_manager::manager_rect(
                 &self.plugin_host,
-                self.plugin_manager_cursor,
+                self.plugin_manager_cursor(),
                 full,
             );
             let body_rows = (rect.height as usize).saturating_sub(2 + 4);
@@ -699,11 +970,11 @@ impl App {
                     axis: ScrollAxis::Vertical,
                     content,
                     viewport: body_rows,
-                    offset: self.plugin_manager_cursor,
+                    offset: self.plugin_manager_cursor(),
                     target: ScrollTarget::Plugin,
                 });
             }
-        } else if self.pending_find_replace.is_some() || self.pending_goto_line.is_some() {
+        } else if self.find_replace().is_some() || self.goto_line_digits().is_some() {
             // Find/Replace and Go-to-Line have no scrollable content.
         } else {
             // Editor — the pane under the cursor column. Feature 027: the editor
@@ -794,20 +1065,24 @@ impl App {
                 self.buffers[i].scroll_offset.1 = offset;
             }
             ScrollTarget::FileBrowser => {
-                if let Some(fb) = self.file_browser.as_mut() {
+                if let Some(fb) = self.file_browser_mut() {
                     fb.set_scroll(offset, viewport);
                 }
             }
             ScrollTarget::Help => {
-                self.help_scroll = offset;
+                if let Some(s) = self.help_scroll_mut() {
+                    *s = offset;
+                }
             }
             ScrollTarget::Encoding => {
                 let n = crate::ui::dialog::ENCODING_OPTIONS.len();
-                self.pending_encoding_select = Some(offset.min(n.saturating_sub(1)));
+                self.set_encoding_select(offset.min(n.saturating_sub(1)));
             }
             ScrollTarget::Plugin => {
                 let n = self.plugin_host.registry.instances.len();
-                self.plugin_manager_cursor = offset.min(n.saturating_sub(1));
+                if let Some(c) = self.plugin_manager_cursor_mut() {
+                    *c = offset.min(n.saturating_sub(1));
+                }
             }
         }
     }
@@ -921,23 +1196,23 @@ impl App {
         // Feature 030 (US3): the editor context menu is modal while open — Up/Down
         // move focus, Enter/Space activate the focused item (routing to the real
         // action), Esc dismisses; all other keys are consumed.
-        if let Some(mut menu) = self.pending_context_menu {
+        if let Modal::ContextMenu(mut menu) = self.modal {
             match &action {
                 Action::MoveDown => {
                     menu.focus_next();
-                    self.pending_context_menu = Some(menu);
+                    self.modal = Modal::ContextMenu(menu);
                 }
                 Action::MoveUp => {
                     menu.focus_prev();
-                    self.pending_context_menu = Some(menu);
+                    self.modal = Modal::ContextMenu(menu);
                 }
                 Action::InsertNewline | Action::InsertChar(' ') => {
                     let act = crate::ui::contextmenu::ITEMS[menu.focus].1.clone();
-                    self.pending_context_menu = None;
+                    self.close_modal();
                     return self.handle_action(act);
                 }
                 Action::MenuClose | Action::Quit => {
-                    self.pending_context_menu = None;
+                    self.close_modal();
                 }
                 _ => {}
             }
@@ -1014,21 +1289,21 @@ impl App {
         // When the session restore dialog is active, only Y/y/Enter (confirm)
         // and N/n/Escape/Quit (decline) are forwarded; everything else is
         // dropped silently so the dialog stays visible.
-        if self.pending_session_restore.is_some() {
+        if matches!(self.modal, Modal::SessionRestore(_)) {
             match &action {
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'Y') => {
                     self.do_restore_session();
-                    self.pending_session_restore = None;
+                    self.close_modal();
                 }
                 Action::InsertNewline => {
                     self.do_restore_session();
-                    self.pending_session_restore = None;
+                    self.close_modal();
                 }
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
-                    self.pending_session_restore = None;
+                    self.close_modal();
                 }
                 Action::Quit | Action::MenuClose => {
-                    self.pending_session_restore = None;
+                    self.close_modal();
                 }
                 _ => {}
             }
@@ -1037,7 +1312,7 @@ impl App {
 
         // When the save-before-quit prompt is active, only S / D / C are valid.
         // All other actions are silently dropped so the prompt stays visible.
-        if self.pending_save_prompt {
+        if matches!(self.modal, Modal::SavePrompt) {
             match &action {
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'S') => {
                     self.prompt_save_and_quit();
@@ -1091,21 +1366,21 @@ impl App {
 
         // Feature 014 — Revert confirmation intercept: Y/Enter discards changes
         // and reloads from disk; N/Esc cancels (buffer untouched).
-        if let Some(buf_idx) = self.pending_revert_confirm {
+        if let Modal::RevertConfirm(buf_idx) = self.modal {
             match &action {
                 Action::InsertNewline => {
-                    self.pending_revert_confirm = None;
+                    self.close_modal();
                     self.reload_from_disk(buf_idx);
                 }
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'Y') => {
-                    self.pending_revert_confirm = None;
+                    self.close_modal();
                     self.reload_from_disk(buf_idx);
                 }
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
-                    self.pending_revert_confirm = None;
+                    self.close_modal();
                 }
                 Action::MenuClose | Action::Quit => {
-                    self.pending_revert_confirm = None;
+                    self.close_modal();
                 }
                 _ => {}
             }
@@ -1116,7 +1391,7 @@ impl App {
         // close), D (discard + close), C/Esc (cancel) are valid; all other input
         // is dropped so the modal stays visible. Mirrors the save-before-quit
         // prompt so the `(S)`/`(D)` label hints are accurate.
-        if self.pending_close_confirm.is_some() {
+        if matches!(self.modal, Modal::CloseConfirm(_)) {
             match &action {
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'S') => {
                     self.activate_dialog_button(0);
@@ -1138,9 +1413,8 @@ impl App {
         // Feature 015 — Find/Replace dialog intercept. While open, keystrokes
         // edit the dialog fields and drive the search; the buffer is only touched
         // by an explicit Replace/Replace-All. All input is consumed.
-        if self.pending_find_replace.is_some() {
-            let is_replace =
-                self.pending_find_replace.as_ref().unwrap().mode == DialogMode::Replace;
+        if self.find_replace().is_some() {
+            let is_replace = self.find_replace().unwrap().mode == DialogMode::Replace;
             // Dialog-global keys (work regardless of which stop is focused):
             // close, option toggles, and match navigation. Feature 020 keeps
             // these unchanged from feature 015.
@@ -1150,23 +1424,23 @@ impl App {
                     return Ok(());
                 }
                 Action::ToggleSearchCase => {
-                    let d = self.pending_find_replace.as_mut().unwrap();
+                    let d = self.find_replace_mut().unwrap();
                     d.case_sensitive = !d.case_sensitive;
                     self.run_find_from_dialog();
                     return Ok(());
                 }
                 Action::ToggleSearchWrap => {
-                    self.pending_find_replace.as_mut().unwrap().wrap ^= true;
+                    self.find_replace_mut().unwrap().wrap ^= true;
                     return Ok(());
                 }
                 Action::ToggleSearchRegex => {
-                    let d = self.pending_find_replace.as_mut().unwrap();
+                    let d = self.find_replace_mut().unwrap();
                     d.regex = !d.regex;
                     self.run_find_from_dialog();
                     return Ok(());
                 }
                 Action::ToggleSearchWholeWord => {
-                    let d = self.pending_find_replace.as_mut().unwrap();
+                    let d = self.find_replace_mut().unwrap();
                     d.whole_word = !d.whole_word;
                     self.run_find_from_dialog();
                     return Ok(());
@@ -1196,12 +1470,10 @@ impl App {
             }
             // A field stop is focused: edit the field / run the per-mode action.
             match &action {
-                Action::InsertChar(c) => {
-                    self.pending_find_replace.as_mut().unwrap().insert_char(*c)
-                }
-                Action::Backspace => self.pending_find_replace.as_mut().unwrap().backspace(),
-                Action::MoveLeft => self.pending_find_replace.as_mut().unwrap().move_left(),
-                Action::MoveRight => self.pending_find_replace.as_mut().unwrap().move_right(),
+                Action::InsertChar(c) => self.find_replace_mut().unwrap().insert_char(*c),
+                Action::Backspace => self.find_replace_mut().unwrap().backspace(),
+                Action::MoveLeft => self.find_replace_mut().unwrap().move_left(),
+                Action::MoveRight => self.find_replace_mut().unwrap().move_right(),
                 Action::InsertNewline => {
                     if is_replace {
                         self.replace_current_from_dialog();
@@ -1217,37 +1489,55 @@ impl App {
         // Feature 025 — Go-to-Line prompt intercept: digits edit the number,
         // Enter jumps (clamped) to the line start, Esc cancels; everything else is
         // consumed so the buffer is never modified while the prompt is open.
-        if self.pending_goto_line.is_some() {
+        if matches!(self.modal, Modal::GotoLine { .. }) {
             // Feature 031: caret-aware digit editing. The value is ASCII digits, so
             // the caret index equals a byte offset.
             match &action {
                 Action::InsertChar(c) if c.is_ascii_digit() => {
-                    let entry = self.pending_goto_line.as_mut().unwrap();
-                    let caret = self.pending_goto_line_caret.min(entry.len());
-                    entry.insert(caret, *c);
-                    self.pending_goto_line_caret = caret + 1;
+                    if let Modal::GotoLine { digits, caret } = &mut self.modal {
+                        let c0 = (*caret).min(digits.len());
+                        digits.insert(c0, *c);
+                        *caret = c0 + 1;
+                    }
                 }
                 Action::Backspace => {
-                    let entry = self.pending_goto_line.as_mut().unwrap();
-                    let caret = self.pending_goto_line_caret.min(entry.len());
-                    if caret > 0 {
-                        entry.remove(caret - 1);
-                        self.pending_goto_line_caret = caret - 1;
+                    if let Modal::GotoLine { digits, caret } = &mut self.modal {
+                        let c0 = (*caret).min(digits.len());
+                        if c0 > 0 {
+                            digits.remove(c0 - 1);
+                            *caret = c0 - 1;
+                        }
                     }
                 }
                 Action::MoveLeft => {
-                    self.pending_goto_line_caret = self.pending_goto_line_caret.saturating_sub(1);
+                    if let Modal::GotoLine { caret, .. } = &mut self.modal {
+                        *caret = caret.saturating_sub(1);
+                    }
                 }
                 Action::MoveRight => {
-                    let len = self.pending_goto_line.as_ref().unwrap().len();
-                    self.pending_goto_line_caret = (self.pending_goto_line_caret + 1).min(len);
+                    if let Modal::GotoLine { digits, caret } = &mut self.modal {
+                        *caret = (*caret + 1).min(digits.len());
+                    }
                 }
-                Action::MoveLineStart => self.pending_goto_line_caret = 0,
+                Action::MoveLineStart => {
+                    if let Modal::GotoLine { caret, .. } = &mut self.modal {
+                        *caret = 0;
+                    }
+                }
                 Action::MoveLineEnd => {
-                    self.pending_goto_line_caret = self.pending_goto_line.as_ref().unwrap().len();
+                    if let Modal::GotoLine { digits, caret } = &mut self.modal {
+                        *caret = digits.len();
+                    }
                 }
                 Action::InsertNewline => {
-                    let entry = self.pending_goto_line.take().unwrap_or_default();
+                    // Take the digits out and close the prompt (mem::take → None).
+                    let entry = match std::mem::take(&mut self.modal) {
+                        Modal::GotoLine { digits, .. } => digits,
+                        other => {
+                            self.modal = other;
+                            String::new()
+                        }
+                    };
                     if let Ok(n) = entry.parse::<usize>() {
                         let count = self.buffers[self.active_idx].rope.line_count();
                         let line1 = n.clamp(1, count.max(1));
@@ -1256,7 +1546,7 @@ impl App {
                     // Empty / non-numeric → closed with no movement.
                 }
                 Action::MenuClose | Action::Quit => {
-                    self.pending_goto_line = None;
+                    self.close_modal();
                 }
                 _ => {}
             }
@@ -1266,11 +1556,11 @@ impl App {
         // T012 — Encoding-dialog intercept: when the dialog is open, only
         // Up/Down (navigate), Enter (confirm), and Esc/MenuClose (cancel) are
         // processed; all other actions are silently consumed.
-        if let Some(idx) = self.pending_encoding_select {
+        if let Modal::EncodingSelect { row: idx } = self.modal {
             let n = crate::ui::dialog::ENCODING_OPTIONS.len();
             // Esc always cancels, from any focus stop.
             if matches!(&action, Action::MenuClose) {
-                self.pending_encoding_select = None;
+                self.close_modal();
                 return Ok(());
             }
             // Button focused (OK/Cancel): Enter/Space activate; arrows no-op.
@@ -1284,20 +1574,20 @@ impl App {
             // Feature 028: PageUp/PageDown jump by a page, clamped (no wrap).
             match &action {
                 Action::MoveUp => {
-                    self.pending_encoding_select = Some((idx + n - 1) % n);
+                    self.set_encoding_select((idx + n - 1) % n);
                 }
                 Action::MoveDown => {
-                    self.pending_encoding_select = Some((idx + 1) % n);
+                    self.set_encoding_select((idx + 1) % n);
                 }
                 Action::MovePageDown => {
-                    self.pending_encoding_select = Some((idx + DIALOG_LIST_PAGE).min(n - 1));
+                    self.set_encoding_select((idx + DIALOG_LIST_PAGE).min(n - 1));
                 }
                 Action::MovePageUp => {
-                    self.pending_encoding_select = Some(idx.saturating_sub(DIALOG_LIST_PAGE));
+                    self.set_encoding_select(idx.saturating_sub(DIALOG_LIST_PAGE));
                 }
                 Action::InsertNewline => {
                     let enc = crate::ui::dialog::ENCODING_OPTIONS[idx].0;
-                    self.pending_encoding_select = None;
+                    self.close_modal();
                     self.do_save_as_encoding(enc);
                 }
                 _ => {}
@@ -1309,10 +1599,10 @@ impl App {
         // Enter/Right activate, Left/Backspace go to parent, printable chars edit
         // the filename/path field, Esc cancels. All other actions are consumed so
         // the browser stays modal over the buffer.
-        if self.file_browser.is_some() {
+        if self.file_browser().is_some() {
             // Esc always cancels, from any focus stop.
             if matches!(&action, Action::MenuClose) {
-                self.file_browser = None;
+                self.close_modal();
                 return Ok(());
             }
             // Button focused (Open|Save / Cancel): Enter/Space activate; other
@@ -1326,14 +1616,13 @@ impl App {
             // Browser focused: existing navigation/edit behavior (feature 012).
             let vis = {
                 let (w, h) = self.terminal_size;
-                self.file_browser
-                    .as_ref()
+                self.file_browser()
                     .unwrap()
                     .visible_rows(ratatui::layout::Rect::new(0, 0, w, h))
             };
             let mut outcome: Option<BrowseOutcome> = None;
             {
-                let fb = self.file_browser.as_mut().unwrap();
+                let fb = self.file_browser_mut().unwrap();
                 // Feature 031: while a filename is being typed, Left/Right/Home/End
                 // edit the field caret; with an empty field they keep the list
                 // navigation semantics (← parent, → activate).
@@ -1364,25 +1653,45 @@ impl App {
         // cheat sheet; Esc/Enter/Quit close; other input is consumed (modal).
         // Feature 028: Home/End jump to top/bottom and every scroll is clamped to
         // the content so keyboard scrolling stays in range.
-        if let Some(screen) = self.pending_help {
+        if let Some(screen) = self.help_screen() {
             let (max_scroll, page) = self.help_view_metrics(screen);
             match &action {
                 Action::MoveDown => {
-                    self.help_scroll = (self.help_scroll + 1).min(max_scroll);
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = (*s + 1).min(max_scroll);
+                    }
                 }
-                Action::MoveUp => self.help_scroll = self.help_scroll.saturating_sub(1),
+                Action::MoveUp => {
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = s.saturating_sub(1);
+                    }
+                }
                 Action::MovePageDown => {
-                    self.help_scroll = (self.help_scroll + page).min(max_scroll);
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = (*s + page).min(max_scroll);
+                    }
                 }
-                Action::MovePageUp => self.help_scroll = self.help_scroll.saturating_sub(page),
-                Action::MoveLineStart => self.help_scroll = 0,
-                Action::MoveLineEnd => self.help_scroll = max_scroll,
+                Action::MovePageUp => {
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = s.saturating_sub(page);
+                    }
+                }
+                Action::MoveLineStart => {
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = 0;
+                    }
+                }
+                Action::MoveLineEnd => {
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = max_scroll;
+                    }
+                }
                 Action::MenuClose | Action::InsertNewline | Action::Quit => {
-                    self.pending_help = None;
+                    self.close_modal();
                 }
                 // A printable key also dismisses (legacy behavior), except none
                 // that we use for scrolling above.
-                Action::InsertChar(_) => self.pending_help = None,
+                Action::InsertChar(_) => self.close_modal(),
                 _ => {}
             }
             return Ok(());
@@ -1406,11 +1715,11 @@ impl App {
 
         // Feature 008 — Plugin manager dialog intercept: Up/Down navigate,
         // Space/Enter toggle enabled, Esc closes.
-        if self.pending_plugin_manager {
+        if self.is_plugin_manager_open() {
             let n = self.plugin_host.registry.instances.len();
             // Esc/Quit always close, from any focus stop.
             if matches!(&action, Action::MenuClose | Action::Quit) {
-                self.pending_plugin_manager = false;
+                self.close_modal();
                 return Ok(());
             }
             // Button focused (Close): Enter/Space activate; arrows no-op.
@@ -1424,18 +1733,24 @@ impl App {
             // Feature 028: PageUp/PageDown jump by a page, clamped (no wrap).
             match &action {
                 Action::MoveUp if n > 0 => {
-                    self.plugin_manager_cursor = (self.plugin_manager_cursor + n - 1) % n;
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = (*c + n - 1) % n;
+                    }
                 }
                 Action::MoveDown if n > 0 => {
-                    self.plugin_manager_cursor = (self.plugin_manager_cursor + 1) % n;
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = (*c + 1) % n;
+                    }
                 }
                 Action::MovePageDown if n > 0 => {
-                    self.plugin_manager_cursor =
-                        (self.plugin_manager_cursor + DIALOG_LIST_PAGE).min(n - 1);
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = (*c + DIALOG_LIST_PAGE).min(n - 1);
+                    }
                 }
                 Action::MovePageUp if n > 0 => {
-                    self.plugin_manager_cursor =
-                        self.plugin_manager_cursor.saturating_sub(DIALOG_LIST_PAGE);
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = c.saturating_sub(DIALOG_LIST_PAGE);
+                    }
                 }
                 Action::InsertChar(' ') | Action::InsertNewline => {
                     self.plugin_manager_toggle_current();
@@ -1545,13 +1860,13 @@ impl App {
 
             // File browser (Feature 012). Open/Save As show the navigable browser.
             Action::Open => {
-                self.file_browser = Some(FileBrowser::open(
+                self.modal = Modal::FileBrowser(FileBrowser::open(
                     self.browser_start_dir(),
                     BrowseMode::Open,
                 ));
             }
             Action::SaveAs => {
-                self.file_browser = Some(FileBrowser::open(
+                self.modal = Modal::FileBrowser(FileBrowser::open(
                     self.browser_start_dir(),
                     BrowseMode::Save,
                 ));
@@ -1578,12 +1893,16 @@ impl App {
 
             // Help menu (Feature 011).
             Action::Help => {
-                self.help_scroll = 0;
-                self.pending_help = Some(HelpScreen::Help);
+                self.modal = Modal::Help {
+                    screen: HelpScreen::Help,
+                    scroll: 0,
+                };
             }
             Action::About => {
-                self.help_scroll = 0;
-                self.pending_help = Some(HelpScreen::About);
+                self.modal = Modal::Help {
+                    screen: HelpScreen::About,
+                    scroll: 0,
+                };
             }
 
             // Save prompt responses (T033)
@@ -1593,7 +1912,7 @@ impl App {
             Action::SaveAsEncoding => {
                 if !self.buffers.is_empty() {
                     let idx = Self::encoding_to_idx(self.buffers[self.active_idx].encoding);
-                    self.pending_encoding_select = Some(idx);
+                    self.set_encoding_select(idx);
                 }
             }
 
@@ -1607,13 +1926,16 @@ impl App {
             Action::GoToLine => {
                 if self.open_button_dialog().is_none()
                     && self.interactive_dialog().is_none()
-                    && self.pending_help.is_none()
-                    && self.pending_goto_line.is_none()
+                    && self.help_screen().is_none()
+                    && self.goto_line_digits().is_none()
                     && !self.menu_bar.is_active()
                 // Feature 029: don't open over a menu
                 {
-                    self.pending_goto_line = Some(String::new());
-                    self.pending_goto_line_caret = 0; // Feature 031
+                    // Feature 031: caret starts at 0.
+                    self.modal = Modal::GotoLine {
+                        digits: String::new(),
+                        caret: 0,
+                    };
                 }
             }
             // Search-option toggles and Tab focus are only meaningful inside an
@@ -1668,8 +1990,7 @@ impl App {
 
             // Feature 008 — Plugin API
             Action::OpenPluginManager => {
-                self.pending_plugin_manager = true;
-                self.plugin_manager_cursor = 0;
+                self.modal = Modal::PluginManager { cursor: 0 };
             }
             Action::PluginMenuActivated(plugin_id, item_id) => {
                 let content = self.active_buffer().rope.to_string();
@@ -1692,7 +2013,7 @@ impl App {
 
     fn handle_quit(&mut self) {
         if self.active_buffer().modified {
-            self.pending_save_prompt = true;
+            self.modal = Modal::SavePrompt;
             // The actual dialog rendering is handled by the UI layer; here we
             // just gate the quit so the render loop can show the prompt.
             log::debug!("Buffer modified — showing save prompt before quit");
@@ -1714,7 +2035,7 @@ impl App {
                 if let Some(path) = self.buffers[self.active_idx].path.clone() {
                     self.self_write_times.insert(path, Instant::now());
                 }
-                self.pending_save_prompt = false;
+                self.close_modal();
                 if let Some(data) = self.build_session_data() {
                     if let Err(e) = crate::session::save_session(&data) {
                         log::warn!("session save failed: {}", e);
@@ -1731,7 +2052,7 @@ impl App {
 
     /// Called when the user chooses [D]iscard in the save-before-quit prompt.
     pub fn prompt_discard_and_quit(&mut self) {
-        self.pending_save_prompt = false;
+        self.close_modal();
         if let Some(data) = self.build_session_data() {
             if let Err(e) = crate::session::save_session(&data) {
                 log::warn!("session save failed: {}", e);
@@ -1742,7 +2063,7 @@ impl App {
 
     /// Called when the user chooses [C]ancel in the save-before-quit prompt.
     pub fn prompt_cancel_quit(&mut self) {
-        self.pending_save_prompt = false;
+        self.close_modal();
     }
 
     // ── Session save/restore ─────────────────────────────────────────────────
@@ -1809,9 +2130,13 @@ impl App {
         use crate::security::sanitize::{validate_path, PathError};
         use crate::session::SplitLayoutKind;
 
-        let session = match self.pending_session_restore.take() {
-            Some(s) => s,
-            None => return,
+        let session = match std::mem::take(&mut self.modal) {
+            Modal::SessionRestore(s) => s,
+            // Not the open overlay — restore state and bail.
+            other => {
+                self.modal = other;
+                return;
+            }
         };
 
         let mut new_buffers: Vec<Buffer> = Vec::new();
@@ -1925,7 +2250,7 @@ impl App {
         // Feature 012: an unnamed buffer has no path to save to — open the Save
         // browser so the user can choose a destination.
         if self.active_buffer().path.is_none() {
-            self.file_browser = Some(FileBrowser::open(
+            self.modal = Modal::FileBrowser(FileBrowser::open(
                 self.browser_start_dir(),
                 BrowseMode::Save,
             ));
@@ -2013,7 +2338,7 @@ impl App {
             ));
             if let Some(ref cache) = self.wrap_cache {
                 let total_vr = cache.total_visual_rows();
-                let buf = &mut self.buffers[self.active_idx];
+                let buf = self.active_buffer_mut();
                 if buf.scroll_offset.0 >= total_vr {
                     buf.scroll_offset.0 = total_vr.saturating_sub(1);
                 }
@@ -2033,12 +2358,12 @@ impl App {
             .clamp(1, 300);
 
         if !self.config.no_autosave {
-            let buf = &self.buffers[self.active_idx];
+            let buf = self.active_buffer();
             if buf.autosave.enabled && buf.modified {
                 let elapsed = buf.autosave.last_save_at.elapsed().as_secs() as u32;
                 if elapsed >= interval {
                     let ok = crate::buffer::autosave::write_recovery_for_buffer(
-                        &mut self.buffers[self.active_idx],
+                        self.active_buffer_mut(),
                         interval,
                     );
                     // Feature 029: surface a recovery-write failure instead of
@@ -2121,7 +2446,7 @@ impl App {
     /// updating `scroll_offset` as necessary.
     /// Compute the cursor position one step in `dir` (no mutation, no selection).
     fn next_cursor_pos(&self, dir: Direction) -> (usize, usize) {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let line_count = buf.rope.line_count();
         let cur = buf.cursor;
         match dir {
@@ -2210,7 +2535,7 @@ impl App {
     /// whitespace + that token's run). Crosses line boundaries; a buffer end
     /// returns the cursor unchanged (no-op).
     fn next_word_pos(&self, dir: Direction) -> (usize, usize) {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let line = buf.cursor.line;
         let gcol = buf.cursor.grapheme_col;
         let graphemes: Vec<String> = buf
@@ -2314,13 +2639,13 @@ impl App {
 
     /// The current selection's anchor, or the cursor position if there is none.
     fn selection_anchor_or_cursor(&self) -> CursorPos {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         buf.selection.map(|s| s.anchor).unwrap_or(buf.cursor)
     }
 
     /// Set `selection` to span `anchor`→cursor, or `None` if empty (Feature 017).
     fn update_selection_to_cursor(&mut self, anchor: CursorPos) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let active = buf.cursor;
         buf.selection = if active.line == anchor.line && active.grapheme_col == anchor.grapheme_col
         {
@@ -2333,7 +2658,7 @@ impl App {
     /// Move the cursor to column 0 of the current line.
     pub fn move_line_start(&mut self) {
         self.buffers[self.active_idx].selection = None; // Feature 017: plain move clears
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor.grapheme_col = 0;
         buf.cursor.visual_col = 0;
         self.clamp_scroll();
@@ -2371,7 +2696,7 @@ impl App {
     /// Move the cursor up by one viewport page.
     pub fn move_page_up(&mut self) {
         let vh = self.viewport_height();
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let target_line = buf.cursor.line.saturating_sub(vh);
         let max_gcol = buf.rope.grapheme_count_on_line(target_line);
         let new_gcol = buf.cursor.grapheme_col.min(max_gcol);
@@ -2389,7 +2714,7 @@ impl App {
     /// Move the cursor down by one viewport page.
     pub fn move_page_down(&mut self) {
         let vh = self.viewport_height();
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let line_count = buf.rope.line_count();
         let target_line = (buf.cursor.line + vh).min(line_count.saturating_sub(1));
         let max_gcol = buf.rope.grapheme_count_on_line(target_line);
@@ -2405,14 +2730,14 @@ impl App {
 
     /// Move cursor to the very first character of the document.
     pub fn move_doc_start(&mut self) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor = CursorPos::default();
         buf.scroll_offset = (0, 0);
     }
 
     /// Move cursor to the very last line of the document.
     pub fn move_doc_end(&mut self) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let last_line = buf.rope.line_count().saturating_sub(1);
         let gcol = buf.rope.grapheme_count_on_line(last_line);
         let vcol = CursorPos::visual_col_from_grapheme_col(&buf.rope, last_line, gcol);
@@ -2463,7 +2788,7 @@ impl App {
 
     /// Select the word (run of same-class graphemes) under the cursor (US2).
     fn select_word_at_cursor(&mut self) {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let line = buf.cursor.line;
         let graphemes: Vec<String> = buf
             .rope
@@ -2502,7 +2827,7 @@ impl App {
     /// Set the active selection to `[start, end)` grapheme columns on `line`, with
     /// the cursor at `end`. A degenerate range clears the selection.
     fn set_selection_on_line(&mut self, line: usize, start: usize, end: usize) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         if start >= end {
             buf.selection = None;
             return;
@@ -2559,7 +2884,7 @@ impl App {
 
         if self.soft_wrap && self.wrap_cache.is_some() {
             let cursor_vr = self.cursor_visual_row();
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             if cursor_vr < buf.scroll_offset.0 {
                 buf.scroll_offset.0 = cursor_vr;
             } else if cursor_vr >= buf.scroll_offset.0 + vh {
@@ -2567,7 +2892,7 @@ impl App {
             }
         } else {
             let cur_line = self.buffers[self.active_idx].cursor.line;
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             if cur_line < buf.scroll_offset.0 {
                 buf.scroll_offset.0 = cur_line;
             } else if cur_line >= buf.scroll_offset.0 + vh {
@@ -2580,13 +2905,13 @@ impl App {
 
     /// Convert the current cursor position to a rope char index.
     fn cursor_char_idx(&self) -> usize {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         self.char_idx_for(buf.cursor.line, buf.cursor.grapheme_col)
     }
 
     /// Return the rope char index for a given (line, grapheme_col) position.
     fn char_idx_for(&self, line: usize, gcol: usize) -> usize {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         // Start of line in chars
         let line_start: usize = (0..line)
             .map(|l| {
@@ -2634,7 +2959,7 @@ impl App {
         let s = c.to_string();
 
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.insert_str(char_idx, &s);
             buf.undo_stack.push(EditOp::Insert {
                 at: char_idx,
@@ -2661,7 +2986,7 @@ impl App {
         let char_idx = self.cursor_char_idx();
 
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.insert_str(char_idx, "\n");
             buf.undo_stack.push(EditOp::Insert {
                 at: char_idx,
@@ -2716,7 +3041,7 @@ impl App {
 
         // Collect the grapheme text (may be multi-char for combining sequences)
         let deleted_text: String = {
-            let buf = &self.buffers[self.active_idx];
+            let buf = self.active_buffer();
             let line_str = buf.rope.line_slice(del_line);
             line_str
                 .graphemes(true)
@@ -2728,7 +3053,7 @@ impl App {
         let del_char_len = deleted_text.chars().count();
 
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope
                 .delete_range(del_char_idx..del_char_idx + del_char_len);
             buf.undo_stack.push(EditOp::Delete {
@@ -2745,7 +3070,7 @@ impl App {
             del_line,
             del_gcol,
         );
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor = CursorPos {
             line: del_line,
             grapheme_col: del_gcol,
@@ -2786,7 +3111,7 @@ impl App {
         // Determine the text being deleted
         let deleted_text: String = if cur.grapheme_col < gcol_count {
             // Delete grapheme at current column
-            let buf = &self.buffers[self.active_idx];
+            let buf = self.active_buffer();
             let line_str = buf.rope.line_slice(cur.line);
             line_str
                 .graphemes(true)
@@ -2801,7 +3126,7 @@ impl App {
         let del_char_len = deleted_text.chars().count();
 
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope
                 .delete_range(del_char_idx..del_char_idx + del_char_len);
             buf.undo_stack.push(EditOp::Delete {
@@ -2824,7 +3149,7 @@ impl App {
     /// reversed/degenerate range to empty rather than panicking — defense-in-depth
     /// for copy/cut.
     pub fn selection_text(&self) -> Option<String> {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let sel = buf.selection.as_ref()?;
         let (start, end) = sel.ordered_range();
         let s_idx = self.char_idx_for(start.line, start.grapheme_col);
@@ -2905,7 +3230,7 @@ impl App {
         let char_idx = self.cursor_char_idx();
         let char_count = text.chars().count();
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.insert_str(char_idx, &text);
             buf.undo_stack.push(EditOp::Insert {
                 at: char_idx,
@@ -2937,7 +3262,7 @@ impl App {
         // text by chars (byte-slicing a String with char indices panics on
         // multibyte content) — same hazard fixed in `copy_selection`/`selection_text`.
         let deleted: String = {
-            let buf = &self.buffers[self.active_idx];
+            let buf = self.active_buffer();
             let full = buf.rope.to_string();
             let total = full.chars().count();
             let lo = s_idx.min(e_idx).min(total);
@@ -2945,7 +3270,7 @@ impl App {
             full.chars().skip(lo).take(hi - lo).collect()
         };
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.delete_range(s_idx..e_idx);
             buf.undo_stack.push(EditOp::Delete {
                 at: s_idx,
@@ -2965,7 +3290,7 @@ impl App {
     /// Open the Find dialog (Ctrl+F / Search ▸ Find), seeded with the last query.
     pub fn open_find_dialog(&mut self) {
         let seed = self.search_state.query.clone();
-        self.pending_find_replace = Some(FindReplaceDialog::new(DialogMode::Find, seed));
+        self.modal = Modal::FindReplace(FindReplaceDialog::new(DialogMode::Find, seed));
     }
 
     /// Open the Replace dialog (Ctrl+H / Search ▸ Find Replace).
@@ -2975,12 +3300,12 @@ impl App {
         if let Some(r) = &self.search_state.replacement {
             d.replacement = r.clone();
         }
-        self.pending_find_replace = Some(d);
+        self.modal = Modal::FindReplace(d);
     }
 
     /// Close the Find/Replace dialog and clear the active match highlights.
     pub fn close_find_replace(&mut self) {
-        self.pending_find_replace = None;
+        self.close_modal();
         self.search_state.matches.clear();
         self.search_state.active_match = None;
     }
@@ -2988,7 +3313,7 @@ impl App {
     /// Char index of the cursor in the active buffer (for "first match at/after
     /// the cursor").
     fn cursor_char_index(&self) -> usize {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let text = buf.rope.to_string();
         let mut char_count = 0usize;
         for (line_idx, line_text) in text.split('\n').enumerate() {
@@ -3008,7 +3333,7 @@ impl App {
     /// highlight matches, and jump to the first match at/after the cursor.
     fn run_find_from_dialog(&mut self) {
         let (query, case, regex, whole, wrap, replacement) = {
-            let d = match self.pending_find_replace.as_ref() {
+            let d = match self.find_replace() {
                 Some(d) => d,
                 None => return,
             };
@@ -3069,8 +3394,7 @@ impl App {
             self.run_find_from_dialog();
         }
         let replacement = self
-            .pending_find_replace
-            .as_ref()
+            .find_replace()
             .map(|d| d.replacement.clone())
             .unwrap_or_default();
         let idx = match self.search_state.active_match {
@@ -3098,7 +3422,7 @@ impl App {
             full[bs..be].to_string()
         };
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.delete_range(range.start..range.end);
             buf.rope.insert_str(range.start, &replacement);
             buf.undo_stack.push(EditOp::Composite(vec![
@@ -3142,15 +3466,30 @@ impl App {
     /// Replace all occurrences (Ctrl+A in Replace mode), reporting the count.
     fn replace_all_from_dialog(&mut self) {
         // Sync the dialog query/replacement/options into search_state first.
-        if let Some(d) = self.pending_find_replace.as_ref() {
-            self.search_state.query = d.query.clone();
-            self.search_state.replacement = Some(d.replacement.clone());
-            self.search_state.case_sensitive = d.case_sensitive;
-            self.search_state.regex_mode = d.regex;
-            self.search_state.whole_word = d.whole_word;
-            self.search_state.wrap = d.wrap;
-        }
+        self.sync_search_state_from_find_replace();
         self.replace_all();
+    }
+
+    /// Copy the open Find/Replace dialog's query/options into `search_state`.
+    /// (Values are cloned out first so `self.search_state` can be mutated without
+    /// holding a borrow of the dialog now nested inside `self.modal` — Feature 039.)
+    fn sync_search_state_from_find_replace(&mut self) {
+        if let Some(d) = self.find_replace() {
+            let (query, replacement, case_sensitive, regex, whole_word, wrap) = (
+                d.query.clone(),
+                d.replacement.clone(),
+                d.case_sensitive,
+                d.regex,
+                d.whole_word,
+                d.wrap,
+            );
+            self.search_state.query = query;
+            self.search_state.replacement = Some(replacement);
+            self.search_state.case_sensitive = case_sensitive;
+            self.search_state.regex_mode = regex;
+            self.search_state.whole_word = whole_word;
+            self.search_state.wrap = wrap;
+        }
     }
 
     /// Jump to the next search match, wrapping at end-of-document when
@@ -3283,7 +3622,7 @@ impl App {
             target_gcol,
         );
 
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor = CursorPos {
             line: target_line,
             grapheme_col: target_gcol,
@@ -3342,7 +3681,7 @@ impl App {
             let del_len = m.end - m.start;
             // Capture the text that will be deleted for undo.
             let deleted_text: String = {
-                let buf = &self.buffers[self.active_idx];
+                let buf = self.active_buffer();
                 let full = buf.rope.to_string();
                 // Convert char indices to byte indices for slicing.
                 let byte_start = full
@@ -3360,7 +3699,7 @@ impl App {
 
             // Apply the deletion.
             {
-                let buf = &mut self.buffers[self.active_idx];
+                let buf = self.active_buffer_mut();
                 buf.rope.delete_range(m.start..m.end);
             }
             ops.push(EditOp::Delete {
@@ -3370,7 +3709,7 @@ impl App {
 
             // Apply the insertion.
             {
-                let buf = &mut self.buffers[self.active_idx];
+                let buf = self.active_buffer_mut();
                 buf.rope.insert_str(m.start, &replacement);
             }
             ops.push(EditOp::Insert {
@@ -3381,7 +3720,7 @@ impl App {
 
         // Push all ops as one composite undo entry.
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.undo_stack.push(EditOp::Composite(ops));
             buf.modified = true;
         }
@@ -3529,11 +3868,11 @@ impl App {
         match outcome {
             BrowseOutcome::Navigated | BrowseOutcome::None => {}
             BrowseOutcome::OpenFile(path) => {
-                self.file_browser = None;
+                self.close_modal();
                 self.handle_open_file(path);
             }
             BrowseOutcome::SaveFile(path) => {
-                self.file_browser = None;
+                self.close_modal();
                 self.do_save_as(path);
             }
         }
@@ -3586,7 +3925,7 @@ impl App {
             return;
         }
         if self.buffers[idx].modified {
-            self.pending_close_confirm = Some(idx);
+            self.modal = Modal::CloseConfirm(idx);
         } else {
             self.close_buffer_at(idx);
         }
@@ -3623,20 +3962,18 @@ impl App {
     /// The currently-open confirm/dismiss dialog that has a button bar, if any.
     /// Order matches modal precedence.
     fn open_button_dialog(&self) -> Option<ButtonDialog> {
-        if self.pending_session_restore.is_some() {
-            Some(ButtonDialog::SessionRestore)
-        } else if self.pending_save_prompt {
-            Some(ButtonDialog::SavePrompt)
-        } else if self.pending_external_change.is_some() {
-            Some(ButtonDialog::ExternalChange)
-        } else if self.pending_revert_confirm.is_some() {
-            Some(ButtonDialog::RevertConfirm)
-        } else if self.pending_close_confirm.is_some() {
-            Some(ButtonDialog::CloseConfirm)
-        } else if !self.pending_plugin_consent.is_empty() {
-            Some(ButtonDialog::PluginConsent)
-        } else {
-            None
+        // Precedence preserved from the original flag chain (Feature 039): the
+        // synchronously-opened button dialogs live in `self.modal`; the two async
+        // ones (`pending_external_change`, `pending_plugin_consent`) keep their
+        // original slots between `SavePrompt` and `RevertConfirm` / at the tail.
+        match &self.modal {
+            Modal::SessionRestore(_) => Some(ButtonDialog::SessionRestore),
+            Modal::SavePrompt => Some(ButtonDialog::SavePrompt),
+            _ if self.pending_external_change.is_some() => Some(ButtonDialog::ExternalChange),
+            Modal::RevertConfirm(_) => Some(ButtonDialog::RevertConfirm),
+            Modal::CloseConfirm(_) => Some(ButtonDialog::CloseConfirm),
+            _ if !self.pending_plugin_consent.is_empty() => Some(ButtonDialog::PluginConsent),
+            _ => None,
         }
     }
 
@@ -3693,7 +4030,7 @@ impl App {
                 if idx == 0 {
                     self.do_restore_session();
                 }
-                self.pending_session_restore = None;
+                self.close_modal();
             }
             Some(ButtonDialog::SavePrompt) => match idx {
                 0 => self.prompt_save_and_quit(),
@@ -3710,12 +4047,15 @@ impl App {
                 }
             }
             Some(ButtonDialog::RevertConfirm) => {
+                let b = match self.modal {
+                    Modal::RevertConfirm(b) => Some(b),
+                    _ => None,
+                };
+                self.close_modal();
                 if idx == 0 {
-                    if let Some(b) = self.pending_revert_confirm.take() {
+                    if let Some(b) = b {
                         self.reload_from_disk(b);
                     }
-                } else {
-                    self.pending_revert_confirm = None;
                 }
             }
             Some(ButtonDialog::PluginConsent) => self.consent_decide(idx == 0),
@@ -3724,7 +4064,12 @@ impl App {
                 // active buffer (M1). Save → save then close; Discard → close;
                 // Cancel → dismiss, nothing closes. A failed save keeps the
                 // dialog open so no changes are silently lost (Principle VII).
-                if let Some(bidx) = self.pending_close_confirm.take() {
+                let taken = match self.modal {
+                    Modal::CloseConfirm(bidx) => Some(bidx),
+                    _ => None,
+                };
+                self.close_modal();
+                if let Some(bidx) = taken {
                     match idx {
                         0 => match self.buffers.get(bidx).map(|b| b.save()) {
                             Some(Ok(())) => {
@@ -3735,12 +4080,12 @@ impl App {
                             }
                             Some(Err(e)) => {
                                 log::error!("Save failed on tab close: {}", e);
-                                self.pending_close_confirm = Some(bidx); // keep open
+                                self.modal = Modal::CloseConfirm(bidx); // keep open
                             }
                             None => {}
                         },
                         1 => self.close_buffer_at(bidx),
-                        _ => {} // Cancel — already cleared by take()
+                        _ => {} // Cancel — already cleared above
                     }
                 }
             }
@@ -3798,13 +4143,15 @@ impl App {
             }
             ButtonDialog::CloseConfirm => {
                 // Name the buffer being closed (the stored index, not active).
-                let name = self
-                    .pending_close_confirm
-                    .and_then(|i| self.buffers.get(i))
-                    .and_then(|b| b.path.as_ref())
-                    .and_then(|p| p.file_name())
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "[No Name]".to_string());
+                let name = match self.modal {
+                    Modal::CloseConfirm(i) => Some(i),
+                    _ => None,
+                }
+                .and_then(|i| self.buffers.get(i))
+                .and_then(|b| b.path.as_ref())
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "[No Name]".to_string());
                 (
                     "Unsaved Changes",
                     vec![format!("Save changes to {} before closing?", name)],
@@ -3873,13 +4220,13 @@ impl App {
     /// The currently-open interactive/list dialog, if any. These are mutually
     /// exclusive in practice; the order is a defensive precedence.
     fn interactive_dialog(&self) -> Option<InteractiveDialog> {
-        if self.pending_find_replace.is_some() {
+        if self.find_replace().is_some() {
             Some(InteractiveDialog::FindReplace)
-        } else if self.pending_encoding_select.is_some() {
+        } else if self.encoding_select_row().is_some() {
             Some(InteractiveDialog::EncodingSelect)
-        } else if self.file_browser.is_some() {
+        } else if self.file_browser().is_some() {
             Some(InteractiveDialog::FileBrowser)
-        } else if self.pending_plugin_manager {
+        } else if self.is_plugin_manager_open() {
             Some(InteractiveDialog::PluginManager)
         } else {
             None
@@ -3890,12 +4237,10 @@ impl App {
     /// (1 for the list/browser dialogs; 1 in Find mode and 2 in Replace mode).
     fn interactive_field_stops(&self) -> usize {
         match self.interactive_dialog() {
-            Some(InteractiveDialog::FindReplace) => {
-                match self.pending_find_replace.as_ref().map(|d| d.mode) {
-                    Some(DialogMode::Replace) => 2,
-                    _ => 1,
-                }
-            }
+            Some(InteractiveDialog::FindReplace) => match self.find_replace().map(|d| d.mode) {
+                Some(DialogMode::Replace) => 2,
+                _ => 1,
+            },
             Some(_) => 1,
             None => 0,
         }
@@ -3912,7 +4257,7 @@ impl App {
             Some(InteractiveDialog::PluginManager) => vec!["Close (Esc)"],
             Some(InteractiveDialog::FileBrowser) => {
                 let save = matches!(
-                    self.file_browser.as_ref().map(|b| b.mode),
+                    self.file_browser().map(|b| b.mode),
                     Some(crate::ui::file_browser::BrowseMode::Save)
                 );
                 if save {
@@ -3923,7 +4268,7 @@ impl App {
             }
             Some(InteractiveDialog::FindReplace) => {
                 let replace = matches!(
-                    self.pending_find_replace.as_ref().map(|d| d.mode),
+                    self.find_replace().map(|d| d.mode),
                     Some(DialogMode::Replace)
                 );
                 if replace {
@@ -3964,7 +4309,7 @@ impl App {
     /// Replacement). No-op when a button stop is focused.
     fn sync_find_replace_focus(&mut self) {
         let f = self.dialog_focus;
-        if let Some(d) = self.pending_find_replace.as_mut() {
+        if let Some(d) = self.find_replace_mut() {
             let field = match f {
                 0 => DialogField::Query,
                 1 if d.mode == DialogMode::Replace => DialogField::Replacement,
@@ -3986,14 +4331,12 @@ impl App {
             }
             InteractiveDialog::PluginManager => Some(crate::ui::plugin_manager::manager_rect(
                 &self.plugin_host,
-                self.plugin_manager_cursor,
+                self.plugin_manager_cursor(),
                 area,
             )),
-            InteractiveDialog::FileBrowser => {
-                Some(self.file_browser.as_ref().unwrap().box_rect(area))
-            }
+            InteractiveDialog::FileBrowser => Some(self.file_browser().unwrap().box_rect(area)),
             InteractiveDialog::FindReplace => Some(crate::ui::find_replace_rect(
-                self.pending_find_replace.as_ref().unwrap(),
+                self.find_replace().unwrap(),
                 area,
             )),
         }
@@ -4005,25 +4348,25 @@ impl App {
         match self.interactive_dialog() {
             Some(InteractiveDialog::EncodingSelect) => {
                 if idx == 0 {
-                    if let Some(sel) = self.pending_encoding_select {
+                    if let Modal::EncodingSelect { row: sel } = self.modal {
                         let enc = crate::ui::dialog::ENCODING_OPTIONS[sel].0;
-                        self.pending_encoding_select = None;
+                        self.close_modal();
                         self.do_save_as_encoding(enc);
                     }
                 } else {
-                    self.pending_encoding_select = None;
+                    self.close_modal();
                 }
             }
             Some(InteractiveDialog::PluginManager) => {
                 // Sole button is Close.
-                self.pending_plugin_manager = false;
+                self.close_modal();
             }
             Some(InteractiveDialog::FileBrowser) => {
                 if idx == 0 {
-                    let outcome = self.file_browser.as_mut().unwrap().activate();
+                    let outcome = self.file_browser_mut().unwrap().activate();
                     self.apply_browse_outcome(outcome);
                 } else {
-                    self.file_browser = None;
+                    self.close_modal();
                 }
             }
             Some(InteractiveDialog::FindReplace) => {
@@ -4031,7 +4374,7 @@ impl App {
                 // Find mode ring buttons: [Find, Close]; Replace mode:
                 // [Find, Replace, Replace All, Close].
                 let replace = matches!(
-                    self.pending_find_replace.as_ref().map(|d| d.mode),
+                    self.find_replace().map(|d| d.mode),
                     Some(DialogMode::Replace)
                 );
                 if replace {
@@ -4063,7 +4406,7 @@ impl App {
         }
         if self.buffers[idx].modified {
             // Confirm before discarding unsaved changes.
-            self.pending_revert_confirm = Some(idx);
+            self.modal = Modal::RevertConfirm(idx);
         } else {
             // Clean buffer — reload directly (harmless re-read).
             self.reload_from_disk(idx);
@@ -4095,7 +4438,7 @@ impl App {
 
     /// Select the entire buffer (Edit ▸ Select All / Ctrl+A).
     pub fn select_all(&mut self) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let line_count = buf.rope.line_count();
         if line_count == 0 {
             return;
@@ -4123,7 +4466,7 @@ impl App {
             return;
         }
         let op = {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.undo_stack.undo(&mut buf.rope)
         };
         match op {
@@ -4141,7 +4484,7 @@ impl App {
             return;
         }
         let op = {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.undo_stack.redo(&mut buf.rope)
         };
         match op {
@@ -4157,7 +4500,7 @@ impl App {
     /// the wrap cache, and move the cursor to `char_idx` (clamped to the buffer).
     fn apply_history_cursor(&mut self, char_idx: usize) {
         let (line, gcol) = self.line_col_for_char_idx(char_idx);
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         // Feature 014: undo/redo may return the content to the saved baseline —
         // derive Modified from the undo history instead of forcing it true.
         buf.refresh_modified();
@@ -4175,7 +4518,7 @@ impl App {
     /// Convert a rope char index into a `(line, grapheme_col)` position — the
     /// inverse of [`Self::char_idx_for`]. Clamps past-end indices to the end.
     fn line_col_for_char_idx(&self, char_idx: usize) -> (usize, usize) {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let line_count = buf.rope.line_count();
         let mut remaining = char_idx;
         for line in 0..line_count {
@@ -4214,7 +4557,7 @@ impl App {
 
         // Feature 030 (US3): while the context menu is open it is modal — a press
         // on an item activates it, a press elsewhere dismisses. (Wheel/drag ignored.)
-        if let Some(menu) = self.pending_context_menu {
+        if let Modal::ContextMenu(menu) = self.modal {
             if ev.kind == NormalizedMouseKind::Press {
                 let (w, h) = self.terminal_size;
                 let rect = crate::ui::contextmenu::menu_rect(
@@ -4224,12 +4567,12 @@ impl App {
                 if ev.button == MouseButton::Left {
                     if let Some(idx) = crate::ui::contextmenu::hit_test(rect, ev.col, ev.row) {
                         let act = crate::ui::contextmenu::ITEMS[idx].1.clone();
-                        self.pending_context_menu = None;
+                        self.close_modal();
                         return self.handle_action(act);
                     }
                 }
                 // Press outside the menu (or non-left) dismisses it.
-                self.pending_context_menu = None;
+                self.close_modal();
             }
             return Ok(());
         }
@@ -4241,12 +4584,12 @@ impl App {
             let in_editor = ev.row >= self.editor_top() && ev.row + 1 < term_rows;
             let any_modal = self.open_button_dialog().is_some()
                 || self.interactive_dialog().is_some()
-                || self.pending_help.is_some()
-                || self.pending_goto_line.is_some()
+                || self.help_screen().is_some()
+                || self.goto_line_digits().is_some()
                 || self.menu_bar.is_active();
             if in_editor && !any_modal {
-                self.pending_context_menu =
-                    Some(crate::ui::contextmenu::ContextMenu::new(ev.col, ev.row));
+                self.modal =
+                    Modal::ContextMenu(crate::ui::contextmenu::ContextMenu::new(ev.col, ev.row));
             }
             return Ok(());
         }
@@ -4297,23 +4640,23 @@ impl App {
         ) {
             let down = ev.kind == NormalizedMouseKind::ScrollDown;
             let step = WHEEL_STEP;
-            if self.pending_help.is_some() {
-                self.help_scroll = if down {
-                    self.help_scroll.saturating_add(step)
+            if let Some(s) = self.help_scroll_mut() {
+                *s = if down {
+                    s.saturating_add(step)
                 } else {
-                    self.help_scroll.saturating_sub(step)
+                    s.saturating_sub(step)
                 };
-            } else if let Some(idx) = self.pending_encoding_select {
+            } else if let Modal::EncodingSelect { row: idx } = self.modal {
                 let n = crate::ui::dialog::ENCODING_OPTIONS.len();
-                self.pending_encoding_select = Some(if down {
+                self.set_encoding_select(if down {
                     (idx + step).min(n - 1)
                 } else {
                     idx.saturating_sub(step)
                 });
-            } else if self.file_browser.is_some() {
+            } else if self.file_browser().is_some() {
                 let (w, h) = self.terminal_size;
                 let vis = ratatui::layout::Rect::new(0, 0, w, h);
-                if let Some(fb) = self.file_browser.as_mut() {
+                if let Some(fb) = self.file_browser_mut() {
                     let rows = fb.visible_rows(vis);
                     for _ in 0..step {
                         if down {
@@ -4323,16 +4666,18 @@ impl App {
                         }
                     }
                 }
-            } else if self.pending_plugin_manager {
+            } else if self.is_plugin_manager_open() {
                 let n = self.plugin_host.registry.instances.len();
                 if n > 0 {
-                    self.plugin_manager_cursor = if down {
-                        (self.plugin_manager_cursor + step).min(n - 1)
-                    } else {
-                        self.plugin_manager_cursor.saturating_sub(step)
-                    };
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = if down {
+                            (*c + step).min(n - 1)
+                        } else {
+                            c.saturating_sub(step)
+                        };
+                    }
                 }
-            } else if self.pending_find_replace.is_some() || self.pending_goto_line.is_some() {
+            } else if self.find_replace().is_some() || self.goto_line_digits().is_some() {
                 // Find/Replace and Go-to-Line have no scrollable content — ignore.
             } else {
                 // Editor: ignore the menu/tab rows (above editor_top) and the
@@ -4408,11 +4753,11 @@ impl App {
 
         // Feature 021 — Help/About overlay: a click on the boxed Close button
         // dismisses it (same effect as Esc). Other clicks are inert (modal).
-        if self.pending_help.is_some() {
+        if self.help_screen().is_some() {
             let (w, h) = self.terminal_size;
             let rects = crate::ui::help_close_button_rects(ratatui::layout::Rect::new(0, 0, w, h));
             if crate::ui::buttons::hit_test_buttons(&rects, ev.col, ev.row).is_some() {
-                self.pending_help = None;
+                self.close_modal();
             }
             return Ok(());
         }
@@ -4421,17 +4766,16 @@ impl App {
         // caret. Geometry mirrors the render: a centered box of width
         // `(19 + digits.len()).clamp(20, w)`; the digits start after the border +
         // the "Go to line: " (12-col) prefix.
-        if let Some(entry) = self.pending_goto_line.clone() {
-            let (w, h) = self.terminal_size;
-            let dw = ((19 + entry.len()) as u16).clamp(20, w.max(1));
-            let dh = 3u16.min(h.max(1));
-            let dx = w.saturating_sub(dw) / 2;
-            let dy = h.saturating_sub(dh) / 2;
-            let value_x = dx + 1 + "Go to line: ".len() as u16;
-            let field_w = dw.saturating_sub(2 + 12);
-            if ev.row == dy + 1 && ev.col >= value_x && ev.col < value_x + field_w {
-                self.pending_goto_line_caret =
-                    crate::ui::width::field_caret_at(&entry, field_w, ev.col - value_x);
+        if let Some(entry) = self.goto_line_digits().map(|s| s.to_owned()) {
+            // Feature 039 (FR-006): hit-test the digit field via the shared rect.
+            if let Some(fr) = self.goto_line_field_rect() {
+                if ev.row == fr.y && ev.col >= fr.x && ev.col < fr.x + fr.width {
+                    let new_caret =
+                        crate::ui::width::field_caret_at(&entry, fr.width, ev.col - fr.x);
+                    if let Modal::GotoLine { caret, .. } = &mut self.modal {
+                        *caret = new_caret;
+                    }
+                }
             }
             return Ok(());
         }
@@ -4454,7 +4798,7 @@ impl App {
                     Some(InteractiveDialog::EncodingSelect) => {
                         if let Some(idx) = crate::ui::dialog::encoding_row_hit(rect, ev.col, ev.row)
                         {
-                            self.pending_encoding_select = Some(idx);
+                            self.set_encoding_select(idx);
                             self.dialog_focus = 0;
                             return Ok(());
                         }
@@ -4466,7 +4810,9 @@ impl App {
                             ev.col,
                             ev.row,
                         ) {
-                            self.plugin_manager_cursor = idx;
+                            if let Some(c) = self.plugin_manager_cursor_mut() {
+                                *c = idx;
+                            }
                             self.dialog_focus = 0;
                             return Ok(());
                         }
@@ -4476,7 +4822,7 @@ impl App {
                         // caret to the clicked grapheme and focuses that field.
                         let (w, h) = self.terminal_size;
                         let full = ratatui::layout::Rect::new(0, 0, w, h);
-                        if let Some(d) = self.pending_find_replace.as_ref() {
+                        if let Some(d) = self.find_replace() {
                             let fields = crate::ui::find_replace_field_rects(d, full);
                             for (field, fr) in fields {
                                 if ev.row == fr.y && ev.col >= fr.x && ev.col < fr.x + fr.width {
@@ -4491,7 +4837,7 @@ impl App {
                                         fr.width,
                                         ev.col - fr.x,
                                     );
-                                    let d = self.pending_find_replace.as_mut().unwrap();
+                                    let d = self.find_replace_mut().unwrap();
                                     d.set_focus(field);
                                     d.caret = caret;
                                     self.dialog_focus = match field {
@@ -4516,24 +4862,20 @@ impl App {
         // double-click on a folder navigating in and then immediately opening
         // whatever file lands under the cursor in the new listing. A click
         // outside the box cancels.
-        if self.file_browser.is_some() {
+        if self.file_browser().is_some() {
             let (w, h) = self.terminal_size;
             let area = ratatui::layout::Rect::new(0, 0, w, h);
             // Feature 031 (#58): a click inside the Name/path field box positions
             // the caret there (checked before the list/outside hit-test).
             {
-                let fb = self.file_browser.as_ref().unwrap();
+                let fb = self.file_browser().unwrap();
                 let fr = fb.field_text_rect(area);
                 if ev.row == fr.y && ev.col >= fr.x && ev.col < fr.x + fr.width {
-                    self.file_browser.as_mut().unwrap().caret_click(fr, ev.col);
+                    self.file_browser_mut().unwrap().caret_click(fr, ev.col);
                     return Ok(());
                 }
             }
-            let hit = self
-                .file_browser
-                .as_ref()
-                .unwrap()
-                .hit_test(area, ev.col, ev.row);
+            let hit = self.file_browser().unwrap().hit_test(area, ev.col, ev.row);
             match hit {
                 BrowserHit::Entry(idx) => {
                     let now = Instant::now();
@@ -4543,17 +4885,17 @@ impl App {
                     });
                     if double {
                         self.last_browser_click = None;
-                        let outcome = self.file_browser.as_mut().unwrap().activate_index(idx);
+                        let outcome = self.file_browser_mut().unwrap().activate_index(idx);
                         self.apply_browse_outcome(outcome);
                     } else {
                         // First click: just move the highlight to the row.
                         self.last_browser_click = Some((idx, now));
-                        self.file_browser.as_mut().unwrap().selected = idx;
+                        self.file_browser_mut().unwrap().selected = idx;
                     }
                 }
                 BrowserHit::Outside => {
                     self.last_browser_click = None;
-                    self.file_browser = None;
+                    self.close_modal();
                 }
                 BrowserHit::Inside => self.last_browser_click = None,
             }
@@ -4586,17 +4928,21 @@ impl App {
         }
 
         // Modal dialogs win: ignore menu/editor mouse while one is open.
-        if self.pending_save_prompt
-            || self.pending_session_restore.is_some()
-            || self.pending_encoding_select.is_some()
-            || self.pending_help.is_some()
+        // (ContextMenu / FileBrowser are handled earlier and have already returned,
+        // so they cannot be the active modal here.)
+        if matches!(
+            self.modal,
+            Modal::SavePrompt
+                | Modal::SessionRestore(_)
+                | Modal::RevertConfirm(_)
+                | Modal::CloseConfirm(_)
+        ) || self.encoding_select_row().is_some()
+            || self.help_screen().is_some()
             || self.pending_external_change.is_some()
             || !self.pending_plugin_consent.is_empty()
-            || self.pending_plugin_manager
-            || self.pending_revert_confirm.is_some()
-            || self.pending_find_replace.is_some()
-            || self.pending_goto_line.is_some()
-            || self.pending_close_confirm.is_some()
+            || self.is_plugin_manager_open()
+            || self.find_replace().is_some()
+            || self.goto_line_digits().is_some()
         {
             return Ok(());
         }
@@ -4606,13 +4952,12 @@ impl App {
         // same geometry as the renderer. A click on the row outside any tab is a
         // no-op. Reached only when no modal is open (guarded above).
         //
-        // Exception: when a menu dropdown is open it overlays the tab row (feature
-        // 033 renders it on top by z-order), so its items — including the first one
-        // on the tab row — own these clicks. Skip the tab-bar interception in that
-        // case and let `hit_test_menu` below route the click, otherwise the first
-        // dropdown item is unreachable by mouse whenever 2+ buffers are open.
-        let dropdown_open = matches!(self.menu_bar.state, MenuState::DropDown { .. });
-        if !dropdown_open && self.tab_bar_visible() && ev.row + 1 == self.editor_top() {
+        // Feature 039: the tab bar handles clicks on its row only when it is the
+        // topmost layer there per `LAYER_PRECEDENCE`. When a menu dropdown is open
+        // it sits above the tab bar (feature 033 paints it on top), so it owns the
+        // tab row — including the first dropdown item — and `hit_test_menu` below
+        // routes the click (otherwise that item is unreachable with 2+ buffers).
+        if self.top_row_owner() == Layer::TabBar && ev.row + 1 == self.editor_top() {
             let area = ratatui::layout::Rect::new(0, ev.row, self.terminal_size.0, 1);
             for r in crate::ui::tabbar::tab_hit_regions(area, &self.buffers, self.active_idx) {
                 if ev.col == r.close_rect.x {
@@ -4767,7 +5112,7 @@ impl App {
                         logical_line,
                         found_gcol,
                     );
-                    let buf = &mut self.buffers[self.active_idx];
+                    let buf = self.active_buffer_mut();
                     buf.cursor = CursorPos {
                         line: logical_line,
                         grapheme_col: found_gcol,
@@ -4780,7 +5125,7 @@ impl App {
         }
 
         // Normal mode (non-wrap): existing logic.
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let scroll_line = buf.scroll_offset.0;
         let target_line = scroll_line + clicked_row;
         let line_count = buf.rope.line_count();
@@ -4812,7 +5157,7 @@ impl App {
             found_gcol,
         );
 
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor = CursorPos {
             line: target_line,
             grapheme_col: found_gcol,
@@ -4869,7 +5214,7 @@ impl App {
 
     /// Toggle the enabled state of the plugin under the manager cursor and persist it.
     fn plugin_manager_toggle_current(&mut self) {
-        let idx = self.plugin_manager_cursor;
+        let idx = self.plugin_manager_cursor();
         let Some((id, new_enabled, version)) =
             self.plugin_host.registry.instances.get(idx).map(|i| {
                 (
@@ -5077,19 +5422,19 @@ mod tests {
         a.terminal_size = (80, 24);
         assert_eq!(a.interactive_ring_len(), 0, "no dialog open");
 
-        a.pending_encoding_select = Some(0);
+        a.set_encoding_select(0);
         assert_eq!(a.interactive_field_stops(), 1);
         assert_eq!(a.interactive_ring_len(), 3); // List + OK + Cancel
-        a.pending_encoding_select = None;
+        a.close_modal();
 
-        a.pending_plugin_manager = true;
+        a.modal = Modal::PluginManager { cursor: 0 };
         assert_eq!(a.interactive_ring_len(), 2); // List + Close
-        a.pending_plugin_manager = false;
+        a.close_modal();
 
-        a.pending_find_replace = Some(FindReplaceDialog::new(DialogMode::Find, String::new()));
+        a.modal = Modal::FindReplace(FindReplaceDialog::new(DialogMode::Find, String::new()));
         assert_eq!(a.interactive_field_stops(), 1);
         assert_eq!(a.interactive_ring_len(), 3); // Query + Find + Close
-        a.pending_find_replace = Some(FindReplaceDialog::new(DialogMode::Replace, String::new()));
+        a.modal = Modal::FindReplace(FindReplaceDialog::new(DialogMode::Replace, String::new()));
         assert_eq!(a.interactive_field_stops(), 2);
         assert_eq!(a.interactive_ring_len(), 6); // Query+Replacement + 4 buttons
     }
@@ -5098,7 +5443,7 @@ mod tests {
     #[test]
     fn interactive_focus_is_button_boundary() {
         let mut a = make_app();
-        a.pending_encoding_select = Some(0); // field_stops 1, ring 3
+        a.set_encoding_select(0); // field_stops 1, ring 3
         a.dialog_focus = 0;
         assert_eq!(a.interactive_focus_is_button(), None);
         a.dialog_focus = 1;
@@ -5117,15 +5462,17 @@ mod tests {
             let mut a = make_app();
             a.terminal_size = (w, h);
             for setup in 0..3 {
-                a.pending_encoding_select = None;
-                a.pending_plugin_manager = false;
-                a.pending_find_replace = None;
+                a.close_modal();
+                a.close_modal();
+                a.close_modal();
                 match setup {
-                    0 => a.pending_encoding_select = Some(3),
-                    1 => a.pending_plugin_manager = true,
+                    0 => a.set_encoding_select(3),
+                    1 => a.modal = Modal::PluginManager { cursor: 0 },
                     _ => {
-                        a.pending_find_replace =
-                            Some(FindReplaceDialog::new(DialogMode::Replace, "abc".into()))
+                        a.modal = Modal::FindReplace(FindReplaceDialog::new(
+                            DialogMode::Replace,
+                            "abc".into(),
+                        ))
                     }
                 }
                 if let Some(r) = a.interactive_dialog_rect() {
@@ -5172,11 +5519,11 @@ mod tests {
             let mut a = make_app();
             a.terminal_size = (80, 24);
             match setup {
-                0 => a.pending_encoding_select = Some(0),
-                1 => a.pending_plugin_manager = true,
+                0 => a.set_encoding_select(0),
+                1 => a.modal = Modal::PluginManager { cursor: 0 },
                 _ => {
-                    a.pending_find_replace =
-                        Some(FindReplaceDialog::new(DialogMode::Replace, "x".into()))
+                    a.modal =
+                        Modal::FindReplace(FindReplaceDialog::new(DialogMode::Replace, "x".into()))
                 }
             }
             // Focus the first button (stop = field_stops) and keep it across the
@@ -5284,42 +5631,47 @@ mod tests {
     #[test]
     fn goto_line_caret_editing() {
         let mut a = make_app();
-        a.pending_goto_line = Some(String::new());
-        a.pending_goto_line_caret = 0;
+        a.modal = Modal::GotoLine {
+            digits: String::new(),
+            caret: 0,
+        };
+        if let Modal::GotoLine { caret, .. } = &mut a.modal {
+            *caret = 0;
+        }
         for c in ['1', '2', '3'] {
             a.handle_action(Action::InsertChar(c)).unwrap();
         }
-        assert_eq!(a.pending_goto_line.as_deref(), Some("123"));
-        assert_eq!(a.pending_goto_line_caret, 3);
+        assert_eq!(a.goto_line_digits(), Some("123"));
+        assert_eq!(a.goto_line_caret(), 3);
         // Home, then insert mid-string.
         a.handle_action(Action::MoveLineStart).unwrap();
-        assert_eq!(a.pending_goto_line_caret, 0);
+        assert_eq!(a.goto_line_caret(), 0);
         a.handle_action(Action::InsertChar('9')).unwrap();
-        assert_eq!(a.pending_goto_line.as_deref(), Some("9123"));
-        assert_eq!(a.pending_goto_line_caret, 1);
+        assert_eq!(a.goto_line_digits(), Some("9123"));
+        assert_eq!(a.goto_line_caret(), 1);
         // Non-digit rejected; caret unchanged.
         a.handle_action(Action::InsertChar('x')).unwrap();
-        assert_eq!(a.pending_goto_line.as_deref(), Some("9123"));
+        assert_eq!(a.goto_line_digits(), Some("9123"));
         // Right then Backspace removes the grapheme before the caret.
         a.handle_action(Action::MoveRight).unwrap(); // caret 2
         a.handle_action(Action::Backspace).unwrap(); // removes '1' → "923"
-        assert_eq!(a.pending_goto_line.as_deref(), Some("923"));
-        assert_eq!(a.pending_goto_line_caret, 1);
+        assert_eq!(a.goto_line_digits(), Some("923"));
+        assert_eq!(a.goto_line_caret(), 1);
         // End clamps; Left clamps at 0.
         a.handle_action(Action::MoveLineEnd).unwrap();
-        assert_eq!(a.pending_goto_line_caret, 3);
+        assert_eq!(a.goto_line_caret(), 3);
         a.handle_action(Action::MoveLineStart).unwrap();
         a.handle_action(Action::MoveLeft).unwrap();
-        assert_eq!(a.pending_goto_line_caret, 0);
+        assert_eq!(a.goto_line_caret(), 0);
     }
 
     // T017 (Feature 029): the save-before-quit prompt cancels on Esc.
     #[test]
     fn save_prompt_cancels_on_esc() {
         let mut a = make_app();
-        a.pending_save_prompt = true;
+        a.modal = Modal::SavePrompt;
         a.handle_action(Action::MenuClose).unwrap();
-        assert!(!a.pending_save_prompt, "Esc cancels the save prompt");
+        assert!(!a.is_save_prompt_open(), "Esc cancels the save prompt");
         assert!(a.running, "cancel does not quit");
     }
 
@@ -5332,7 +5684,7 @@ mod tests {
         assert!(a.menu_bar.is_active());
         a.handle_action(Action::GoToLine).unwrap();
         assert!(
-            a.pending_goto_line.is_none(),
+            a.goto_line_digits().is_none(),
             "Go-to-Line must not open over an active menu"
         );
     }
@@ -5610,31 +5962,30 @@ mod tests {
     fn page_keys_clamp_encoding_select_list() {
         let mut a = make_app();
         let n = crate::ui::dialog::ENCODING_OPTIONS.len();
-        a.pending_encoding_select = Some(0);
+        a.set_encoding_select(0);
         a.handle_action(Action::MovePageDown).unwrap();
-        assert_eq!(a.pending_encoding_select, Some(DIALOG_LIST_PAGE.min(n - 1)));
+        assert_eq!(a.encoding_select_row(), Some(DIALOG_LIST_PAGE.min(n - 1)));
         // Repeated page-downs clamp to the last item.
         for _ in 0..5 {
             a.handle_action(Action::MovePageDown).unwrap();
         }
-        assert_eq!(a.pending_encoding_select, Some(n - 1));
+        assert_eq!(a.encoding_select_row(), Some(n - 1));
         for _ in 0..5 {
             a.handle_action(Action::MovePageUp).unwrap();
         }
-        assert_eq!(a.pending_encoding_select, Some(0));
+        assert_eq!(a.encoding_select_row(), Some(0));
     }
 
     #[test]
     fn page_keys_clamp_plugin_manager_list() {
         let mut a = make_app();
         // With no plugins installed the list is empty — paging must be a safe no-op.
-        a.pending_plugin_manager = true;
-        a.plugin_manager_cursor = 0;
+        a.modal = Modal::PluginManager { cursor: 0 };
         a.handle_action(Action::MovePageDown).unwrap();
         a.handle_action(Action::MovePageUp).unwrap();
-        assert_eq!(a.plugin_manager_cursor, 0);
+        assert_eq!(a.plugin_manager_cursor(), 0);
         assert!(
-            a.pending_plugin_manager,
+            a.is_plugin_manager_open(),
             "list paging never closes the dialog"
         );
     }
@@ -5645,28 +5996,31 @@ mod tests {
     fn help_keyboard_scroll_clamps() {
         let mut a = make_app();
         a.terminal_size = (80, 24);
-        a.pending_help = Some(HelpScreen::Help);
+        a.modal = Modal::Help {
+            screen: HelpScreen::Help,
+            scroll: 0,
+        };
         let (max_scroll, _page) = a.help_view_metrics(HelpScreen::Help);
         assert!(max_scroll > 0, "Help overflows a 24-row terminal");
         // End → bottom; Home → top.
         a.handle_action(Action::MoveLineEnd).unwrap();
-        assert_eq!(a.help_scroll, max_scroll);
+        assert_eq!(a.help_scroll(), max_scroll);
         a.handle_action(Action::MoveLineStart).unwrap();
-        assert_eq!(a.help_scroll, 0);
+        assert_eq!(a.help_scroll(), 0);
         // PageDown clamps to max even when pressed many times.
         for _ in 0..50 {
             a.handle_action(Action::MovePageDown).unwrap();
         }
-        assert_eq!(a.help_scroll, max_scroll);
+        assert_eq!(a.help_scroll(), max_scroll);
         // Down never exceeds max; Up returns toward 0.
         a.handle_action(Action::MoveDown).unwrap();
-        assert_eq!(a.help_scroll, max_scroll);
+        assert_eq!(a.help_scroll(), max_scroll);
         for _ in 0..200 {
             a.handle_action(Action::MoveUp).unwrap();
         }
-        assert_eq!(a.help_scroll, 0);
+        assert_eq!(a.help_scroll(), 0);
         // Help is still open (scroll keys don't dismiss it).
-        assert_eq!(a.pending_help, Some(HelpScreen::Help));
+        assert_eq!(a.help_screen(), Some(HelpScreen::Help));
     }
 
     // T019 (Feature 028): Home/End move the editor cursor to line start/end.
@@ -5690,7 +6044,7 @@ mod tests {
     fn arrow_keys_move_confirm_dialog_buttons() {
         let mut a = make_app();
         // SavePrompt has 3 buttons (Save/Discard/Cancel); default focus = 2 (Cancel).
-        a.pending_save_prompt = true;
+        a.modal = Modal::SavePrompt;
         a.handle_action(Action::MoveRight).unwrap(); // ensure sets 2, then next → 0
         assert_eq!(a.dialog_focus, 0);
         a.handle_action(Action::MoveRight).unwrap(); // → 1
@@ -5713,7 +6067,7 @@ mod tests {
     fn arrow_keys_cycle_interactive_buttons_when_button_focused() {
         use crate::ui::file_browser::{BrowseMode, FileBrowser};
         let mut a = make_app();
-        a.file_browser = Some(FileBrowser::open(
+        a.modal = Modal::FileBrowser(FileBrowser::open(
             std::path::PathBuf::from("."),
             BrowseMode::Save,
         ));
@@ -5739,7 +6093,7 @@ mod tests {
         a.dialog_focus = 2;
         a.dialog_focus_init = false;
         // Open the Save browser.
-        a.file_browser = Some(FileBrowser::open(
+        a.modal = Modal::FileBrowser(FileBrowser::open(
             std::path::PathBuf::from("."),
             BrowseMode::Save,
         ));
@@ -5865,17 +6219,17 @@ mod tests {
         // Clean buffer (idx 0) closes immediately, no prompt.
         a.tab_close_clicked(0);
         assert_eq!(a.buffers.len(), 1);
-        assert!(a.pending_close_confirm.is_none());
+        assert!(a.close_confirm_target().is_none());
         // Re-create a modified second buffer; its [x] opens the confirm.
         a.buffers.push(crate::buffer::Buffer::new_empty());
         a.buffers[1].modified = true;
         a.tab_close_clicked(1);
         assert_eq!(a.buffers.len(), 2, "nothing closed yet");
-        assert_eq!(a.pending_close_confirm, Some(1));
+        assert_eq!(a.close_confirm_target(), Some(1));
         // Discard (button 1) closes it.
         a.activate_dialog_button(1);
         assert_eq!(a.buffers.len(), 1);
-        assert!(a.pending_close_confirm.is_none());
+        assert!(a.close_confirm_target().is_none());
     }
 
     // ── Feature 025 — Go-to-Line prompt render ────────────────────────────────
@@ -5888,7 +6242,10 @@ mod tests {
         let render = |w: u16, h: u16| -> String {
             let mut a = make_app();
             a.terminal_size = (w, h);
-            a.pending_goto_line = Some("42".to_string());
+            a.modal = Modal::GotoLine {
+                digits: "42".to_string(),
+                caret: 0,
+            };
             let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
             t.draw(|f| a.render(f)).unwrap();
             t.backend()
@@ -6226,7 +6583,7 @@ mod tests {
         let mut app = make_app();
         app.handle_action(Action::InsertChar('x')).unwrap();
         app.handle_action(Action::Quit).unwrap();
-        assert!(app.pending_save_prompt);
+        assert!(app.is_save_prompt_open());
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|f| app.render(f)).unwrap();
         let content: String = terminal
@@ -6258,56 +6615,56 @@ mod tests {
     fn test_save_as_encoding_action_opens_dialog() {
         let mut app = make_app(); // UTF-8 buffer (index 0 in ENCODING_OPTIONS)
         app.handle_action(Action::SaveAsEncoding).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(0));
+        assert_eq!(app.encoding_select_row(), Some(0));
     }
 
     #[test]
     fn test_dialog_preselects_current_encoding() {
         let mut app = make_app_with_encoding(EncodingId::Utf16Le); // index 1
         app.handle_action(Action::SaveAsEncoding).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(1));
+        assert_eq!(app.encoding_select_row(), Some(1));
     }
 
     #[test]
     fn test_dialog_move_down_increments_idx() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(1);
+        app.set_encoding_select(1);
         app.handle_action(Action::MoveDown).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(2));
+        assert_eq!(app.encoding_select_row(), Some(2));
     }
 
     #[test]
     fn test_dialog_move_down_wraps_at_end() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(6); // last item
+        app.set_encoding_select(6); // last item
         app.handle_action(Action::MoveDown).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(0));
+        assert_eq!(app.encoding_select_row(), Some(0));
     }
 
     #[test]
     fn test_dialog_move_up_wraps_at_start() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(0);
+        app.set_encoding_select(0);
         app.handle_action(Action::MoveUp).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(6));
+        assert_eq!(app.encoding_select_row(), Some(6));
     }
 
     #[test]
     fn test_dialog_escape_closes() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(3);
+        app.set_encoding_select(3);
         app.handle_action(Action::MenuClose).unwrap();
-        assert_eq!(app.pending_encoding_select, None);
+        assert_eq!(app.encoding_select_row(), None);
     }
 
     #[test]
     fn test_dialog_other_action_consumed() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(2);
+        app.set_encoding_select(2);
         let gcol_before = app.buffers[0].cursor.grapheme_col;
         app.handle_action(Action::MoveLeft).unwrap();
         // Dialog state must be preserved (action consumed, not passed to editor).
-        assert_eq!(app.pending_encoding_select, Some(2));
+        assert_eq!(app.encoding_select_row(), Some(2));
         // Cursor must not have moved.
         assert_eq!(app.buffers[0].cursor.grapheme_col, gcol_before);
     }
@@ -6317,9 +6674,9 @@ mod tests {
     #[test]
     fn test_open_action_opens_browser() {
         let mut app = make_app();
-        assert!(app.file_browser.is_none());
+        assert!(app.file_browser().is_none());
         app.handle_action(Action::Open).unwrap();
-        let fb = app.file_browser.as_ref().expect("browser open");
+        let fb = app.file_browser().expect("browser open");
         assert_eq!(fb.mode, BrowseMode::Open);
     }
 
@@ -6330,9 +6687,9 @@ mod tests {
         for c in "ab".chars() {
             app.handle_action(Action::InsertChar(c)).unwrap();
         }
-        assert_eq!(app.file_browser.as_ref().unwrap().filename, "ab");
+        assert_eq!(app.file_browser().unwrap().filename, "ab");
         app.handle_action(Action::Backspace).unwrap();
-        assert_eq!(app.file_browser.as_ref().unwrap().filename, "a");
+        assert_eq!(app.file_browser().unwrap().filename, "a");
     }
 
     #[test]
@@ -6341,7 +6698,7 @@ mod tests {
         let n_before = app.buffers.len();
         app.handle_action(Action::Open).unwrap();
         app.handle_action(Action::MenuClose).unwrap();
-        assert!(app.file_browser.is_none());
+        assert!(app.file_browser().is_none());
         assert_eq!(app.buffers.len(), n_before, "cancel must not open a buffer");
     }
 
@@ -6352,7 +6709,7 @@ mod tests {
         let gcol_before = app.buffers[0].cursor.grapheme_col;
         // ToggleHighlight is consumed by the browser intercept (no effect).
         app.handle_action(Action::ToggleHighlight).unwrap();
-        assert!(app.file_browser.is_some());
+        assert!(app.file_browser().is_some());
         assert_eq!(app.buffers[0].cursor.grapheme_col, gcol_before);
     }
 
@@ -6371,7 +6728,7 @@ mod tests {
         }
         app.handle_action(Action::InsertNewline).unwrap();
 
-        assert!(app.file_browser.is_none(), "browser closes after opening");
+        assert!(app.file_browser().is_none(), "browser closes after opening");
         assert_eq!(app.buffers.len(), n_before + 1, "a new buffer is added");
         assert!(app
             .active_buffer()
@@ -6448,9 +6805,9 @@ mod tests {
     fn test_about_action_opens_and_closes() {
         let mut app = make_app();
         app.handle_action(Action::About).unwrap();
-        assert_eq!(app.pending_help, Some(HelpScreen::About));
+        assert_eq!(app.help_screen(), Some(HelpScreen::About));
         app.handle_action(Action::MenuClose).unwrap();
-        assert_eq!(app.pending_help, None);
+        assert_eq!(app.help_screen(), None);
     }
 
     #[test]
@@ -6464,15 +6821,15 @@ mod tests {
         app.insert_char('h');
         app.insert_char('i');
         app.handle_action(Action::SaveAs).unwrap();
-        assert_eq!(app.file_browser.as_ref().unwrap().mode, BrowseMode::Save);
+        assert_eq!(app.file_browser().unwrap().mode, BrowseMode::Save);
         // Point the browser at the temp dir, type a filename, confirm.
-        app.file_browser = Some(FileBrowser::open(dir.clone(), BrowseMode::Save));
+        app.modal = Modal::FileBrowser(FileBrowser::open(dir.clone(), BrowseMode::Save));
         for c in "saved.txt".chars() {
             app.handle_action(Action::InsertChar(c)).unwrap();
         }
         app.handle_action(Action::InsertNewline).unwrap();
 
-        assert!(app.file_browser.is_none(), "browser closes after save");
+        assert!(app.file_browser().is_none(), "browser closes after save");
         let written = std::fs::read_to_string(&path).expect("file written");
         assert!(written.contains("hi"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -6483,7 +6840,7 @@ mod tests {
         let mut app = make_app(); // make_app starts with an unnamed buffer
         assert!(app.active_buffer().path.is_none());
         app.handle_action(Action::Save).unwrap();
-        let fb = app.file_browser.as_ref().expect("save browser opened");
+        let fb = app.file_browser().expect("save browser opened");
         assert_eq!(fb.mode, BrowseMode::Save);
     }
 
@@ -6596,12 +6953,55 @@ mod tests {
 
         // Find ▸ first item fired: the Find dialog is open and the menu closed.
         assert!(
-            app.pending_find_replace.is_some(),
+            app.find_replace().is_some(),
             "first Search item should invoke Find, not switch tabs"
         );
         assert!(!app.menu_bar.is_active());
         // The click must not have changed the active buffer.
         assert_eq!(app.active_idx, 0);
+    }
+
+    // Feature 039 (Phase 2): the tab-bar row's owner is resolved by the single
+    // `LAYER_PRECEDENCE` order, so paint and hit-test agree by construction. This
+    // generalizes the two point regressions above (`repro_menu_click_over_tabs`,
+    // `first_dropdown_item_clickable_with_tab_bar_open`) into the precedence
+    // invariant they were special-casing.
+    #[test]
+    fn top_row_owner_follows_layer_precedence() {
+        let mut app = make_app();
+        app.terminal_size = (80, 24);
+
+        // Single buffer, nothing open: the tab bar is hidden, so the editor owns
+        // the top region.
+        assert!(!app.tab_bar_visible());
+        assert_eq!(app.top_row_owner(), Layer::Editor);
+
+        // 2+ buffers, no dropdown: the tab bar is the topmost active layer.
+        app.buffers.push(crate::buffer::Buffer::new_empty());
+        assert!(app.tab_bar_visible());
+        assert_eq!(app.top_row_owner(), Layer::TabBar);
+
+        // Open a dropdown: it sits ABOVE the tab bar in LAYER_PRECEDENCE and must
+        // win the tab row (this is exactly the 033/038 fix, now precedence-derived).
+        app.menu_bar.state = MenuState::DropDown {
+            top_idx: 0,
+            item_idx: 0,
+        };
+        assert_eq!(app.top_row_owner(), Layer::MenuDropDown);
+
+        // A foreground modal outranks everything (it is dispatched even earlier in
+        // the mouse handler, but the precedence ordering must still reflect that).
+        app.menu_bar.close_menu();
+        app.modal = Modal::Help {
+            screen: HelpScreen::Help,
+            scroll: 0,
+        };
+        assert_eq!(app.top_row_owner(), Layer::Modal);
+
+        // Precedence is strictly ordered top→bottom with no duplicates.
+        for win in LAYER_PRECEDENCE.windows(2) {
+            assert_ne!(win[0], win[1]);
+        }
     }
 
     #[test]
@@ -6611,7 +7011,7 @@ mod tests {
         app.handle_mouse_event(mouse_press(1, 0)).unwrap();
         app.handle_mouse_event(mouse_press(3, 2)).unwrap();
         // "Open" → Action::Open → opens the file browser and closes the menu.
-        assert!(app.file_browser.is_some());
+        assert!(app.file_browser().is_some());
         assert!(!app.menu_bar.is_active());
     }
 
@@ -6632,11 +7032,11 @@ mod tests {
         let mut app = make_app();
         // Start with UTF-8 encoding.
         assert_eq!(app.buffers[0].encoding, EncodingId::Utf8);
-        app.pending_encoding_select = Some(3); // e.g. CP437 selected
-                                               // Cancel via MenuClose.
+        app.set_encoding_select(3); // e.g. CP437 selected
+                                    // Cancel via MenuClose.
         app.handle_action(Action::MenuClose).unwrap();
         // Dialog closed.
-        assert_eq!(app.pending_encoding_select, None);
+        assert_eq!(app.encoding_select_row(), None);
         // Encoding unchanged.
         assert_eq!(app.buffers[0].encoding, EncodingId::Utf8);
         // No status message about encoding change.
@@ -6693,7 +7093,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         // Re-open dialog — must pre-select UTF-16 BE (index 2).
         app.handle_action(Action::SaveAsEncoding).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(2));
+        assert_eq!(app.encoding_select_row(), Some(2));
     }
 
     // ── T022 — Pending encoding cleared on filename-prompt cancel ────────────

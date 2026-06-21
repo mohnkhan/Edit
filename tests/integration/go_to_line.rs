@@ -32,10 +32,10 @@ fn typ(a: &mut App, s: &str) {
 fn ctrl_g_opens_and_jumps_scrolling_into_view() {
     let mut a = app_with_lines(100);
     a.handle_action(Action::GoToLine).unwrap();
-    assert!(a.pending_goto_line.is_some(), "prompt opened");
+    assert!(a.goto_line_digits().is_some(), "prompt opened");
     typ(&mut a, "50");
     a.handle_action(Action::InsertNewline).unwrap();
-    assert!(a.pending_goto_line.is_none(), "prompt closed on Enter");
+    assert!(a.goto_line_digits().is_none(), "prompt closed on Enter");
     assert_eq!(a.buffers[0].cursor.line, 49, "1-based line 50 → index 49");
     assert_eq!(a.buffers[0].cursor.grapheme_col, 0, "cursor at column 1");
     let scroll = a.buffers[0].scroll_offset.0;
@@ -69,7 +69,7 @@ fn esc_cancels_without_moving() {
     a.handle_action(Action::GoToLine).unwrap();
     typ(&mut a, "80");
     a.handle_action(Action::MenuClose).unwrap();
-    assert!(a.pending_goto_line.is_none(), "Esc closed the prompt");
+    assert!(a.goto_line_digits().is_none(), "Esc closed the prompt");
     assert_eq!(a.buffers[0].cursor.line, 12, "Esc did not move the cursor");
 }
 
@@ -79,7 +79,7 @@ fn empty_enter_does_not_move() {
     a.buffers[0].cursor.line = 7;
     a.handle_action(Action::GoToLine).unwrap();
     a.handle_action(Action::InsertNewline).unwrap(); // empty field
-    assert!(a.pending_goto_line.is_none());
+    assert!(a.goto_line_digits().is_none());
     assert_eq!(a.buffers[0].cursor.line, 7, "empty entry → no movement");
 }
 
@@ -92,11 +92,7 @@ fn backspace_edits_and_non_digits_rejected_buffer_untouched() {
     typ(&mut a, "a"); // non-digit ignored by the field
     a.handle_action(Action::Backspace).unwrap(); // remove the '9'
     typ(&mut a, "3");
-    assert_eq!(
-        a.pending_goto_line.as_deref(),
-        Some("3"),
-        "field is digits-only"
-    );
+    assert_eq!(a.goto_line_digits(), Some("3"), "field is digits-only");
     assert_eq!(
         a.buffers[0].rope.to_string(),
         before,
@@ -110,10 +106,10 @@ fn backspace_edits_and_non_digits_rejected_buffer_untouched() {
 fn go_to_line_does_not_open_over_another_modal() {
     let mut a = app_with_lines(10);
     a.handle_action(Action::Find).unwrap(); // open Find dialog
-    assert!(a.pending_find_replace.is_some());
+    assert!(a.find_replace().is_some());
     a.handle_action(Action::GoToLine).unwrap();
     assert!(
-        a.pending_goto_line.is_none(),
+        a.goto_line_digits().is_none(),
         "Go to Line does not open while another modal is open"
     );
 }

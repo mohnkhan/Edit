@@ -41,11 +41,11 @@ fn test_save_utf8_file_as_utf16le() {
 
     // Open dialog → pre-selects UTF-8 at index 0.
     app.handle_action(Action::SaveAsEncoding).unwrap();
-    assert_eq!(app.pending_encoding_select, Some(0));
+    assert_eq!(app.encoding_select_row(), Some(0));
 
     // Navigate one step down → UTF-16 LE at index 1.
     app.handle_action(Action::MoveDown).unwrap();
-    assert_eq!(app.pending_encoding_select, Some(1));
+    assert_eq!(app.encoding_select_row(), Some(1));
 
     // Confirm selection.
     app.handle_action(Action::InsertNewline).unwrap();
@@ -79,7 +79,7 @@ fn test_save_utf8_file_as_utf16be() {
     // Navigate two steps → UTF-16 BE at index 2.
     app.handle_action(Action::MoveDown).unwrap();
     app.handle_action(Action::MoveDown).unwrap();
-    assert_eq!(app.pending_encoding_select, Some(2));
+    assert_eq!(app.encoding_select_row(), Some(2));
 
     app.handle_action(Action::InsertNewline).unwrap();
 
@@ -113,7 +113,8 @@ fn test_cancel_leaves_file_unchanged() {
     app.handle_action(Action::MenuClose).unwrap();
 
     assert_eq!(
-        app.pending_encoding_select, None,
+        app.encoding_select_row(),
+        None,
         "dialog must be closed after cancel"
     );
     assert_eq!(
@@ -216,7 +217,8 @@ fn test_new_buffer_pending_encoding_held() {
 
     // Case B: pending encoding must be held, dialog closed.
     assert_eq!(
-        app.pending_encoding_select, None,
+        app.encoding_select_row(),
+        None,
         "dialog must be closed after confirm"
     );
     assert_eq!(

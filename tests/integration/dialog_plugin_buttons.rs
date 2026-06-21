@@ -14,7 +14,7 @@ use edit::input::keymap::Action;
 fn app() -> App {
     let mut a = App::new(Config::default(), vec![], EncodingId::Utf8, None, None);
     a.terminal_size = (80, 24);
-    a.pending_plugin_manager = true;
+    a.open_plugin_manager();
     a
 }
 
@@ -52,7 +52,7 @@ fn click_close_button_closes_manager() {
     let rects = edit::ui::buttons::button_rects(rect, &labels);
     let close = rects[0];
     click(&mut a, close.x + 1, close.y + 1);
-    assert!(!a.pending_plugin_manager, "Close closes the manager");
+    assert!(!a.is_plugin_manager_open(), "Close closes the manager");
 }
 
 // ── T020 [US3] no regression ────────────────────────────────────────────────
@@ -62,7 +62,7 @@ fn esc_closes_from_any_focus() {
     let mut a = app();
     a.handle_action(Action::FocusNextField).unwrap(); // focus Close
     a.handle_action(Action::MenuClose).unwrap();
-    assert!(!a.pending_plugin_manager, "Esc closes from a button");
+    assert!(!a.is_plugin_manager_open(), "Esc closes from a button");
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn enter_on_close_button_closes() {
     let mut a = app();
     a.handle_action(Action::FocusNextField).unwrap(); // focus Close
     a.handle_action(Action::InsertNewline).unwrap();
-    assert!(!a.pending_plugin_manager, "Enter activates Close");
+    assert!(!a.is_plugin_manager_open(), "Enter activates Close");
 }
 
 #[test]
@@ -91,5 +91,8 @@ fn space_while_list_focused_does_not_close() {
     // Focus is on the list (stop 0). With no plugins, Space toggles nothing and
     // must NOT close the dialog (only the Close button does).
     a.handle_action(Action::InsertChar(' ')).unwrap();
-    assert!(a.pending_plugin_manager, "list-focused Space keeps it open");
+    assert!(
+        a.is_plugin_manager_open(),
+        "list-focused Space keeps it open"
+    );
 }

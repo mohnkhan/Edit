@@ -201,6 +201,11 @@ impl Ui {
         // an open menu's dropdown (which drops from row 0 into the tab-bar row and
         // below) overlays the tab bar instead of being painted over by it
         // (Feature 033: z-order fix — the first dropdown item was hidden).
+        //
+        // Feature 039: this paint order is the REVERSE of `app::LAYER_PRECEDENCE`
+        // (editor → tab bar → menu/dropdown → modal). The same precedence drives
+        // mouse hit-testing (`App::top_row_owner`), so paint and hit-test cannot
+        // disagree about which layer owns the tab-bar row.
         if let Some(area) = tab_bar_area {
             tabbar::render_tab_bar(
                 frame.buffer_mut(),
@@ -264,7 +269,7 @@ impl Ui {
         }
 
         // Feature 015 — interactive Find / Replace dialog overlay.
-        if let Some(ref d) = app.pending_find_replace {
+        if let Some(d) = app.find_replace() {
             use crate::ui::dialog::{DialogField, DialogMode};
             use crate::ui::file_browser::truncate_to_width;
             let base = ratatui::style::Style::default()
@@ -381,7 +386,7 @@ impl Ui {
         }
 
         // T015 — Encoding select dialog overlay.
-        if let Some(cursor_idx) = app.pending_encoding_select {
+        if let Some(cursor_idx) = app.encoding_select_row() {
             use crate::ui::dialog::EncodingSelectDialog;
             let dialog = EncodingSelectDialog {
                 cursor_idx,
@@ -392,19 +397,15 @@ impl Ui {
         }
 
         // Feature 025 — Go-to-Line prompt overlay.
-        if let Some(ref entry) = app.pending_goto_line {
+        // Feature 039 (FR-006): the box geometry comes from the single shared
+        // `App::goto_line_rect`, the same source the mouse hit-test uses.
+        if let (Some(entry), Some(area)) = (app.goto_line_digits(), app.goto_line_rect()) {
             let base = ratatui::style::Style::default()
                 .fg(app.theme.menubar_fg)
                 .bg(app.theme.menubar_bg);
             // Feature 031: embed the caret glyph at the caret position (mid-string).
-            let caret = app.pending_goto_line_caret.min(entry.len());
+            let caret = app.goto_line_caret().min(entry.len());
             let body = format!("Go to line: {}▏{}", &entry[..caret], &entry[caret..]);
-            // A compact centered box; width fits the prompt + padding, clamped.
-            let dw = (body.len() as u16 + 4).clamp(20, size.width.max(1));
-            let dh = 3u16.min(size.height.max(1));
-            let dx = size.x + size.width.saturating_sub(dw) / 2;
-            let dy = size.y + size.height.saturating_sub(dh) / 2;
-            let area = ratatui::layout::Rect::new(dx, dy, dw, dh);
             frame.render_widget(ratatui::widgets::Clear, area);
             frame.render_widget(
                 ratatui::widgets::Paragraph::new(body).style(base).block(
@@ -418,7 +419,7 @@ impl Ui {
         }
 
         // Feature 012 — File browser overlay (Open / Save As).
-        if let Some(ref browser) = app.file_browser {
+        if let Some(browser) = app.file_browser() {
             use crate::ui::file_browser::FileBrowserWidget;
             let widget = FileBrowserWidget {
                 browser,
@@ -429,19 +430,19 @@ impl Ui {
         }
 
         // Feature 011 — Help / About overlay.
-        if let Some(screen) = app.pending_help {
+        if let Some(screen) = app.help_screen() {
             render_help_overlay(frame, app, screen, size);
         }
 
         // Feature 008 — Plugin manager dialog (Feature 020: + boxed Close button).
-        if app.pending_plugin_manager {
+        if app.is_plugin_manager_open() {
             let body = crate::ui::plugin_manager::manager_body(
                 &app.plugin_host,
-                app.plugin_manager_cursor,
+                app.plugin_manager_cursor(),
             );
             let dialog_area = crate::ui::plugin_manager::manager_rect(
                 &app.plugin_host,
-                app.plugin_manager_cursor,
+                app.plugin_manager_cursor(),
                 size,
             );
             let dialog = ratatui::widgets::Paragraph::new(body)
@@ -471,7 +472,7 @@ impl Ui {
                 ),
                 app.plugin_host.registry.instances.len(),
                 body_rows,
-                app.plugin_manager_cursor,
+                app.plugin_manager_cursor(),
                 app.theme,
             );
             // Boxed Close button in the bottom interior rows.
@@ -488,7 +489,7 @@ impl Ui {
 
         // Feature 030 (US3) — editor right-click context menu, drawn last so it
         // overlays everything (it only opens when no other modal is active).
-        if let Some(ref menu) = app.pending_context_menu {
+        if let Some(menu) = app.context_menu() {
             crate::ui::contextmenu::render(frame.buffer_mut(), size, menu, app.theme);
         }
     }
@@ -866,7 +867,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, screen: HelpScreen, size: R
     let body_rows = inner_h.saturating_sub(1 + button_reserved); // 1 row = footer hint
     let total = lines.len();
     let max_scroll = total.saturating_sub(body_rows);
-    let scroll = app.help_scroll.min(max_scroll);
+    let scroll = app.help_scroll().min(max_scroll);
 
     let mut shown: Vec<Line> = lines
         .into_iter()

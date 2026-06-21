@@ -39,23 +39,23 @@ fn close_button_label_carries_its_key() {
 fn help_closes_on_close_button_click() {
     let mut a = app();
     a.handle_action(Action::Help).unwrap();
-    assert!(a.pending_help.is_some(), "Help opened");
+    assert!(a.help_screen().is_some(), "Help opened");
     let rects = edit::ui::help_close_button_rects(ratatui::layout::Rect::new(0, 0, 80, 24));
     assert!(!rects.is_empty(), "Close button is laid out");
     let b = rects[0];
     click(&mut a, b.x + 1, b.y + 1);
-    assert!(a.pending_help.is_none(), "clicking Close dismisses Help");
+    assert!(a.help_screen().is_none(), "clicking Close dismisses Help");
 }
 
 #[test]
 fn about_closes_on_close_button_click() {
     let mut a = app();
     a.handle_action(Action::About).unwrap();
-    assert!(a.pending_help.is_some(), "About opened");
+    assert!(a.help_screen().is_some(), "About opened");
     let rects = edit::ui::help_close_button_rects(ratatui::layout::Rect::new(0, 0, 80, 24));
     let b = rects[0];
     click(&mut a, b.x + 1, b.y + 1);
-    assert!(a.pending_help.is_none(), "clicking Close dismisses About");
+    assert!(a.help_screen().is_none(), "clicking Close dismisses About");
 }
 
 #[test]
@@ -63,11 +63,11 @@ fn esc_still_closes_help_and_about() {
     let mut a = app();
     a.handle_action(Action::Help).unwrap();
     a.handle_action(Action::MenuClose).unwrap();
-    assert!(a.pending_help.is_none(), "Esc still closes Help");
+    assert!(a.help_screen().is_none(), "Esc still closes Help");
 
     a.handle_action(Action::About).unwrap();
     a.handle_action(Action::MenuClose).unwrap();
-    assert!(a.pending_help.is_none(), "Esc still closes About");
+    assert!(a.help_screen().is_none(), "Esc still closes About");
 }
 
 #[test]
@@ -75,5 +75,8 @@ fn click_outside_close_button_keeps_help_open() {
     let mut a = app();
     a.handle_action(Action::Help).unwrap();
     click(&mut a, 0, 0); // far corner, not the button
-    assert!(a.pending_help.is_some(), "non-button click keeps Help open");
+    assert!(
+        a.help_screen().is_some(),
+        "non-button click keeps Help open"
+    );
 }

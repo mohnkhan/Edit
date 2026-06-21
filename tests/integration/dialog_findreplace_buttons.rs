@@ -74,16 +74,10 @@ fn replace_mode_ring_has_six_stops_and_syncs_field() {
         ]
     );
     // Stop 0 = Query.
-    assert_eq!(
-        a.pending_find_replace.as_ref().unwrap().focus,
-        DialogField::Query
-    );
+    assert_eq!(a.find_replace().unwrap().focus, DialogField::Query);
     // Stop 1 = Replacement (field focus syncs).
     a.handle_action(Action::FocusNextField).unwrap();
-    assert_eq!(
-        a.pending_find_replace.as_ref().unwrap().focus,
-        DialogField::Replacement
-    );
+    assert_eq!(a.find_replace().unwrap().focus, DialogField::Replacement);
     assert_eq!(a.interactive_focus_is_button(), None, "still a field stop");
     // Stops 2..5 = buttons.
     for expect in 0..4 {
@@ -93,10 +87,7 @@ fn replace_mode_ring_has_six_stops_and_syncs_field() {
     // Wrap back to Query.
     a.handle_action(Action::FocusNextField).unwrap();
     assert_eq!(a.interactive_focus_is_button(), None);
-    assert_eq!(
-        a.pending_find_replace.as_ref().unwrap().focus,
-        DialogField::Query
-    );
+    assert_eq!(a.find_replace().unwrap().focus, DialogField::Query);
 }
 
 // ── T033 [US1] mouse activation ─────────────────────────────────────────────
@@ -143,7 +134,7 @@ fn click_close_button_closes_dialog() {
     let rects = edit::ui::buttons::button_rects(rect, &labels);
     let close = rects[1];
     click(&mut a, close.x + 1, close.y + 1);
-    assert!(a.pending_find_replace.is_none(), "Close closed the dialog");
+    assert!(a.find_replace().is_none(), "Close closed the dialog");
 }
 
 // ── T034 [US3] no regression ────────────────────────────────────────────────
@@ -155,12 +146,12 @@ fn editing_options_matchnav_unchanged_on_field() {
     type_into(&mut a, "fox");
     a.handle_action(Action::Backspace).unwrap(); // "fo"
     type_into(&mut a, "o"); // "foo"
-    assert_eq!(a.pending_find_replace.as_ref().unwrap().query, "foo");
+    assert_eq!(a.find_replace().unwrap().query, "foo");
     // Option toggles still work (regardless of focus).
     a.handle_action(Action::ToggleSearchCase).unwrap();
-    assert!(a.pending_find_replace.as_ref().unwrap().case_sensitive);
+    assert!(a.find_replace().unwrap().case_sensitive);
     a.handle_action(Action::ToggleSearchCase).unwrap();
-    assert!(!a.pending_find_replace.as_ref().unwrap().case_sensitive);
+    assert!(!a.find_replace().unwrap().case_sensitive);
     // Run + match nav.
     a.handle_action(Action::InsertNewline).unwrap();
     assert_eq!(a.search_state.matches.len(), 3);
@@ -188,7 +179,7 @@ fn text_keys_ignored_while_button_focused() {
     a.handle_action(Action::FocusNextField).unwrap(); // focus Find button
     assert!(a.interactive_focus_is_button().is_some());
     a.handle_action(Action::InsertChar('Z')).unwrap(); // must NOT edit the field
-    assert_eq!(a.pending_find_replace.as_ref().unwrap().query, "abc");
+    assert_eq!(a.find_replace().unwrap().query, "abc");
 }
 
 #[test]
@@ -198,5 +189,5 @@ fn esc_closes_from_any_stop() {
     a.handle_action(Action::FocusNextField).unwrap();
     a.handle_action(Action::FocusNextField).unwrap(); // some button
     a.handle_action(Action::MenuClose).unwrap();
-    assert!(a.pending_find_replace.is_none(), "Esc closes from any stop");
+    assert!(a.find_replace().is_none(), "Esc closes from any stop");
 }

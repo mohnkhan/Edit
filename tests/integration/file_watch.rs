@@ -510,7 +510,7 @@ fn test_deleted_file_close_without_save_prompts() {
     app.handle_action(Action::Quit).expect("handle_action");
 
     assert!(
-        app.pending_save_prompt,
+        app.is_save_prompt_open(),
         "quitting with a modified buffer (even after file deletion) should show save prompt"
     );
     assert!(

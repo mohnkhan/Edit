@@ -28,7 +28,7 @@ fn tree(tag: &str) -> PathBuf {
 }
 
 fn select_named(app: &mut App, name: &str) {
-    let fb = app.file_browser.as_mut().unwrap();
+    let fb = app.file_browser_mut().unwrap();
     fb.selected = fb
         .entries
         .iter()
@@ -43,19 +43,19 @@ fn open_by_browsing_two_levels_keyboard() {
     fs::write(base.join("sub").join("inner.txt"), b"deep content\n").unwrap();
 
     let mut app = make_app();
-    app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    app.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
 
     // Descend into "sub".
     select_named(&mut app, "sub");
     app.handle_action(Action::InsertNewline).unwrap();
-    assert!(app.file_browser.as_ref().unwrap().cwd.ends_with("sub"));
+    assert!(app.file_browser().unwrap().cwd.ends_with("sub"));
 
     // Open "inner.txt".
     let n_before = app.buffers.len();
     select_named(&mut app, "inner.txt");
     app.handle_action(Action::InsertNewline).unwrap();
 
-    assert!(app.file_browser.is_none(), "browser closes after open");
+    assert!(app.file_browser().is_none(), "browser closes after open");
     assert_eq!(app.buffers.len(), n_before + 1);
     assert!(app
         .active_buffer()
@@ -72,9 +72,9 @@ fn open_cancel_leaves_state_unchanged() {
     fs::write(base.join("a.txt"), b"x\n").unwrap();
     let mut app = make_app();
     let n_before = app.buffers.len();
-    app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    app.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
     app.handle_action(Action::MenuClose).unwrap();
-    assert!(app.file_browser.is_none());
+    assert!(app.file_browser().is_none());
     assert_eq!(app.buffers.len(), n_before);
     let _ = fs::remove_dir_all(&base);
 }
@@ -86,13 +86,13 @@ fn save_by_browsing_writes_file() {
     for c in "save me".chars() {
         app.handle_action(Action::InsertChar(c)).unwrap();
     }
-    app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Save));
+    app.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Save));
     for c in "out.txt".chars() {
         app.handle_action(Action::InsertChar(c)).unwrap();
     }
     app.handle_action(Action::InsertNewline).unwrap();
 
-    assert!(app.file_browser.is_none(), "browser closes after save");
+    assert!(app.file_browser().is_none(), "browser closes after save");
     let written = fs::read_to_string(base.join("out.txt")).expect("file written");
     assert!(written.contains("save me"));
     let _ = fs::remove_dir_all(&base);
@@ -103,7 +103,7 @@ fn save_empty_filename_is_noop() {
     let base = tree("save_empty");
     let mut app = make_app();
     app.handle_action(Action::InsertChar('z')).unwrap();
-    app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Save));
+    app.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Save));
     // No filename typed; selected is ".." → Enter navigates up, no save/no panic.
     app.handle_action(Action::InsertNewline).unwrap();
     // Browser is still open (navigated up) and nothing was written into base.
@@ -118,7 +118,7 @@ fn mouse_double_click_opens_file() {
     fs::write(base.join("click.txt"), b"clicked\n").unwrap();
 
     let mut app = make_app();
-    app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    app.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
     // Layout for 80x24, Open mode (feature 020 grew the box to 64x24 at (8,0) to
     // fit the button row): list starts at row 2.
     // entries: index 0 = "..", index 1 = "click.txt" → row 3.
@@ -132,7 +132,7 @@ fn mouse_double_click_opens_file() {
     // First click only selects (browser stays open, no file opened).
     app.handle_mouse_event(me).unwrap();
     assert!(
-        app.file_browser.is_some(),
+        app.file_browser().is_some(),
         "single click selects without opening"
     );
     assert_eq!(
@@ -141,7 +141,7 @@ fn mouse_double_click_opens_file() {
         "no buffer added on single click"
     );
     assert_eq!(
-        app.file_browser.as_ref().unwrap().selected,
+        app.file_browser().unwrap().selected,
         1,
         "single click highlights the clicked row"
     );
@@ -149,7 +149,7 @@ fn mouse_double_click_opens_file() {
     // Second click on the same row activates → opens the file, closes browser.
     app.handle_mouse_event(me).unwrap();
     assert!(
-        app.file_browser.is_none(),
+        app.file_browser().is_none(),
         "browser closes after double-click open"
     );
     assert_eq!(app.buffers.len(), n_before + 1);
@@ -166,7 +166,7 @@ fn mouse_double_click_folder_enters_then_stays_open() {
     fs::write(base.join("sub").join("inner.txt"), b"inner\n").unwrap();
 
     let mut app = make_app();
-    app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    app.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
     // entries: index 0 = "..", index 1 = "sub/" → row 3 (box now 64x24 at (8,0)).
     let me = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
@@ -179,8 +179,7 @@ fn mouse_double_click_folder_enters_then_stays_open() {
     app.handle_mouse_event(me).unwrap();
 
     let fb = app
-        .file_browser
-        .as_ref()
+        .file_browser()
         .expect("browser stays open after entering a folder");
     assert!(fb.cwd.ends_with("sub"), "navigated into the folder");
     assert_eq!(
@@ -195,7 +194,7 @@ fn mouse_double_click_folder_enters_then_stays_open() {
 fn mouse_click_outside_cancels() {
     let base = tree("mouse_cancel");
     let mut app = make_app();
-    app.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    app.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
     let me = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: 0,
@@ -203,6 +202,6 @@ fn mouse_click_outside_cancels() {
         modifiers: KeyModifiers::NONE,
     };
     app.handle_mouse_event(me).unwrap();
-    assert!(app.file_browser.is_none(), "outside click cancels");
+    assert!(app.file_browser().is_none(), "outside click cancels");
     let _ = fs::remove_dir_all(&base);
 }

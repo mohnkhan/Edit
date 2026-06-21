@@ -33,14 +33,14 @@ fn type_into_dialog(app: &mut App, s: &str) {
 fn find_opens_dialog_and_finds_matches() {
     let mut app = app_with_text("foo bar foo baz foo");
     app.handle_action(Action::Find).unwrap();
-    assert!(app.pending_find_replace.is_some(), "Find opens the dialog");
+    assert!(app.find_replace().is_some(), "Find opens the dialog");
 
     type_into_dialog(&mut app, "foo");
     app.handle_action(Action::InsertNewline).unwrap(); // run search
 
     assert_eq!(app.search_state.matches.len(), 3, "three occurrences");
     assert!(app.search_state.active_match.is_some(), "current match set");
-    assert!(app.pending_find_replace.is_some(), "dialog stays open");
+    assert!(app.find_replace().is_some(), "dialog stays open");
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn esc_closes_dialog_and_clears_highlights() {
     app.handle_action(Action::InsertNewline).unwrap();
     assert!(!app.search_state.matches.is_empty());
     app.handle_action(Action::MenuClose).unwrap(); // Esc
-    assert!(app.pending_find_replace.is_none());
+    assert!(app.find_replace().is_none());
     assert!(
         app.search_state.matches.is_empty(),
         "highlights cleared on close"
