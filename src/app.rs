@@ -1105,7 +1105,7 @@ impl App {
                     .map(|c| c.is_stale(w, self.wrap_text_gen))
                     .unwrap_or(true)
                 {
-                    let rope = &self.buffers[self.active_idx].rope;
+                    let rope = &self.active_buffer().rope;
                     self.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(
                         rope,
                         w,
@@ -1539,7 +1539,7 @@ impl App {
                         }
                     };
                     if let Ok(n) = entry.parse::<usize>() {
-                        let count = self.buffers[self.active_idx].rope.line_count();
+                        let count = self.active_buffer().rope.line_count();
                         let line1 = n.clamp(1, count.max(1));
                         self.set_cursor_lc(line1 - 1, 0);
                     }
@@ -1911,7 +1911,7 @@ impl App {
             // T013 — Save As Encoding dialog trigger
             Action::SaveAsEncoding => {
                 if !self.buffers.is_empty() {
-                    let idx = Self::encoding_to_idx(self.buffers[self.active_idx].encoding);
+                    let idx = Self::encoding_to_idx(self.active_buffer().encoding);
                     self.set_encoding_select(idx);
                 }
             }
@@ -2032,7 +2032,7 @@ impl App {
         match self.active_buffer().save() {
             Ok(()) => {
                 // Feature 007: record write time for self-write suppression (FR-007).
-                if let Some(path) = self.buffers[self.active_idx].path.clone() {
+                if let Some(path) = self.active_buffer().path.clone() {
                     self.self_write_times.insert(path, Instant::now());
                 }
                 self.close_modal();
@@ -2262,11 +2262,12 @@ impl App {
                 // Feature 014: the just-written content is the new clean baseline.
                 self.active_buffer_mut().undo_stack.mark_saved();
                 // Feature 007: record write time for self-write suppression (FR-007).
-                if let Some(path) = self.buffers[self.active_idx].path.clone() {
+                if let Some(path) = self.active_buffer().path.clone() {
                     self.self_write_times.insert(path, Instant::now());
                 }
                 // Feature 029: confirm the save (was silent; Save-As already does).
-                let name = self.buffers[self.active_idx]
+                let name = self
+                    .active_buffer()
                     .path
                     .as_ref()
                     .and_then(|p| p.file_name())
@@ -2293,23 +2294,23 @@ impl App {
     ///
     /// Case B (unnamed buffer): handled in T020.
     pub fn do_save_as_encoding(&mut self, enc: EncodingId) {
-        if self.buffers[self.active_idx].path.is_some() {
+        if self.active_buffer().path.is_some() {
             // Case A: named buffer — encode + atomic write.
-            let old_enc = self.buffers[self.active_idx].encoding;
-            self.buffers[self.active_idx].encoding = enc;
-            match self.buffers[self.active_idx].save() {
+            let old_enc = self.active_buffer().encoding;
+            self.active_buffer_mut().encoding = enc;
+            match self.active_buffer().save() {
                 Ok(()) => {
-                    self.buffers[self.active_idx].modified = false;
-                    self.buffers[self.active_idx].undo_stack.mark_saved(); // Feature 014
-                                                                           // Feature 007: record write time for self-write suppression.
-                    if let Some(path) = self.buffers[self.active_idx].path.clone() {
+                    self.active_buffer_mut().modified = false;
+                    self.active_buffer_mut().undo_stack.mark_saved(); // Feature 014
+                                                                      // Feature 007: record write time for self-write suppression.
+                    if let Some(path) = self.active_buffer().path.clone() {
                         self.self_write_times.insert(path, Instant::now());
                     }
                     let label = Self::label_for_encoding(enc);
                     self.status_message = Some(format!("Saved as {}", label));
                 }
                 Err(e) => {
-                    self.buffers[self.active_idx].encoding = old_enc;
+                    self.active_buffer_mut().encoding = old_enc;
                     self.status_message = Some(format!("Save failed: {}", e));
                 }
             }
@@ -2330,7 +2331,7 @@ impl App {
         // Rebuild wrap cache for new terminal width (Feature 005, T022).
         if self.soft_wrap {
             let content_w = self.content_width();
-            let rope = &self.buffers[self.active_idx].rope;
+            let rope = &self.active_buffer().rope;
             self.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(
                 rope,
                 content_w,
@@ -2497,12 +2498,8 @@ impl App {
     /// Set the cursor to `(line, gcol)` (computing its visual column) and clamp
     /// the viewport. Does not touch the selection.
     fn set_cursor_lc(&mut self, line: usize, gcol: usize) {
-        let vcol = CursorPos::visual_col_from_grapheme_col(
-            &self.buffers[self.active_idx].rope,
-            line,
-            gcol,
-        );
-        self.buffers[self.active_idx].cursor = CursorPos {
+        let vcol = CursorPos::visual_col_from_grapheme_col(&self.active_buffer().rope, line, gcol);
+        self.active_buffer_mut().cursor = CursorPos {
             line,
             grapheme_col: gcol,
             visual_col: vcol,
@@ -2513,7 +2510,7 @@ impl App {
     pub fn move_cursor(&mut self, dir: Direction) {
         let (new_line, new_gcol) = self.next_cursor_pos(dir);
         // Feature 017: a plain (non-shift) move clears any selection.
-        self.buffers[self.active_idx].selection = None;
+        self.active_buffer_mut().selection = None;
         self.set_cursor_lc(new_line, new_gcol);
     }
 
@@ -2594,7 +2591,7 @@ impl App {
     /// Move the cursor one word in `dir` (clears any selection). (US1)
     pub fn move_word(&mut self, dir: Direction) {
         let (l, g) = self.next_word_pos(dir);
-        self.buffers[self.active_idx].selection = None;
+        self.active_buffer_mut().selection = None;
         self.set_cursor_lc(l, g);
     }
 
@@ -2612,25 +2609,24 @@ impl App {
         if self.deny_if_readonly() {
             return;
         }
-        if self.buffers[self.active_idx].selection.is_some() {
+        if self.active_buffer().selection.is_some() {
             self.delete_selection();
             return;
         }
-        let cursor = self.buffers[self.active_idx].cursor;
+        let cursor = self.active_buffer().cursor;
         let (l, g) = self.next_word_pos(dir);
         if (l, g) == (cursor.line, cursor.grapheme_col) {
             return; // buffer end — nothing to delete
         }
         // Span cursor↔target as a selection, then reuse the char-safe,
         // single-undo-step delete path (which also places the cursor at the start).
-        let vcol =
-            CursorPos::visual_col_from_grapheme_col(&self.buffers[self.active_idx].rope, l, g);
+        let vcol = CursorPos::visual_col_from_grapheme_col(&self.active_buffer().rope, l, g);
         let target = CursorPos {
             line: l,
             grapheme_col: g,
             visual_col: vcol,
         };
-        self.buffers[self.active_idx].selection = Some(Selection {
+        self.active_buffer_mut().selection = Some(Selection {
             anchor: cursor,
             active: target,
         });
@@ -2657,7 +2653,7 @@ impl App {
 
     /// Move the cursor to column 0 of the current line.
     pub fn move_line_start(&mut self) {
-        self.buffers[self.active_idx].selection = None; // Feature 017: plain move clears
+        self.active_buffer_mut().selection = None; // Feature 017: plain move clears
         let buf = self.active_buffer_mut();
         buf.cursor.grapheme_col = 0;
         buf.cursor.visual_col = 0;
@@ -2666,23 +2662,21 @@ impl App {
 
     /// Move the cursor to the last grapheme of the current line.
     pub fn move_line_end(&mut self) {
-        self.buffers[self.active_idx].selection = None; // Feature 017: plain move clears
+        self.active_buffer_mut().selection = None; // Feature 017: plain move clears
         self.cursor_to_line_end();
     }
 
     /// Place the cursor at the end of its line (no selection change).
     fn cursor_to_line_end(&mut self) {
-        let line = self.buffers[self.active_idx].cursor.line;
-        let gcol = self.buffers[self.active_idx]
-            .rope
-            .grapheme_count_on_line(line);
+        let line = self.active_buffer().cursor.line;
+        let gcol = self.active_buffer().rope.grapheme_count_on_line(line);
         self.set_cursor_lc(line, gcol);
     }
 
     /// Feature 017: extend the selection to the start of the current line.
     pub fn select_line_start(&mut self) {
         let anchor = self.selection_anchor_or_cursor();
-        self.set_cursor_lc(self.buffers[self.active_idx].cursor.line, 0);
+        self.set_cursor_lc(self.active_buffer().cursor.line, 0);
         self.update_selection_to_cursor(anchor);
     }
 
@@ -2798,7 +2792,7 @@ impl App {
             .collect();
         let len = graphemes.len();
         if len == 0 {
-            self.buffers[self.active_idx].selection = None; // empty line — clear
+            self.active_buffer_mut().selection = None; // empty line — clear
             return;
         }
         // Clamp the index (a click at end-of-line lands on `len`).
@@ -2817,10 +2811,8 @@ impl App {
 
     /// Select the whole logical line under the cursor (US2).
     fn select_line_at_cursor(&mut self) {
-        let line = self.buffers[self.active_idx].cursor.line;
-        let len = self.buffers[self.active_idx]
-            .rope
-            .grapheme_count_on_line(line);
+        let line = self.active_buffer().cursor.line;
+        let len = self.active_buffer().rope.grapheme_count_on_line(line);
         self.set_selection_on_line(line, 0, len);
     }
 
@@ -2891,7 +2883,7 @@ impl App {
                 buf.scroll_offset.0 = cursor_vr.saturating_sub(vh - 1);
             }
         } else {
-            let cur_line = self.buffers[self.active_idx].cursor.line;
+            let cur_line = self.active_buffer().cursor.line;
             let buf = self.active_buffer_mut();
             if cur_line < buf.scroll_offset.0 {
                 buf.scroll_offset.0 = cur_line;
@@ -2935,7 +2927,7 @@ impl App {
     /// Feature 029: if the active buffer is read-only, set a status message and
     /// return `true` so the caller aborts the edit (previously a silent no-op).
     fn deny_if_readonly(&mut self) -> bool {
-        if self.buffers[self.active_idx].readonly {
+        if self.active_buffer().readonly {
             self.status_message = Some("Buffer is read-only".to_string());
             true
         } else {
@@ -2951,7 +2943,7 @@ impl App {
             return;
         }
         // Feature 017: typing replaces the current selection.
-        if self.buffers[self.active_idx].selection.is_some() {
+        if self.active_buffer().selection.is_some() {
             self.delete_selection();
         }
 
@@ -2979,7 +2971,7 @@ impl App {
         if self.deny_if_readonly() {
             return;
         }
-        if self.buffers[self.active_idx].selection.is_some() {
+        if self.active_buffer().selection.is_some() {
             self.delete_selection(); // Feature 017: Enter replaces a selection
         }
 
@@ -3013,12 +3005,12 @@ impl App {
             return;
         }
         // Feature 017: Backspace with a selection deletes the selection.
-        if self.buffers[self.active_idx].selection.is_some() {
+        if self.active_buffer().selection.is_some() {
             self.delete_selection();
             return;
         }
 
-        let cur = self.buffers[self.active_idx].cursor;
+        let cur = self.active_buffer().cursor;
 
         // No-op at absolute beginning of the buffer
         if cur.line == 0 && cur.grapheme_col == 0 {
@@ -3031,9 +3023,7 @@ impl App {
         } else {
             // At the start of a line — deleting the newline of the previous line
             let prev_line = cur.line - 1;
-            let prev_len = self.buffers[self.active_idx]
-                .rope
-                .grapheme_count_on_line(prev_line);
+            let prev_len = self.active_buffer().rope.grapheme_count_on_line(prev_line);
             (prev_line, prev_len)
         };
 
@@ -3065,11 +3055,8 @@ impl App {
         self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
 
         // Move cursor to the deleted position
-        let new_vcol = CursorPos::visual_col_from_grapheme_col(
-            &self.buffers[self.active_idx].rope,
-            del_line,
-            del_gcol,
-        );
+        let new_vcol =
+            CursorPos::visual_col_from_grapheme_col(&self.active_buffer().rope, del_line, del_gcol);
         let buf = self.active_buffer_mut();
         buf.cursor = CursorPos {
             line: del_line,
@@ -3087,16 +3074,14 @@ impl App {
             return;
         }
         // Feature 017: Delete with a selection deletes the selection.
-        if self.buffers[self.active_idx].selection.is_some() {
+        if self.active_buffer().selection.is_some() {
             self.delete_selection();
             return;
         }
 
-        let cur = self.buffers[self.active_idx].cursor;
-        let line_count = self.buffers[self.active_idx].rope.line_count();
-        let gcol_count = self.buffers[self.active_idx]
-            .rope
-            .grapheme_count_on_line(cur.line);
+        let cur = self.active_buffer().cursor;
+        let line_count = self.active_buffer().rope.line_count();
+        let gcol_count = self.active_buffer().rope.grapheme_count_on_line(cur.line);
 
         // Determine whether we're at the last possible position
         let is_last_line = cur.line + 1 >= line_count;
@@ -3187,7 +3172,7 @@ impl App {
         if self.deny_if_readonly() {
             return;
         }
-        if self.buffers[self.active_idx].selection.is_none() {
+        if self.active_buffer().selection.is_none() {
             return;
         }
         self.copy_selection();
@@ -3204,7 +3189,7 @@ impl App {
             return;
         }
         // Feature 017: paste replaces the current selection.
-        if self.buffers[self.active_idx].selection.is_some() {
+        if self.active_buffer().selection.is_some() {
             self.delete_selection();
         }
         let text = match arboard::Clipboard::new() {
@@ -3248,7 +3233,7 @@ impl App {
 
     /// Delete the current selection from the buffer.
     fn delete_selection(&mut self) {
-        let sel = match self.buffers[self.active_idx].selection {
+        let sel = match self.active_buffer().selection {
             Some(s) => s,
             None => return,
         };
@@ -3360,7 +3345,7 @@ impl App {
         }
 
         let matches = {
-            let rope = &self.buffers[self.active_idx].rope;
+            let rope = &self.active_buffer().rope;
             SearchEngine::find_all(rope, &query, regex, case, whole)
         };
         let total = matches.len();
@@ -3385,7 +3370,7 @@ impl App {
     /// Replace the current match with the dialog's replacement, then recompute
     /// matches and advance to the next (Enter in Replace mode).
     fn replace_current_from_dialog(&mut self) {
-        if self.buffers[self.active_idx].readonly {
+        if self.active_buffer().readonly {
             self.status_message = Some("Buffer is read-only".to_string());
             return;
         }
@@ -3408,7 +3393,7 @@ impl App {
 
         // Capture the deleted text for undo.
         let deleted: String = {
-            let full = self.buffers[self.active_idx].rope.to_string();
+            let full = self.active_buffer().rope.to_string();
             let bs = full
                 .char_indices()
                 .nth(range.start)
@@ -3447,7 +3432,7 @@ impl App {
             self.search_state.whole_word,
         );
         let matches = {
-            let rope = &self.buffers[self.active_idx].rope;
+            let rope = &self.active_buffer().rope;
             SearchEngine::find_all(rope, &query, regex, case, whole)
         };
         let total = matches.len();
@@ -3505,7 +3490,7 @@ impl App {
             let regex_mode = self.search_state.regex_mode;
             let case_sensitive = self.search_state.case_sensitive;
             let whole_word = self.search_state.whole_word;
-            let rope = &self.buffers[self.active_idx].rope;
+            let rope = &self.active_buffer().rope;
             self.search_state.matches =
                 SearchEngine::find_all(rope, &query, regex_mode, case_sensitive, whole_word);
         }
@@ -3549,7 +3534,7 @@ impl App {
             let regex_mode = self.search_state.regex_mode;
             let case_sensitive = self.search_state.case_sensitive;
             let whole_word = self.search_state.whole_word;
-            let rope = &self.buffers[self.active_idx].rope;
+            let rope = &self.active_buffer().rope;
             self.search_state.matches =
                 SearchEngine::find_all(rope, &query, regex_mode, case_sensitive, whole_word);
         }
@@ -3591,7 +3576,7 @@ impl App {
         };
 
         // Convert char index → (line, grapheme_col) by walking the rope.
-        let text = self.buffers[self.active_idx].rope.to_string();
+        let text = self.active_buffer().rope.to_string();
         let mut char_count = 0usize;
         let mut target_line = 0usize;
         let mut target_gcol = 0usize;
@@ -3617,7 +3602,7 @@ impl App {
         }
 
         let new_vcol = CursorPos::visual_col_from_grapheme_col(
-            &self.buffers[self.active_idx].rope,
+            &self.active_buffer().rope,
             target_line,
             target_gcol,
         );
@@ -3643,7 +3628,7 @@ impl App {
     ///
     /// Sets `status_message` to "Replaced N occurrences" (or "No matches").
     pub fn replace_all(&mut self) {
-        if self.buffers[self.active_idx].readonly {
+        if self.active_buffer().readonly {
             self.status_message = Some("Buffer is read-only".to_string());
             return;
         }
@@ -3662,7 +3647,7 @@ impl App {
             let regex_mode = self.search_state.regex_mode;
             let case_sensitive = self.search_state.case_sensitive;
             let whole_word = self.search_state.whole_word;
-            let rope = &self.buffers[self.active_idx].rope;
+            let rope = &self.active_buffer().rope;
             self.search_state.matches =
                 SearchEngine::find_all(rope, &query, regex_mode, case_sensitive, whole_word);
         }
@@ -3749,7 +3734,7 @@ impl App {
         new_path: std::path::PathBuf,
     ) -> Result<(), crate::buffer::BufferError> {
         if let Some(enc) = self.pending_save_as_encoding.take() {
-            self.buffers[self.active_idx].encoding = enc;
+            self.active_buffer_mut().encoding = enc;
         }
         self.active_buffer_mut().save_as(new_path)
     }
@@ -4419,13 +4404,13 @@ impl App {
         // (the Save-As-Encoding → file-browser flow). Previously this path ignored
         // `pending_save_as_encoding`, silently writing the file in the old encoding.
         if let Some(enc) = self.pending_save_as_encoding.take() {
-            self.buffers[self.active_idx].encoding = enc;
+            self.active_buffer_mut().encoding = enc;
         }
-        match self.buffers[self.active_idx].save_as(path.clone()) {
+        match self.active_buffer_mut().save_as(path.clone()) {
             Ok(()) => {
-                self.buffers[self.active_idx].modified = false;
-                self.buffers[self.active_idx].undo_stack.mark_saved(); // Feature 014
-                                                                       // Feature 007: suppress the watcher event from our own write.
+                self.active_buffer_mut().modified = false;
+                self.active_buffer_mut().undo_stack.mark_saved(); // Feature 014
+                                                                  // Feature 007: suppress the watcher event from our own write.
                 self.self_write_times.insert(path.clone(), Instant::now());
                 self.status_message = Some(format!("Saved as {}", path.display()));
             }
@@ -5015,8 +5000,8 @@ impl App {
                         _ => {
                             // Single click: clear selection, set the drag anchor so
                             // a following drag selects (Feature 017).
-                            self.buffers[self.active_idx].selection = None;
-                            self.drag_anchor = Some(self.buffers[self.active_idx].cursor);
+                            self.active_buffer_mut().selection = None;
+                            self.drag_anchor = Some(self.active_buffer().cursor);
                         }
                     }
                 }
@@ -5061,11 +5046,11 @@ impl App {
         // Soft-wrap mode: map (visual_row, visual_col) → (logical_line, grapheme_col).
         if self.soft_wrap {
             if let Some(ref cache) = self.wrap_cache {
-                let scroll_vr = self.buffers[self.active_idx].scroll_offset.0;
+                let scroll_vr = self.active_buffer().scroll_offset.0;
                 let visual_row = scroll_vr + clicked_row;
                 if let Some((logical_line, start_byte_u32)) = cache.visual_to_logical(visual_row) {
                     let start_byte = start_byte_u32 as usize;
-                    let line_str = self.buffers[self.active_idx].rope.line_slice(logical_line);
+                    let line_str = self.active_buffer().rope.line_slice(logical_line);
                     // Compute which segment end byte is.
                     let seg_end = {
                         let starts = &cache.visual_starts[logical_line];
@@ -5108,7 +5093,7 @@ impl App {
                     let _ = cur_byte; // used for iteration side effects
 
                     let new_vcol = CursorPos::visual_col_from_grapheme_col(
-                        &self.buffers[self.active_idx].rope,
+                        &self.active_buffer().rope,
                         logical_line,
                         found_gcol,
                     );
@@ -5152,7 +5137,7 @@ impl App {
         }
 
         let new_vcol = CursorPos::visual_col_from_grapheme_col(
-            &self.buffers[self.active_idx].rope,
+            &self.active_buffer().rope,
             target_line,
             found_gcol,
         );
@@ -5297,10 +5282,10 @@ impl App {
     fn cursor_visual_row(&self) -> usize {
         let cache = match self.wrap_cache.as_ref() {
             Some(c) => c,
-            None => return self.buffers[self.active_idx].cursor.line,
+            None => return self.active_buffer().cursor.line,
         };
-        let cursor = self.buffers[self.active_idx].cursor;
-        let line_str = self.buffers[self.active_idx].rope.line_slice(cursor.line);
+        let cursor = self.active_buffer().cursor;
+        let line_str = self.active_buffer().rope.line_slice(cursor.line);
         let cursor_byte: usize = line_str
             .graphemes(true)
             .take(cursor.grapheme_col)
@@ -5366,7 +5351,7 @@ impl App {
 
         if self.soft_wrap {
             // Build cache; reset horizontal scroll on all buffers.
-            let rope = &self.buffers[self.active_idx].rope;
+            let rope = &self.active_buffer().rope;
             self.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(
                 rope,
                 content_w,

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 040: Finish active-buffer accessor standardization
+
+#### Changed
+
+- **All active-buffer access now goes through `active_buffer()` / `active_buffer_mut()`** (completing
+  feature 039's FR-008, issue #68). The remaining ~66 direct `self.buffers[self.active_idx].<field>`
+  reads/writes in `src/app.rs` are routed through the accessors; only the two accessor bodies index the
+  `buffers` vector directly. Explicit indexing is retained where a specific non-active buffer is meant
+  (revert/close confirmations, loops over all buffers). Behavior-preserving — no user-visible change.
+
 ### feature 039: Centralize editor UI state (Modal enum + single layer precedence)
 
 Behavior-preserving internal refactor of `src/app.rs` — no user-visible change. It removes the two
