@@ -1,13 +1,14 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.4.0 (features 001–035 complete; 038–042 unreleased)
+**Version**: 0.4.0 (features 001–035 complete; 038–043 unreleased)
 **Last updated**: 2026-06-21
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F043 | Fix: soft-wrap cache leaking across tabs — tab-click/new_buffer switches now invalidate the wrap cache (via centralized `activate_buffer`), fixing ghost wrap + misaligned line numbers on other tabs | Complete |
 | F042 | Harden error handling (#72): 24 guarded `unwrap()`s in input/dialog code → pattern matches; `clippy::unwrap_used` guardrail on the app tree; deterministic no-panic fuzz sweep; fixed 2 latent stale-index panics (`char_idx_for`, `line_slice`). Behavior-preserving | Complete |
 | F041 | Split `app.rs` (7361→1395 lines) into focused `src/app/*.rs` submodules (dispatch/mouse/dialogs/search/fileops/actions/softwrap/tests). Pure relocation; behavior-preserving (#71) | Complete |
 | F040 | Finish active-buffer accessor standardization (FR-008 / #68): all `self.buffers[self.active_idx]` field access routed through `active_buffer()`/`active_buffer_mut()`. Behavior-preserving | Complete |

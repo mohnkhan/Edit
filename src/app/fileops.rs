@@ -225,10 +225,9 @@ impl App {
             }
         };
 
-        // Clamp active_idx to avoid out-of-bounds (I1).
-        self.active_idx = session
-            .active_buffer
-            .min(self.buffers.len().saturating_sub(1));
+        // Clamp active_idx to avoid out-of-bounds (I1) and invalidate the wrap
+        // cache for the restored active buffer (Feature 043).
+        self.activate_buffer(session.active_buffer);
 
         // Show first warning in the status bar; log the rest.
         if let Some(first) = warnings.first() {

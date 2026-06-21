@@ -2023,3 +2023,51 @@ fn no_panic_under_random_input_sweep() {
         }
     }
 }
+
+// ── Feature 043: tab switch must invalidate the soft-wrap cache ────────────────
+// Regression for the reported bug: with soft-wrap on, clicking a different tab
+// reused the previous buffer's wrap cache, so the newly-shown tab rendered with
+// ghost wrap segments and a misaligned line-number gutter. Every buffer switch
+// now routes through `activate_buffer`, which bumps `wrap_text_gen` so the next
+// render rebuilds the cache for the now-active buffer.
+#[test]
+fn activate_buffer_invalidates_wrap_cache() {
+    let mut a = make_app();
+    a.buffers.push(crate::buffer::Buffer::new_empty());
+    a.active_idx = 0;
+    let gen_before = a.wrap_text_gen;
+    a.activate_buffer(1);
+    assert_eq!(a.active_idx, 1);
+    assert_ne!(
+        a.wrap_text_gen, gen_before,
+        "switching the active buffer must invalidate the wrap cache"
+    );
+}
+
+#[test]
+fn tab_click_switch_invalidates_wrap_cache() {
+    let mut a = make_app();
+    a.terminal_size = (80, 24);
+    a.soft_wrap = true;
+    a.buffers.push(crate::buffer::Buffer::new_empty());
+    a.active_idx = 0;
+    assert!(a.tab_bar_visible());
+    let gen_before = a.wrap_text_gen;
+
+    // Click tab index 1 on the tab-bar row (editor_top - 1).
+    let row = a.editor_top() - 1;
+    let area = ratatui::layout::Rect::new(0, row, a.terminal_size.0, 1);
+    let regions = crate::ui::tabbar::tab_hit_regions(area, &a.buffers, a.active_idx);
+    let tab1 = regions
+        .iter()
+        .find(|r| r.idx == 1)
+        .expect("tab 1 hit region present");
+    let col = tab1.label_rect.x;
+    a.handle_mouse_event(mouse_press(col, row)).unwrap();
+
+    assert_eq!(a.active_idx, 1, "clicking tab 1 switches to buffer 1");
+    assert_ne!(
+        a.wrap_text_gen, gen_before,
+        "a tab-click switch must invalidate the wrap cache (ghost-wrap bug #043)"
+    );
+}

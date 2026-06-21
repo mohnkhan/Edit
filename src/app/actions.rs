@@ -40,13 +40,29 @@ impl App {
         self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
     }
 
+    /// Switch the active buffer to `idx` (clamped into range) and reset the
+    /// per-buffer view state the single global render caches depend on.
+    ///
+    /// **Every** tab/buffer switch MUST go through this. The wrap cache holds ONE
+    /// buffer's visual byte offsets keyed by `wrap_text_gen`; a switch that forgets
+    /// to invalidate it renders the newly-shown tab with the previous tab's wrap —
+    /// ghost wrap segments and a misaligned line-number gutter (the symptom that
+    /// prompted feature 043). Centralizing it here means the invalidation can't be
+    /// forgotten by a future switch site, the way the tab-click path once did.
+    pub(super) fn activate_buffer(&mut self, idx: usize) {
+        if self.buffers.is_empty() {
+            return;
+        }
+        self.active_idx = idx.min(self.buffers.len() - 1);
+        self.invalidate_wrap_cache();
+        self.clamp_scroll();
+    }
+
     pub fn next_buffer(&mut self) {
         if self.buffers.len() <= 1 {
             return;
         }
-        self.active_idx = (self.active_idx + 1) % self.buffers.len();
-        self.invalidate_wrap_cache();
-        self.clamp_scroll();
+        self.activate_buffer((self.active_idx + 1) % self.buffers.len());
     }
 
     /// Cycle backward to the previous open buffer, wrapping around.
@@ -54,13 +70,12 @@ impl App {
         if self.buffers.len() <= 1 {
             return;
         }
-        self.active_idx = if self.active_idx == 0 {
+        let idx = if self.active_idx == 0 {
             self.buffers.len() - 1
         } else {
             self.active_idx - 1
         };
-        self.invalidate_wrap_cache();
-        self.clamp_scroll();
+        self.activate_buffer(idx);
     }
 
     // ── T069 — Open file into new buffer ─────────────────────────────────────
@@ -94,8 +109,7 @@ impl App {
                     }
                 }
                 self.buffers.push(buf);
-                self.active_idx = self.buffers.len() - 1;
-                self.invalidate_wrap_cache();
+                self.activate_buffer(self.buffers.len() - 1);
                 let name = safe_path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -149,7 +163,7 @@ impl App {
     /// Open a fresh empty buffer and make it active (File ▸ New / Ctrl+N).
     pub fn new_buffer(&mut self) {
         self.buffers.push(Buffer::new_empty());
-        self.active_idx = self.buffers.len() - 1;
+        self.activate_buffer(self.buffers.len() - 1);
     }
 
     /// Close the active buffer (File ▸ Close). The sole buffer is replaced by a
