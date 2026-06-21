@@ -12,13 +12,16 @@ fn test_toggle_on_off() {
 
     // Toggle on.
     app.handle_action(Action::ToggleSoftWrap).unwrap();
-    assert!(app.soft_wrap, "soft_wrap must be true after first toggle");
+    assert!(
+        app.active_buffer().soft_wrap,
+        "soft_wrap must be true after first toggle"
+    );
     assert!(app.wrap_cache.is_some(), "cache must exist when wrap is on");
 
     // Toggle off.
     app.handle_action(Action::ToggleSoftWrap).unwrap();
     assert!(
-        !app.soft_wrap,
+        !app.active_buffer().soft_wrap,
         "soft_wrap must be false after second toggle"
     );
     assert!(
@@ -62,7 +65,7 @@ fn test_persistence_from_config() {
     };
     let app = App::new(cfg, vec![], EncodingId::Utf8, None, None);
     assert!(
-        app.soft_wrap,
+        app.active_buffer().soft_wrap,
         "App must start with soft_wrap=true when config says so"
     );
 }

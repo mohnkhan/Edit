@@ -289,8 +289,6 @@ pub struct App {
     pub last_editor_click: Option<(u16, u16, u8, Instant)>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
     pub pending_save_as_encoding: Option<EncodingId>,
-    /// Whether soft-wrap visual rendering is active (Feature 005).
-    pub soft_wrap: bool,
     /// Computed wrap cache; `None` when soft_wrap is false.
     pub wrap_cache: Option<crate::ui::wrap::WrapCache>,
     /// Generation counter incremented on every buffer mutation for cache invalidation.
@@ -414,6 +412,12 @@ impl App {
             v
         };
 
+        // Feature 044: seed each initial tab's soft-wrap from the configured default
+        // (wrap is now per-buffer; `config.soft_wrap` is the seed for new tabs).
+        for buf in &mut buffers {
+            buf.soft_wrap = config.soft_wrap;
+        }
+
         // T077 — Auto-detect syntax highlighter for each buffer on startup.
         // Feature 008: an active plugin highlighter takes precedence over the built-in
         // for the same extension; the built-in is the fallback.
@@ -465,8 +469,6 @@ impl App {
         } else {
             None
         };
-
-        let soft_wrap_initial = config.soft_wrap;
 
         // ── Feature 007: initialise file watcher ─────────────────────────────
         let (file_watcher, initial_watch_notice) = if config.no_watch {
@@ -520,7 +522,6 @@ impl App {
             last_browser_click: None,
             last_editor_click: None,
             pending_save_as_encoding: None,
-            soft_wrap: soft_wrap_initial,
             wrap_cache: None,
             wrap_text_gen: 0,
             file_watcher,
@@ -882,7 +883,7 @@ impl App {
     /// with the editor render and mouse mapping so scrolling/paging/cursor-
     /// visibility match what is drawn.
     fn viewport_height(&self) -> usize {
-        let hbar = if self.soft_wrap { 0 } else { 1 };
+        let hbar = if self.active_buffer().soft_wrap { 0 } else { 1 };
         // editor_top accounts for the menu bar (+ tab bar); -1 for the status bar.
         (self.terminal_size.1 as usize).saturating_sub(self.editor_top() as usize + 1 + hbar)
     }
@@ -904,7 +905,7 @@ impl App {
     /// only — the cursor is not moved), clamped to `[0, content_rows-1]`. Content
     /// rows are visual rows in soft-wrap, else logical lines.
     fn wheel_scroll_editor(&mut self, buf_idx: usize, down: bool, step: usize) {
-        let content_rows = if self.soft_wrap {
+        let content_rows = if self.buffers[buf_idx].soft_wrap {
             self.wrap_cache
                 .as_ref()
                 .map(|c| c.total_visual_rows())
@@ -1023,8 +1024,8 @@ impl App {
             } else {
                 (editor_area, self.active_idx)
             };
-            let (text, vbar, hbar) = crate::ui::editor_panes(pane, self.soft_wrap);
-            let content_v = if self.soft_wrap {
+            let (text, vbar, hbar) = crate::ui::editor_panes(pane, self.buffers[buf_idx].soft_wrap);
+            let content_v = if self.buffers[buf_idx].soft_wrap {
                 self.wrap_cache
                     .as_ref()
                     .map(|c| c.total_visual_rows())
@@ -1067,7 +1068,7 @@ impl App {
     fn apply_scroll_target(&mut self, target: ScrollTarget, offset: usize, viewport: usize) {
         match target {
             ScrollTarget::EditorV(i) => {
-                let content = if self.soft_wrap {
+                let content = if self.buffers[i].soft_wrap {
                     self.wrap_cache
                         .as_ref()
                         .map(|c| c.total_visual_rows())
@@ -1113,7 +1114,7 @@ impl App {
 
         while self.running {
             // Ensure wrap cache is current before rendering (Feature 005).
-            if self.soft_wrap {
+            if self.active_buffer().soft_wrap {
                 let w = self.content_width();
                 if self
                     .wrap_cache

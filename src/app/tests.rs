@@ -142,7 +142,7 @@ fn interactive_dialogs_render_one_focused_button() {
 fn editor_top_and_viewport_height_track_tab_bar() {
     let mut a = make_app();
     a.terminal_size = (80, 24);
-    a.soft_wrap = false;
+    a.active_buffer_mut().soft_wrap = false;
     // One buffer → no tab bar; editor at row 1; height = 24-2-hbar(1) = 21.
     assert!(!a.tab_bar_visible());
     assert_eq!(a.editor_top(), 1);
@@ -153,7 +153,7 @@ fn editor_top_and_viewport_height_track_tab_bar() {
     assert_eq!(a.editor_top(), 2);
     assert_eq!(a.viewport_height(), 20);
     // Soft-wrap (no hbar): one buffer 22, two buffers 21.
-    a.soft_wrap = true;
+    a.active_buffer_mut().soft_wrap = true;
     assert_eq!(a.viewport_height(), 21);
 }
 
@@ -208,7 +208,7 @@ fn click_accounts_for_gutter_and_hscroll() {
     let mut a = make_app();
     a.terminal_size = (80, 24);
     a.config.line_numbers = true;
-    a.soft_wrap = false;
+    a.active_buffer_mut().soft_wrap = false;
     a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str("abcdefghij\n");
     a.active_idx = 0;
     // Gutter is 4 cols; editor_top is row 1 (single buffer). Click at terminal
@@ -710,7 +710,7 @@ fn render_after_softwrap_buffer_switch_with_stale_cache_no_panic() {
     use ratatui::{backend::TestBackend, Terminal};
     let mut a = make_app();
     a.terminal_size = (80, 24);
-    a.soft_wrap = true;
+    a.active_buffer_mut().soft_wrap = true;
     // Buffer 0: long content; buffer 1: short + empty lines.
     let mut b0 = crate::buffer::Buffer::new_empty();
     b0.rope = crate::buffer::rope::EditorRope::from_str(
@@ -931,9 +931,9 @@ fn editor_scrollbars_render_with_gutter_split_and_resize() {
 fn viewport_height_reserves_hbar_row_in_nonwrap_only() {
     let mut a = make_app();
     a.terminal_size = (80, 24);
-    a.soft_wrap = false;
+    a.active_buffer_mut().soft_wrap = false;
     assert_eq!(a.viewport_height(), 21, "24 - menu - status - hbar row");
-    a.soft_wrap = true;
+    a.active_buffer_mut().soft_wrap = true;
     assert_eq!(a.viewport_height(), 22, "soft-wrap: no horizontal bar row");
 }
 
@@ -953,7 +953,7 @@ fn content_width_reserves_vbar_column() {
 fn click_on_reserved_scrollbar_cells_is_inert() {
     let mut a = make_app();
     a.terminal_size = (80, 24);
-    a.soft_wrap = false;
+    a.active_buffer_mut().soft_wrap = false;
     for _ in 0..3 {
         a.handle_action(Action::InsertNewline).unwrap();
     }
@@ -1746,11 +1746,14 @@ fn toggle_soft_wrap_on_builds_cache() {
     let mut app = make_app();
     app.terminal_size = (80, 24);
     // Default: soft_wrap is false, no cache.
-    assert!(!app.soft_wrap);
+    assert!(!app.active_buffer().soft_wrap);
     assert!(app.wrap_cache.is_none());
     // Toggle on.
     app.handle_action(Action::ToggleSoftWrap).unwrap();
-    assert!(app.soft_wrap, "soft_wrap must be true after toggle");
+    assert!(
+        app.active_buffer().soft_wrap,
+        "soft_wrap must be true after toggle"
+    );
     assert!(
         app.wrap_cache.is_some(),
         "wrap_cache must be Some after enabling"
@@ -1766,7 +1769,7 @@ fn toggle_soft_wrap_off_drops_cache_and_resets_hscroll() {
     app.buffers[0].scroll_offset.1 = 10; // simulate horizontal scroll while on
     app.handle_action(Action::ToggleSoftWrap).unwrap();
     assert!(
-        !app.soft_wrap,
+        !app.active_buffer().soft_wrap,
         "soft_wrap must be false after second toggle"
     );
     assert!(
@@ -1880,7 +1883,7 @@ fn save_while_soft_wrap_active_no_extra_newlines() {
     );
     app.terminal_size = (40, 24);
     app.handle_action(Action::ToggleSoftWrap).unwrap();
-    assert!(app.soft_wrap, "soft_wrap must be enabled");
+    assert!(app.active_buffer().soft_wrap, "soft_wrap must be enabled");
 
     // Save.
     app.handle_save_action();
@@ -2048,7 +2051,7 @@ fn activate_buffer_invalidates_wrap_cache() {
 fn tab_click_switch_invalidates_wrap_cache() {
     let mut a = make_app();
     a.terminal_size = (80, 24);
-    a.soft_wrap = true;
+    a.active_buffer_mut().soft_wrap = true;
     a.buffers.push(crate::buffer::Buffer::new_empty());
     a.active_idx = 0;
     assert!(a.tab_bar_visible());
@@ -2069,5 +2072,65 @@ fn tab_click_switch_invalidates_wrap_cache() {
     assert_ne!(
         a.wrap_text_gen, gen_before,
         "a tab-click switch must invalidate the wrap cache (ghost-wrap bug #043)"
+    );
+}
+
+// ── Feature 044: per-tab soft-wrap ─────────────────────────────────────────────
+// Wrap is a per-buffer setting: toggling one tab must not touch another, and each
+// tab keeps its own setting across switches.
+#[test]
+fn soft_wrap_is_per_tab_independent() {
+    let mut a = make_app();
+    a.terminal_size = (80, 24);
+    a.buffers.push(crate::buffer::Buffer::new_empty());
+    // Both start unwrapped (config default false).
+    a.active_idx = 0;
+    assert!(!a.buffers[0].soft_wrap);
+    assert!(!a.buffers[1].soft_wrap);
+
+    // Toggle wrap ON for tab 0 only.
+    a.handle_toggle_soft_wrap().unwrap();
+    assert!(a.buffers[0].soft_wrap, "tab 0 wraps after toggle");
+    assert!(!a.buffers[1].soft_wrap, "tab 1 must be unaffected");
+
+    // Switch to tab 1: still unwrapped; toggle it ON.
+    a.activate_buffer(1);
+    assert!(!a.buffers[1].soft_wrap);
+    a.handle_toggle_soft_wrap().unwrap();
+    assert!(a.buffers[1].soft_wrap, "tab 1 wraps after its own toggle");
+
+    // Toggle tab 1 back OFF; tab 0 must remain ON.
+    a.handle_toggle_soft_wrap().unwrap();
+    assert!(!a.buffers[1].soft_wrap, "tab 1 unwrapped again");
+    assert!(a.buffers[0].soft_wrap, "tab 0 still wrapped — no leakage");
+
+    // Round-trip switch preserves each tab's own setting.
+    a.activate_buffer(0);
+    assert!(a.active_buffer().soft_wrap, "tab 0 remembers wrapped");
+    a.activate_buffer(1);
+    assert!(!a.active_buffer().soft_wrap, "tab 1 remembers unwrapped");
+}
+
+#[test]
+fn soft_wrap_toggle_acts_on_active_tab_only() {
+    let mut a = make_app();
+    a.terminal_size = (80, 24);
+    a.buffers.push(crate::buffer::Buffer::new_empty());
+    a.buffers.push(crate::buffer::Buffer::new_empty());
+
+    a.activate_buffer(1);
+    a.handle_toggle_soft_wrap().unwrap();
+
+    // Exactly the active tab flipped; the indicator source (active buffer's flag)
+    // matches; the others are untouched.
+    assert!(a.active_buffer().soft_wrap);
+    assert!(!a.buffers[0].soft_wrap);
+    assert!(!a.buffers[2].soft_wrap);
+
+    // Switching makes the indicator reflect the now-active tab.
+    a.activate_buffer(0);
+    assert!(
+        !a.active_buffer().soft_wrap,
+        "indicator tracks the active tab"
     );
 }

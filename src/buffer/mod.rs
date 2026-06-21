@@ -196,6 +196,10 @@ pub struct Buffer {
     pub scroll_offset: (usize, usize),
     /// The active selection, if any.
     pub selection: Option<Selection>,
+    /// Feature 044: this tab's soft-wrap setting. Per-buffer so each tab keeps its
+    /// own wrap on/off. Defaults to `false`; the App seeds it from `config.soft_wrap`
+    /// at buffer-creation time.
+    pub soft_wrap: bool,
     /// The undo/redo history for this buffer.
     pub undo_stack: crate::buffer::undo::UndoStack,
     /// Active syntax highlighter for this buffer (T070 / US7).
@@ -225,6 +229,7 @@ impl Buffer {
             cursor: CursorPos::default(),
             scroll_offset: (0, 0),
             selection: None,
+            soft_wrap: false,
             undo_stack: crate::buffer::undo::UndoStack::new(),
             syntax: None,
             autosave: AutosaveState::new(false, 30),
@@ -309,6 +314,7 @@ impl Buffer {
             cursor: CursorPos::default(),
             scroll_offset: (0, 0),
             selection: None,
+            soft_wrap: false,
             undo_stack: crate::buffer::undo::UndoStack::new(),
             syntax: None,
             autosave: AutosaveState::for_path(&abs_path, !readonly, 30),
