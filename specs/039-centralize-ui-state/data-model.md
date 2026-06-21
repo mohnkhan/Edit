@@ -14,7 +14,6 @@ enum Modal {
     ContextMenu(crate::ui::contextmenu::ContextMenu),
     SessionRestore(crate::session::SessionData),
     SavePrompt,                                   // was `pending_save_prompt: bool`
-    ExternalChange(crate::watcher::ExternalChange),
     RevertConfirm(usize),                         // buffer index
     CloseConfirm(usize),                          // buffer index
     FindReplace(FindReplaceDialog),
@@ -22,10 +21,22 @@ enum Modal {
     EncodingSelect { row: usize },                // highlighted row
     FileBrowser(FileBrowser),
     Help { screen: HelpScreen, scroll: usize },   // folds pending_help + help_scroll
-    PluginConsent(Vec<crate::plugin::PluginMeta>),// front item is prompted
     PluginManager { cursor: usize },              // folds pending_plugin_manager + plugin_manager_cursor
 }
 ```
+
+**As-built deviation (discovered during implementation, preserves FR-010):** two overlays that the
+original spec listed as variants are NOT folded in, because they are set *asynchronously* and can be
+pending *underneath* a user-opened overlay — a priority **stack** a single value cannot represent:
+
+- `pending_external_change` — the file watcher (`handle_tick`, every 500ms) can detect a change while
+  a dialog is open; by precedence it preempts, and the dialog survives underneath until dismissed.
+- `pending_plugin_consent` — a startup queue that can sit behind a session-restore prompt and surface
+  once it closes.
+
+Both remain independent fields (like `pending_save_as_encoding` flow state and `dialog_focus`). They
+keep their existing precedence slots in dispatch, so behavior is identical. The exclusivity guarantee
+(FR-001/SC-003) still holds for the 12 user-driven overlays the enum owns.
 
 **Field→variant mapping** (old → new):
 
@@ -34,7 +45,7 @@ enum Modal {
 | `pending_context_menu: Option<ContextMenu>`        | `Modal::ContextMenu(_)`                     |
 | `pending_session_restore: Option<SessionData>`     | `Modal::SessionRestore(_)`                  |
 | `pending_save_prompt: bool`                        | `Modal::SavePrompt`                         |
-| `pending_external_change: Option<ExternalChange>`  | `Modal::ExternalChange(_)`                  |
+| `pending_external_change: Option<ExternalChange>`  | **kept as a field** (async; see deviation)  |
 | `pending_revert_confirm: Option<usize>`            | `Modal::RevertConfirm(usize)`              |
 | `pending_close_confirm: Option<usize>`             | `Modal::CloseConfirm(usize)`              |
 | `pending_find_replace: Option<FindReplaceDialog>`  | `Modal::FindReplace(_)`                     |
@@ -42,7 +53,7 @@ enum Modal {
 | `pending_encoding_select: Option<usize>`           | `Modal::EncodingSelect { row }`            |
 | `file_browser: Option<FileBrowser>`                | `Modal::FileBrowser(_)`                     |
 | `pending_help: Option<HelpScreen>` + `help_scroll` | `Modal::Help { screen, scroll }`           |
-| `pending_plugin_consent: Vec<PluginMeta>`          | `Modal::PluginConsent(_)` (empty ⇒ `None`) |
+| `pending_plugin_consent: Vec<PluginMeta>`          | **kept as a field** (async queue; see deviation) |
 | `pending_plugin_manager: bool` + `plugin_manager_cursor` | `Modal::PluginManager { cursor }`    |
 | `menu_active: bool`                                | **deleted** (dead; use `menu_bar.is_active()`) |
 
