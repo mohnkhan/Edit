@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 050: Sandboxed fuzz covering file-I/O actions
+
+#### Internal
+
+- **Added a sandboxed no-panic fuzz sweep over the file-I/O actions** (Save, SaveAs, SaveAsEncoding,
+  Open, Revert) that the feature-042 sweep excludes because they reach the real filesystem. The new
+  deterministic sweep (fixed-seed xorshift64) redirects the working directory and `$XDG_STATE_HOME` /
+  `$XDG_CONFIG_HOME` into a per-process temp sandbox — confining every read/write so the repository
+  working tree is never touched — and drives those actions plus path-ish typed input across all
+  overlay states and four terminal sizes (incl. the 80×24 minimum and a sub-minimum). Test-only; no
+  behavior change. Closes #79.
+
 ### feature 049: Recent-files list
 
 #### Added

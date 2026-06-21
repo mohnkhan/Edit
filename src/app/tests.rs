@@ -2104,6 +2104,200 @@ fn no_panic_under_random_input_sweep() {
     }
 }
 
+// ── Feature 050 (#79): sandboxed no-panic fuzz sweep over file-I/O actions ─────
+// Follow-up to 042: that sweep excludes Save/SaveAs/SaveAsEncoding/Open/Revert
+// because they reach the real filesystem (the browser builds paths from cwd +
+// typed name; save/open read/write disk). Here we fuzz those actions too, but
+// confine every read/write to a per-pid temp sandbox by redirecting the process
+// working directory and $XDG_STATE_HOME/$XDG_CONFIG_HOME into it — so the repo
+// working tree is never touched. Deterministic (fixed-seed xorshift64, no rand /
+// Date::now / Instant::now in control flow). Global cwd/env mutation is serialized
+// behind SWEEP_ENV_LOCK and restored (incl. on panic) by EnvGuard's Drop.
+
+// Serializes the cwd/env mutation against any other test taking this lock.
+static SWEEP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// RAII sandbox: on construction redirects cwd + XDG dirs into a fresh temp dir;
+/// on Drop restores the original cwd + env vars and removes the sandbox. Drop runs
+/// even on panic unwinding, so a sweep failure cannot leave the process cwd
+/// pointing at a deleted directory and cascade into unrelated tests.
+struct EnvGuard {
+    sandbox: std::path::PathBuf,
+    prev_cwd: std::path::PathBuf,
+    prev_state: Option<std::ffi::OsString>,
+    prev_config: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn new() -> Self {
+        let prev_cwd = std::env::current_dir().expect("cwd readable");
+        let prev_state = std::env::var_os("XDG_STATE_HOME");
+        let prev_config = std::env::var_os("XDG_CONFIG_HOME");
+        let sandbox = std::env::temp_dir().join(format!("edit_io_fuzz_{}", std::process::id()));
+        // Start from a clean sandbox even if a previous crashed run left one behind.
+        let _ = std::fs::remove_dir_all(&sandbox);
+        std::fs::create_dir_all(sandbox.join("state")).expect("create state dir");
+        std::fs::create_dir_all(sandbox.join("config")).expect("create config dir");
+        std::env::set_current_dir(&sandbox).expect("chdir sandbox");
+        std::env::set_var("XDG_STATE_HOME", sandbox.join("state"));
+        std::env::set_var("XDG_CONFIG_HOME", sandbox.join("config"));
+        Self {
+            sandbox,
+            prev_cwd,
+            prev_state,
+            prev_config,
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.prev_cwd);
+        match &self.prev_state {
+            Some(v) => std::env::set_var("XDG_STATE_HOME", v),
+            None => std::env::remove_var("XDG_STATE_HOME"),
+        }
+        match &self.prev_config {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&self.sandbox);
+    }
+}
+
+#[test]
+fn no_panic_under_sandboxed_io_sweep() {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn xorshift(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    // Hold the lock for the whole body: cwd + XDG are process-global and other
+    // tests read them. Allow poisoning — a real panic here should fail loudly.
+    let _guard_lock = SWEEP_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvGuard::new();
+
+    // Seed real, readable targets inside the sandbox so Open/Revert have valid
+    // files to act on (relative to the now-sandboxed cwd).
+    std::fs::write("seed_a.txt", "alpha seed\nsecond line\n").expect("seed a");
+    std::fs::write("seed_b.txt", "beta seed\n").expect("seed b");
+
+    // Action set = the 042 set PLUS the five file-I/O actions.
+    let actions: Vec<Action> = vec![
+        Action::InsertChar('x'),
+        Action::InsertNewline,
+        Action::Backspace,
+        Action::Delete,
+        Action::MoveUp,
+        Action::MoveDown,
+        Action::MoveLeft,
+        Action::MoveRight,
+        Action::MoveLineStart,
+        Action::MoveLineEnd,
+        Action::MovePageUp,
+        Action::MovePageDown,
+        Action::SelectLeft,
+        Action::SelectRight,
+        Action::SelectAll,
+        Action::Cut,
+        Action::Copy,
+        Action::Paste,
+        Action::Undo,
+        Action::Redo,
+        Action::Find,
+        Action::FindReplace,
+        Action::GoToLine,
+        Action::Help,
+        Action::About,
+        Action::OpenPluginManager,
+        // The file-I/O actions under test — sandboxed, so safe to fuzz.
+        Action::Save,
+        Action::SaveAs,
+        Action::SaveAsEncoding,
+        Action::Open,
+        Action::Revert,
+        Action::NextBuffer,
+        Action::PrevBuffer,
+        Action::ToggleSoftWrap,
+        Action::SplitView,
+        Action::Menu,
+        Action::MenuOpen(0),
+        Action::MenuClose,
+        Action::InsertNewline, // doubles as dialog "confirm" (Enter)
+        Action::Quit,
+    ];
+    // Path-ish characters so the file browser / save dialog receives plausible
+    // typed relative names that resolve and read/write INSIDE the sandbox. A few
+    // multibyte chars keep the UTF-8 path stressed.
+    let insert_chars = [
+        's', 'e', 'd', '_', 'a', 'b', '.', 't', 'x', '/', '1', 'é', '中', '✓',
+    ];
+    let sizes: [(u16, u16); 4] = [(80, 24), (120, 40), (200, 60), (40, 12)];
+
+    for &seed in &[
+        0x51a4_b0c2_d3e6_f708u64,
+        0xfee1_dead_1337_c0de,
+        0x00c0_ffee_0bad_f00d,
+    ] {
+        for &(w, h) in &sizes {
+            // Initial buffer is a sandbox seed file, so it carries a path → bare
+            // Save/Revert have a real (in-sandbox) target.
+            let mut app = App::new(
+                Config::default(),
+                vec![std::path::PathBuf::from("seed_a.txt")],
+                EncodingId::Utf8,
+                None,
+                None,
+            );
+            app.terminal_size = (w, h);
+            // Two buffers so the tab-bar layer participates.
+            app.buffers.push(crate::buffer::Buffer::new_empty());
+            let mut term = Terminal::new(TestBackend::new(w.max(1), h.max(1))).unwrap();
+            let mut st = seed ^ ((w as u64) << 32) ^ (h as u64) ^ 0x9e37_79b9_7f4a_7c15;
+
+            for i in 0..1500u32 {
+                let r = xorshift(&mut st);
+                if r & 1 == 0 {
+                    let a = match actions[((r >> 1) as usize) % actions.len()].clone() {
+                        Action::InsertChar(_) => Action::InsertChar(
+                            insert_chars[((r >> 8) as usize) % insert_chars.len()],
+                        ),
+                        other => other,
+                    };
+                    let _ = app.handle_action(a);
+                } else {
+                    let kind = match (r >> 1) % 6 {
+                        0 => MouseEventKind::Down(MouseButton::Left),
+                        1 => MouseEventKind::Down(MouseButton::Right),
+                        2 => MouseEventKind::Up(MouseButton::Left),
+                        3 => MouseEventKind::Drag(MouseButton::Left),
+                        4 => MouseEventKind::ScrollDown,
+                        _ => MouseEventKind::ScrollUp,
+                    };
+                    let col = ((r >> 8) as u16) % (w + 3);
+                    let row = ((r >> 24) as u16) % (h + 3);
+                    let _ = app.handle_mouse_event(MouseEvent {
+                        kind,
+                        column: col,
+                        row,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                }
+                if i % 11 == 0 {
+                    let _ = term.draw(|f| app.render(f));
+                }
+            }
+        }
+    }
+}
+
 // ── Feature 043: tab switch must invalidate the soft-wrap cache ────────────────
 // Regression for the reported bug: with soft-wrap on, clicking a different tab
 // reused the previous buffer's wrap cache, so the newly-shown tab rendered with
