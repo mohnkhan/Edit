@@ -438,8 +438,10 @@ impl App {
                     return Ok(());
                 }
                 if ev.col >= r.label_rect.x && ev.col < r.label_rect.x + r.label_rect.width {
-                    self.active_idx = r.idx;
-                    self.clamp_scroll();
+                    // Feature 043: route through activate_buffer so the wrap cache is
+                    // invalidated — otherwise the clicked tab renders with the previous
+                    // tab's wrap (ghost wrap + misaligned line numbers).
+                    self.activate_buffer(r.idx);
                     return Ok(());
                 }
             }
