@@ -12,6 +12,7 @@ mod encoding;
 mod highlight;
 mod input;
 mod plugin;
+mod recent;
 mod search;
 mod security;
 mod session;

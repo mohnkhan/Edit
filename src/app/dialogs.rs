@@ -503,6 +503,8 @@ impl App {
                 self.active_buffer_mut().undo_stack.mark_saved(); // Feature 014
                                                                   // Feature 007: suppress the watcher event from our own write.
                 self.self_write_times.insert(path.clone(), Instant::now());
+                // Feature 049: a Save-As destination is a recently-used file.
+                self.record_recent(&path.to_string_lossy());
                 self.status_message = Some(format!("Saved as {}", path.display()));
             }
             Err(e) => {

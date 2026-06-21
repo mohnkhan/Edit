@@ -62,6 +62,31 @@ impl App {
         self.clamp_scroll();
     }
 
+    /// Feature 049: record `path` at the front of the recent-files list (deduped,
+    /// capped at `config.recent_files_limit`) and persist it best-effort.
+    pub(super) fn record_recent(&mut self, path: &str) {
+        self.recent_files
+            .record(path, self.config.recent_files_limit);
+        if let Err(e) = crate::recent::save(&self.recent_files) {
+            log::warn!("recent: save failed: {e}");
+        }
+    }
+
+    /// Feature 049: open the recent file at `idx`. A missing/removed entry drops
+    /// from the list; a failed open surfaces the normal message (no crash).
+    pub(super) fn open_recent(&mut self, idx: usize) {
+        let Some(path) = self.recent_files.paths.get(idx).cloned() else {
+            return;
+        };
+        if !std::path::Path::new(&path).exists() {
+            self.status_message = Some(format!("Recent file not found: {path}"));
+            self.recent_files.remove(&path);
+            let _ = crate::recent::save(&self.recent_files);
+            return;
+        }
+        self.handle_open_file(std::path::PathBuf::from(path));
+    }
+
     pub fn next_buffer(&mut self) {
         if self.buffers.len() <= 1 {
             return;
@@ -114,6 +139,8 @@ impl App {
                 }
                 self.buffers.push(buf);
                 self.activate_buffer(self.buffers.len() - 1);
+                // Feature 049: remember this file in the recent-files list.
+                self.record_recent(&safe_path.to_string_lossy());
                 let name = safe_path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())

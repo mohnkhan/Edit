@@ -50,6 +50,8 @@ pub enum Action {
     Menu,
     MenuOpen(usize),
     MenuClose,
+    /// Feature 049: open the recent file at this index in the recent-files list.
+    OpenRecent(usize),
     MenuFile,
     MenuEdit,
     MenuSearch,

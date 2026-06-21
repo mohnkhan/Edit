@@ -8,7 +8,10 @@ impl App {
     /// Build the resolved composite menu list (built-in + active plugin menus).
     /// Recomputed on demand so mid-session plugin enable/disable is reflected.
     pub(super) fn resolved_menus(&self) -> Vec<ResolvedMenu> {
-        resolve_menus(&self.plugin_host.registry.menu_items())
+        resolve_menus(
+            &self.plugin_host.registry.menu_items(),
+            &self.recent_files.paths,
+        )
     }
 
     /// Open the dropdown for top-level menu `idx`, clamped against the resolved
@@ -734,6 +737,9 @@ impl App {
                     BrowseMode::Save,
                 ));
             }
+
+            // Feature 049: open a recent file by its index in the recent list.
+            Action::OpenRecent(idx) => self.open_recent(idx),
 
             // File operations (Feature 011).
             Action::New => self.new_buffer(),

@@ -167,7 +167,10 @@ fn test_plugin_menu_keyboard_activation_sets_status() {
     // Five-word buffer.
     type_str(&mut app, "one two three four five");
 
-    let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+    let menus = resolve_menus(
+        &app.plugin_host.registry.menu_items(),
+        &app.recent_files.paths,
+    );
     let tools_idx = menus
         .iter()
         .position(|m| m.label == "Tools")
@@ -192,7 +195,10 @@ fn test_plugin_menu_renders_between_options_and_help() {
     app.plugin_host
         .load_all(&cfg, &allow("word-count"), &mut Vec::new());
 
-    let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+    let menus = resolve_menus(
+        &app.plugin_host.registry.menu_items(),
+        &app.recent_files.paths,
+    );
     let labels: Vec<&str> = menus.iter().map(|m| m.label.as_str()).collect();
     let tools = labels.iter().position(|l| *l == "Tools").unwrap();
     let help = labels.iter().position(|l| *l == "Help").unwrap();
@@ -204,7 +210,10 @@ fn test_plugin_menu_renders_between_options_and_help() {
 #[test]
 fn test_no_plugins_menu_bar_unchanged() {
     let app = plain_app(); // no fixtures loaded
-    let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+    let menus = resolve_menus(
+        &app.plugin_host.registry.menu_items(),
+        &app.recent_files.paths,
+    );
     let labels: Vec<&str> = menus.iter().map(|m| m.label.as_str()).collect();
     assert_eq!(
         labels,
@@ -219,7 +228,10 @@ fn test_no_plugins_flag_yields_no_plugin_menus() {
         ..Config::default()
     };
     let app = App::new(cfg, vec![], EncodingId::Utf8, None, None);
-    let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+    let menus = resolve_menus(
+        &app.plugin_host.registry.menu_items(),
+        &app.recent_files.paths,
+    );
     assert_eq!(menus.len(), 6, "--no-plugins → built-in menus only");
 }
 
@@ -232,7 +244,10 @@ fn test_disabled_plugin_contributes_no_menu() {
         .load_all(&cfg, &allow("word-count"), &mut Vec::new());
     app.plugin_host.registry.set_enabled("word-count", false);
 
-    let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+    let menus = resolve_menus(
+        &app.plugin_host.registry.menu_items(),
+        &app.recent_files.paths,
+    );
     assert!(
         !menus.iter().any(|m| m.label == "Tools"),
         "disabled plugin must contribute no menu"
@@ -298,7 +313,10 @@ fn test_plugin_menu_dispatch_failure_surfaces_warning() {
 
     // The fs-violation plugin denies on each call and disables after 3.
     for _ in 0..3 {
-        let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+        let menus = resolve_menus(
+            &app.plugin_host.registry.menu_items(),
+            &app.recent_files.paths,
+        );
         if let Some(idx) = menus.iter().position(|m| m.label == "Tools") {
             app.handle_action(Action::MenuOpen(idx)).unwrap();
             app.handle_action(Action::InsertNewline).unwrap();

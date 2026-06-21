@@ -242,6 +242,11 @@ letters are assigned automatically (Feature 013).
 - Close (`Ctrl+W`) — close the current buffer
 - ----
 - Exit (`Ctrl+Q`)
+- *Recent files* — below Exit, the most-recently opened files (and Save-As destinations) appear,
+  labelled by file name, most-recent first, de-duplicated. Selecting one reopens it; an entry whose
+  file has since been deleted is removed with a "Recent file not found" message instead of failing.
+  The list is capped by `recent_files_limit` (default 10; `0` disables it) and persists across
+  restarts in `$XDG_STATE_HOME/edit/recent.toml` (Feature 049).
 
 Files larger than 256 MiB are refused with a "file too large" message rather than loaded (avoids
 out-of-memory). Copy/cut/paste and read-only edits report a brief status message; a failed file open
@@ -374,7 +379,8 @@ keeps its jump-to-path behavior.
 
 Location: `$XDG_CONFIG_HOME/edit/config.toml` (default `~/.config/edit/config.toml`)
 
-See `src/config/schema.rs` for the full schema and all defaults.
+See `src/config/schema.rs` for the full schema and all defaults. Notable keys include
+`recent_files_limit` (max recent files shown in the File menu; default 10, `0` disables — Feature 049).
 
 ## Recovery Files
 
