@@ -1,3 +1,6 @@
+// Feature 042: test code may use unwrap/expect freely (re-allow the app-tree deny).
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use super::*;
 use crate::config::Config;
 use crate::encoding::EncodingId;
@@ -1888,4 +1891,135 @@ fn save_while_soft_wrap_active_no_extra_newlines() {
         saved, content,
         "saved bytes must be identical to original content"
     );
+}
+
+// ── Feature 042 (#72): deterministic no-panic fuzz sweep ──────────────────────
+// Drives long pseudo-random sequences of keyboard Actions + mouse events across
+// overlay states and several terminal sizes (incl. the 80×24 minimum and a
+// sub-minimum that triggers the too-small path), asserting the editor never
+// panics. Generalizes `repro_menu_click_over_tabs` to the whole input space.
+// Fully deterministic — a fixed-seed xorshift64 PRNG (no `rand`, no `Date::now`) —
+// so any failure reproduces identically on every run/host.
+#[test]
+fn no_panic_under_random_input_sweep() {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn xorshift(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    // Representative actions, including every overlay opener so the sweep reaches
+    // Find/Replace, Go-to-Line, Help/About, encoding select, plugin manager, file
+    // browser, the save prompt, and the menu/dropdown layers.
+    let actions: Vec<Action> = vec![
+        Action::InsertChar('x'),
+        Action::InsertNewline,
+        Action::Backspace,
+        Action::Delete,
+        Action::MoveUp,
+        Action::MoveDown,
+        Action::MoveLeft,
+        Action::MoveRight,
+        Action::MoveLineStart,
+        Action::MoveLineEnd,
+        Action::MovePageUp,
+        Action::MovePageDown,
+        Action::MoveWordLeft,
+        Action::MoveWordRight,
+        Action::SelectLeft,
+        Action::SelectRight,
+        Action::SelectAll,
+        Action::Cut,
+        Action::Copy,
+        Action::Paste,
+        Action::Undo,
+        Action::Redo,
+        Action::Find,
+        Action::FindReplace,
+        Action::FindNext,
+        Action::FindPrev,
+        Action::GoToLine,
+        Action::ToggleSearchCase,
+        Action::ToggleSearchRegex,
+        Action::Help,
+        Action::About,
+        Action::OpenPluginManager,
+        // NOTE: file-I/O actions (Save / SaveAs / SaveAsEncoding / Open / Revert)
+        // are deliberately EXCLUDED — they reach the real filesystem (the file
+        // browser builds paths from cwd + typed name and `activate()` reads/writes
+        // disk), so fuzzing them would create/overwrite files in the working tree.
+        // Those paths are covered by dedicated integration tests in temp dirs; the
+        // fuzz here targets the in-memory input-dispatch / overlay / geometry panic
+        // class (#72). Determinism makes "no disk writes this run" a guarantee.
+        Action::NextBuffer,
+        Action::PrevBuffer,
+        Action::ToggleSoftWrap,
+        Action::ToggleLineNumbers,
+        Action::SplitView,
+        Action::Menu,
+        Action::MenuOpen(0),
+        Action::MenuClose,
+        Action::MenuSearch,
+        Action::Quit,
+    ];
+    // Multibyte chars stress the UTF-8 paths (combining mark, wide CJK, emoji).
+    let insert_chars = ['a', 'Z', '9', ' ', 'é', '中', '✓', '😀', '\u{0301}'];
+    let sizes: [(u16, u16); 4] = [(80, 24), (120, 40), (200, 60), (40, 12)];
+
+    for &seed in &[
+        0x1234_5678_9abc_def0u64,
+        0xdead_beef_cafe_babe,
+        0x0bad_c0de_f00d_1234,
+    ] {
+        for &(w, h) in &sizes {
+            let mut app = make_app();
+            app.terminal_size = (w, h);
+            // Two buffers so the tab-bar layer participates.
+            app.buffers.push(crate::buffer::Buffer::new_empty());
+            let mut term = Terminal::new(TestBackend::new(w.max(1), h.max(1))).unwrap();
+            let mut st = seed ^ ((w as u64) << 32) ^ (h as u64) ^ 0x9e37_79b9_7f4a_7c15;
+
+            for i in 0..1500u32 {
+                let r = xorshift(&mut st);
+                if r & 1 == 0 {
+                    // Keyboard: pick an action; for InsertChar vary the char.
+                    let a = match actions[((r >> 1) as usize) % actions.len()].clone() {
+                        Action::InsertChar(_) => Action::InsertChar(
+                            insert_chars[((r >> 8) as usize) % insert_chars.len()],
+                        ),
+                        other => other,
+                    };
+                    let _ = app.handle_action(a);
+                } else {
+                    // Mouse: varied kinds at in- and slightly-out-of-bounds coords.
+                    let kind = match (r >> 1) % 6 {
+                        0 => MouseEventKind::Down(MouseButton::Left),
+                        1 => MouseEventKind::Down(MouseButton::Right),
+                        2 => MouseEventKind::Up(MouseButton::Left),
+                        3 => MouseEventKind::Drag(MouseButton::Left),
+                        4 => MouseEventKind::ScrollDown,
+                        _ => MouseEventKind::ScrollUp,
+                    };
+                    let col = ((r >> 8) as u16) % (w + 3); // +3 → a few OOB cells
+                    let row = ((r >> 24) as u16) % (h + 3);
+                    let _ = app.handle_mouse_event(MouseEvent {
+                        kind,
+                        column: col,
+                        row,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                }
+                // Render periodically to exercise paint + the pre-render clamp.
+                if i % 11 == 0 {
+                    let _ = term.draw(|f| app.render(f));
+                }
+            }
+        }
+    }
 }

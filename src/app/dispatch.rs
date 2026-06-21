@@ -166,16 +166,19 @@ impl App {
         if self.pending_external_change.is_some() {
             match &action {
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'Y') => {
-                    let ec = self.pending_external_change.take().unwrap();
-                    self.reload_from_disk(ec.buf_idx);
+                    if let Some(ec) = self.pending_external_change.take() {
+                        self.reload_from_disk(ec.buf_idx);
+                    }
                 }
                 Action::InsertNewline => {
-                    let ec = self.pending_external_change.take().unwrap();
-                    self.reload_from_disk(ec.buf_idx);
+                    if let Some(ec) = self.pending_external_change.take() {
+                        self.reload_from_disk(ec.buf_idx);
+                    }
                 }
                 Action::ReloadFile => {
-                    let ec = self.pending_external_change.take().unwrap();
-                    self.reload_from_disk(ec.buf_idx);
+                    if let Some(ec) = self.pending_external_change.take() {
+                        self.reload_from_disk(ec.buf_idx);
+                    }
                 }
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
                     if let Some(ec) = self.pending_external_change.take() {
@@ -242,7 +245,10 @@ impl App {
         // edit the dialog fields and drive the search; the buffer is only touched
         // by an explicit Replace/Replace-All. All input is consumed.
         if self.find_replace().is_some() {
-            let is_replace = self.find_replace().unwrap().mode == DialogMode::Replace;
+            let is_replace = matches!(
+                self.find_replace().map(|d| d.mode),
+                Some(DialogMode::Replace)
+            );
             // Dialog-global keys (work regardless of which stop is focused):
             // close, option toggles, and match navigation. Feature 020 keeps
             // these unchanged from feature 015.
@@ -252,24 +258,29 @@ impl App {
                     return Ok(());
                 }
                 Action::ToggleSearchCase => {
-                    let d = self.find_replace_mut().unwrap();
-                    d.case_sensitive = !d.case_sensitive;
+                    if let Some(d) = self.find_replace_mut() {
+                        d.case_sensitive = !d.case_sensitive;
+                    }
                     self.run_find_from_dialog();
                     return Ok(());
                 }
                 Action::ToggleSearchWrap => {
-                    self.find_replace_mut().unwrap().wrap ^= true;
+                    if let Some(d) = self.find_replace_mut() {
+                        d.wrap ^= true;
+                    }
                     return Ok(());
                 }
                 Action::ToggleSearchRegex => {
-                    let d = self.find_replace_mut().unwrap();
-                    d.regex = !d.regex;
+                    if let Some(d) = self.find_replace_mut() {
+                        d.regex = !d.regex;
+                    }
                     self.run_find_from_dialog();
                     return Ok(());
                 }
                 Action::ToggleSearchWholeWord => {
-                    let d = self.find_replace_mut().unwrap();
-                    d.whole_word = !d.whole_word;
+                    if let Some(d) = self.find_replace_mut() {
+                        d.whole_word = !d.whole_word;
+                    }
                     self.run_find_from_dialog();
                     return Ok(());
                 }
@@ -298,10 +309,26 @@ impl App {
             }
             // A field stop is focused: edit the field / run the per-mode action.
             match &action {
-                Action::InsertChar(c) => self.find_replace_mut().unwrap().insert_char(*c),
-                Action::Backspace => self.find_replace_mut().unwrap().backspace(),
-                Action::MoveLeft => self.find_replace_mut().unwrap().move_left(),
-                Action::MoveRight => self.find_replace_mut().unwrap().move_right(),
+                Action::InsertChar(c) => {
+                    if let Some(d) = self.find_replace_mut() {
+                        d.insert_char(*c);
+                    }
+                }
+                Action::Backspace => {
+                    if let Some(d) = self.find_replace_mut() {
+                        d.backspace();
+                    }
+                }
+                Action::MoveLeft => {
+                    if let Some(d) = self.find_replace_mut() {
+                        d.move_left();
+                    }
+                }
+                Action::MoveRight => {
+                    if let Some(d) = self.find_replace_mut() {
+                        d.move_right();
+                    }
+                }
                 Action::InsertNewline => {
                     if is_replace {
                         self.replace_current_from_dialog();
@@ -445,12 +472,11 @@ impl App {
             let vis = {
                 let (w, h) = self.terminal_size;
                 self.file_browser()
-                    .unwrap()
-                    .visible_rows(ratatui::layout::Rect::new(0, 0, w, h))
+                    .map(|b| b.visible_rows(ratatui::layout::Rect::new(0, 0, w, h)))
+                    .unwrap_or(0)
             };
             let mut outcome: Option<BrowseOutcome> = None;
-            {
-                let fb = self.file_browser_mut().unwrap();
+            if let Some(fb) = self.file_browser_mut() {
                 // Feature 031: while a filename is being typed, Left/Right/Home/End
                 // edit the field caret; with an empty field they keep the list
                 // navigation semantics (← parent, → activate).

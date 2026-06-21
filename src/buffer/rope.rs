@@ -63,16 +63,20 @@ impl EditorRope {
     /// stripped.
     ///
     /// Feature 034: an out-of-range `line_idx` returns an empty string instead of
-    /// panicking (`ropey::Rope::line` panics past the end). A debug build asserts
-    /// so a stale line index is caught at its source (with a backtrace) during
-    /// development, while a release build degrades gracefully (no crash).
+    /// panicking (`ropey::Rope::line` panics past the end), so the editor degrades
+    /// gracefully on a stale line index in every build.
+    ///
+    /// Feature 042 (#72): this is now a *total*, panic-free function in all builds.
+    /// It previously `debug_assert!`-ed on an out-of-range index to surface a stale
+    /// cursor at its source — but legitimate defensive callers (mouse hit-testing
+    /// against a stale wrap cache, position→char-index helpers) pass an
+    /// out-of-range index *by design* and rely on the documented "" result. An
+    /// out-of-range index is logged at debug level instead of aborting, so the dev
+    /// breadcrumb survives without a crash on arbitrary input.
     pub fn line_slice(&self, line_idx: usize) -> String {
         let len = self.0.len_lines();
-        debug_assert!(
-            line_idx < len,
-            "line_slice: line index {line_idx} out of range (len_lines {len})"
-        );
         if line_idx >= len {
+            log::debug!("line_slice: line index {line_idx} out of range (len_lines {len}) → \"\"");
             return String::new();
         }
         let line = self.0.line(line_idx);

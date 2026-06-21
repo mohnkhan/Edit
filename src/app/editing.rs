@@ -464,8 +464,15 @@ impl App {
     }
 
     /// Return the rope char index for a given (line, grapheme_col) position.
+    ///
+    /// Feature 042 (#72): total over any input. The `line` is clamped into range so
+    /// a stale position — e.g. a selection endpoint left dangling by a buffer shrink
+    /// before the next pre-render clamp — can never index a line past the rope
+    /// (which would trip the `line_slice` debug-assert / read empty in release).
+    /// For every in-range position the result is unchanged.
     pub(super) fn char_idx_for(&self, line: usize, gcol: usize) -> usize {
         let buf = self.active_buffer();
+        let line = line.min(buf.rope.line_count().saturating_sub(1));
         // Start of line in chars
         let line_start: usize = (0..line)
             .map(|l| {
