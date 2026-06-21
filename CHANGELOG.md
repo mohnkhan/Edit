@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 043: Fix soft-wrap cache leaking across tabs
+
+#### Fixed
+
+- **Switching tabs with soft-wrap on corrupted the newly-shown tab's rendering.** The editor keeps a
+  single wrap cache for the active buffer (one buffer's visual line offsets, keyed by `wrap_text_gen`).
+  Cycling buffers and closing them already invalidated it, but the **tab-bar click** and `new_buffer`
+  paths did not — so clicking another tab rendered it using the previous tab's wrap, producing ghost
+  wrap segments and a misaligned line-number gutter. All buffer switches now route through a single
+  `activate_buffer` helper that invalidates the wrap cache (and re-clamps scroll), so the cache can't
+  be left stale by any switch site.
+
 ### feature 042: Harden error handling — eliminate residual panic surfaces
 
 Issue #72. Removes the residual *panic class* in the editor's input handling and adds a standing
