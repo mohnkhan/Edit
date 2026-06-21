@@ -4,7 +4,7 @@
 
 ### Finish active-buffer accessor standardization (follow-up to feature 039)
 - **Issue**: #68 (`follow-up`)
-- **Status**: Deferred (feature 039 converted the reference-taking sites; ~71 field-level index
+- **Status**: Complete as of 2026-06-21 (feature 040, PR #70)
   accesses remain).
 - **Description**: Route the remaining `self.buffers[self.active_idx].<field>` reads/writes through
   `active_buffer()`/`active_buffer_mut()` (FR-008). Deferred from 039 to avoid borrow-checker churn in

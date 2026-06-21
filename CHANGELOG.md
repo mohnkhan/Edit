@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 046: Harden raw slice/index access
+
+#### Changed
+
+- **Closed the input-influenced raw-index panic surface** (follow-up to #72/issue #78). List lookups
+  driven by a selection/cursor/focus now use checked access (encoding-options and context-menu item
+  lookups), and the external-change handler's stored buffer index uses `buffers.get_mut` so a buffer
+  closed between change-detection and handling is a graceful no-op instead of a panic. String slices were
+  already char-boundary-safe and the rope line helpers already total, so those were left as-is.
+
+#### Added
+
+- A **content-bearing deterministic no-panic fuzz sweep** (multibyte buffers: ASCII, combining marks,
+  CJK, emoji) that drives random keyboard+mouse input across overlays and terminal sizes, exercising
+  line/grapheme/byte indexing and guarding against future raw-index regressions. Filesystem-safe and
+  reproducible (fixed seed).
+
+#### Notes
+
+- Behavior-preserving for all in-range input. Full suite 1279 passed / 0 failed / 11 ignored; `fmt` +
+  `clippy -D warnings` clean. A crate-wide indexing lint and file-I/O fuzz coverage remain separate
+  follow-ups (#79).
+
 ### feature 045: Persist per-tab soft-wrap across restart
 
 #### Changed

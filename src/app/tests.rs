@@ -2134,3 +2134,127 @@ fn soft_wrap_toggle_acts_on_active_tab_only() {
         "indicator tracks the active tab"
     );
 }
+
+// ── Feature 046 (#78): no-panic fuzz on content-bearing (multibyte) buffers ────
+// The 042 sweep used empty buffers; this seeds real multibyte content so line /
+// grapheme / byte indexing paths actually fire, surfacing raw-index panics. Same
+// deterministic xorshift, same file-I/O exclusion (buffers have no path; Save/Open
+// not in the action set; autosave disabled) → no disk writes.
+#[test]
+fn no_panic_random_input_with_multibyte_content() {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn xorshift(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    // Mixed ASCII, combining mark, wide CJK, emoji, and an empty line — exercises
+    // grapheme/visual-width/byte-offset indexing on every line.
+    let content = "Hello, World — ASCII line\n\
+                   café déjà a\u{0301}\u{0302} combining marks\n\
+                   日本語 中文 ワイド文字 CJK\n\
+                   emoji 😀👍🏽🇮🇳 and tail\n\
+                   \n\
+                   x";
+
+    // Actions that move/select/edit/search across the content (no file I/O).
+    let actions: Vec<Action> = vec![
+        Action::MoveUp,
+        Action::MoveDown,
+        Action::MoveLeft,
+        Action::MoveRight,
+        Action::MoveLineStart,
+        Action::MoveLineEnd,
+        Action::MoveWordLeft,
+        Action::MoveWordRight,
+        Action::MoveDocStart,
+        Action::MoveDocEnd,
+        Action::MovePageUp,
+        Action::MovePageDown,
+        Action::SelectLeft,
+        Action::SelectRight,
+        Action::SelectUp,
+        Action::SelectDown,
+        Action::SelectWordLeft,
+        Action::SelectWordRight,
+        Action::SelectAll,
+        Action::Backspace,
+        Action::Delete,
+        Action::DeleteWordLeft,
+        Action::DeleteWordRight,
+        Action::InsertChar('z'),
+        Action::InsertChar('界'),
+        Action::InsertChar('🙂'),
+        Action::InsertNewline,
+        Action::Cut,
+        Action::Copy,
+        Action::Paste,
+        Action::Undo,
+        Action::Redo,
+        Action::Find,
+        Action::FindReplace,
+        Action::FindNext,
+        Action::GoToLine,
+        Action::Help,
+        Action::ToggleSoftWrap,
+        Action::NextBuffer,
+        Action::PrevBuffer,
+        Action::Menu,
+        Action::MenuOpen(0),
+        Action::MenuClose,
+    ];
+    let sizes: [(u16, u16); 3] = [(80, 24), (100, 30), (40, 12)];
+
+    for &seed in &[
+        0x51ed_0046_0046_0046_u64,
+        0xc0ff_ee12_3456_7890,
+        0x0fae_dead_beef_0046,
+    ] {
+        for &(w, h) in &sizes {
+            let mut app = make_app();
+            app.terminal_size = (w, h);
+            app.buffers[0].rope = crate::buffer::rope::EditorRope::from_str(content);
+            app.buffers.push(crate::buffer::Buffer::new_empty());
+            app.buffers[1].rope = crate::buffer::rope::EditorRope::from_str(content);
+            app.active_idx = 0;
+            // Toggle wrap on for one tab so wrap-cache index paths fire too.
+            app.buffers[0].soft_wrap = true;
+            let mut term = Terminal::new(TestBackend::new(w.max(1), h.max(1))).unwrap();
+            let mut st = seed ^ ((w as u64) << 32) ^ (h as u64) ^ 0x9e37_79b9_7f4a_7c15;
+
+            for i in 0..1500u32 {
+                let r = xorshift(&mut st);
+                if r & 1 == 0 {
+                    let a = actions[((r >> 1) as usize) % actions.len()].clone();
+                    let _ = app.handle_action(a);
+                } else {
+                    let kind = match (r >> 1) % 6 {
+                        0 => MouseEventKind::Down(MouseButton::Left),
+                        1 => MouseEventKind::Down(MouseButton::Right),
+                        2 => MouseEventKind::Up(MouseButton::Left),
+                        3 => MouseEventKind::Drag(MouseButton::Left),
+                        4 => MouseEventKind::ScrollDown,
+                        _ => MouseEventKind::ScrollUp,
+                    };
+                    let col = ((r >> 8) as u16) % (w + 3);
+                    let row = ((r >> 24) as u16) % (h + 3);
+                    let _ = app.handle_mouse_event(MouseEvent {
+                        kind,
+                        column: col,
+                        row,
+                        modifiers: KeyModifiers::NONE,
+                    });
+                }
+                if i % 9 == 0 {
+                    let _ = term.draw(|f| app.render(f));
+                }
+            }
+        }
+    }
+}

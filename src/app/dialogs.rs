@@ -113,8 +113,8 @@ impl App {
                 if let Some(ec) = self.pending_external_change.take() {
                     if idx == 0 {
                         self.reload_from_disk(ec.buf_idx);
-                    } else {
-                        self.buffers[ec.buf_idx].modified = true;
+                    } else if let Some(b) = self.buffers.get_mut(ec.buf_idx) {
+                        b.modified = true;
                     }
                 }
             }
@@ -419,10 +419,14 @@ impl App {
         match self.interactive_dialog() {
             Some(InteractiveDialog::EncodingSelect) => {
                 if idx == 0 {
+                    // Feature 046: checked list access — a stale selection row can't
+                    // index past ENCODING_OPTIONS (no-op instead of panic).
                     if let Modal::EncodingSelect { row: sel } = self.modal {
-                        let enc = crate::ui::dialog::ENCODING_OPTIONS[sel].0;
-                        self.close_modal();
-                        self.do_save_as_encoding(enc);
+                        if let Some(enc) = crate::ui::dialog::ENCODING_OPTIONS.get(sel).map(|o| o.0)
+                        {
+                            self.close_modal();
+                            self.do_save_as_encoding(enc);
+                        }
                     }
                 } else {
                     self.close_modal();
