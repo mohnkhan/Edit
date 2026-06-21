@@ -1,13 +1,14 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.4.0 (features 001–035 complete; 038–046 unreleased)
+**Version**: 0.4.0 (features 001–035 complete; 038–047 unreleased)
 **Last updated**: 2026-06-21
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F047 | Session restore also brings back scroll offset, selection, and encoding per tab (additive, backward-compatible) | Complete |
 | F046 | Harden raw slice/index access (#78): checked .get() for selection/cursor-driven list + stored buffer-index lookups; content-bearing no-panic fuzz sweep. Behavior-preserving | Complete |
 | F045 | Persist per-tab soft-wrap across restart: session `BufferEntry` gains `soft_wrap` (schema v2, v1 still loads); restore applies each tab's saved value | Complete |
 | F044 | Per-tab soft-wrap: `soft_wrap` moved from a global `App` flag to per-`Buffer` state; toggle/indicators act on the active tab; new tabs seed from config; split panes honor each buffer's flag | Complete |

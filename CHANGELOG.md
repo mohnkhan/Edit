@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 047: Restore scroll, selection & encoding in session
+
+#### Changed
+
+- **Session restore now reopens each tab exactly where you left it** — viewport scroll position, active
+  selection, and the file's encoding are recorded per tab and reapplied on restore (clamped to current
+  content). Additive schema fields (serde defaults, still v2) so older session files load unchanged.
+  New/opened tabs and non-session users are unaffected.
+
 ### feature 046: Harden raw slice/index access
 
 #### Changed

@@ -46,6 +46,20 @@ pub fn encoding_from_str(s: &str) -> EncodingId {
     }
 }
 
+/// Canonical string name for an [`EncodingId`] (Feature 047), suitable for
+/// persistence. Every returned string round-trips through [`encoding_from_str`].
+pub fn encoding_to_str(enc: EncodingId) -> &'static str {
+    match enc {
+        EncodingId::Utf8 => "utf-8",
+        EncodingId::Utf16Le => "utf-16-le",
+        EncodingId::Utf16Be => "utf-16-be",
+        EncodingId::Cp437 => "cp437",
+        EncodingId::Cp850 => "cp850",
+        EncodingId::Iso8859_1 => "iso-8859-1",
+        EncodingId::Windows1252 => "windows-1252",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +106,20 @@ mod tests {
         assert_eq!(encoding_from_str("utf-8"), EncodingId::Utf8);
         assert_eq!(encoding_from_str("cp437"), EncodingId::Cp437);
         assert_eq!(encoding_from_str("windows-1252"), EncodingId::Windows1252);
+    }
+
+    #[test]
+    fn encoding_to_str_round_trips_all_variants() {
+        for enc in [
+            EncodingId::Utf8,
+            EncodingId::Utf16Le,
+            EncodingId::Utf16Be,
+            EncodingId::Cp437,
+            EncodingId::Cp850,
+            EncodingId::Iso8859_1,
+            EncodingId::Windows1252,
+        ] {
+            assert_eq!(encoding_from_str(encoding_to_str(enc)), enc);
+        }
     }
 }

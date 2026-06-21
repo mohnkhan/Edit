@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use edit::session::{
-    load_session, save_session, session_path, BufferEntry, SessionData, SplitLayoutKind,
+    load_session, save_session, session_path, BufferEntry, SelectionEntry, SessionData,
+    SplitLayoutKind,
 };
 
 // Serialize XDG env mutations so parallel test threads do not interfere.
@@ -32,6 +33,10 @@ fn sample_session() -> SessionData {
             cursor_line: 3,
             cursor_col: 7,
             soft_wrap: false,
+            scroll_line: 0,
+            scroll_col: 0,
+            selection: None,
+            encoding: String::new(),
         }],
     }
 }
@@ -168,12 +173,20 @@ fn test_partial_restore_skips_missing() {
                     cursor_line: 1,
                     cursor_col: 1,
                     soft_wrap: false,
+                    scroll_line: 0,
+                    scroll_col: 0,
+                    selection: None,
+                    encoding: String::new(),
                 },
                 BufferEntry {
                     path: "/nonexistent/ghost/file_xyz_abc.txt".to_string(),
                     cursor_line: 1,
                     cursor_col: 1,
                     soft_wrap: false,
+                    scroll_line: 0,
+                    scroll_col: 0,
+                    selection: None,
+                    encoding: String::new(),
                 },
             ],
         };
@@ -227,12 +240,20 @@ fn test_restore_applies_per_tab_soft_wrap() {
                     cursor_line: 1,
                     cursor_col: 1,
                     soft_wrap: true,
+                    scroll_line: 0,
+                    scroll_col: 0,
+                    selection: None,
+                    encoding: String::new(),
                 },
                 BufferEntry {
                     path: plain.to_string_lossy().into_owned(),
                     cursor_line: 1,
                     cursor_col: 1,
                     soft_wrap: false,
+                    scroll_line: 0,
+                    scroll_col: 0,
+                    selection: None,
+                    encoding: String::new(),
                 },
             ],
         };
@@ -276,5 +297,68 @@ fn test_crash_exit_does_not_write_session() {
             original, after,
             "session file must be unchanged after a crash exit"
         );
+    });
+}
+
+// Feature 047 — restore applies scroll/selection/encoding, clamped to content.
+#[test]
+fn test_restore_applies_scroll_selection_encoding_clamped() {
+    use edit::config::Config;
+    use edit::encoding::encoding_from_str;
+
+    with_temp_state(|tmp| {
+        let f = tmp.join("doc.txt");
+        std::fs::write(&f, b"line one\nline two\n").unwrap(); // 2 short lines
+
+        let data = SessionData {
+            version: 2,
+            active_buffer: 0,
+            split_layout: SplitLayoutKind::None,
+            active_pane: 0,
+            buffers: vec![BufferEntry {
+                path: f.to_string_lossy().into_owned(),
+                cursor_line: 1,
+                cursor_col: 1,
+                soft_wrap: false,
+                // Oversized scroll + selection → must clamp, not panic.
+                scroll_line: 999,
+                scroll_col: 5,
+                selection: Some(SelectionEntry {
+                    anchor_line: 1,
+                    anchor_col: 1,
+                    active_line: 999,
+                    active_col: 999,
+                }),
+                encoding: "utf-8".to_string(),
+            }],
+        };
+        save_session(&data).unwrap();
+
+        let session = load_session().unwrap().expect("session exists");
+        let mut app = edit::app::App::new(
+            Config::default(),
+            vec![],
+            encoding_from_str("utf-8"),
+            Some(session),
+            None,
+        );
+        app.do_restore_session();
+
+        assert_eq!(app.buffers.len(), 1);
+        let b = &app.buffers[0];
+        let last = b.rope.line_count().saturating_sub(1);
+        assert!(
+            b.scroll_offset.0 <= last,
+            "scroll line clamped to content ({} <= {last})",
+            b.scroll_offset.0
+        );
+        let sel = b.selection.expect("selection restored");
+        assert!(
+            sel.active.line <= last,
+            "selection active line clamped ({} <= {last})",
+            sel.active.line
+        );
+        // Encoding round-tripped.
+        assert_eq!(b.encoding, encoding_from_str("utf-8"));
     });
 }
