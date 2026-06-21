@@ -1,13 +1,14 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.4.0 (features 001–035 complete; 038–040 unreleased)
+**Version**: 0.4.0 (features 001–035 complete; 038–041 unreleased)
 **Last updated**: 2026-06-21
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F041 | Split `app.rs` (7361→1395 lines) into focused `src/app/*.rs` submodules (dispatch/mouse/dialogs/search/fileops/actions/softwrap/tests). Pure relocation; behavior-preserving (#71) | Complete |
 | F040 | Finish active-buffer accessor standardization (FR-008 / #68): all `self.buffers[self.active_idx]` field access routed through `active_buffer()`/`active_buffer_mut()`. Behavior-preserving | Complete |
 | F039 | Centralize UI state: one `Modal` enum (illegal two-overlay states unrepresentable) + single `LAYER_PRECEDENCE` driving paint & hit-test + shared Go-to-Line geometry. Behavior-preserving refactor; no user-visible change | Complete |
 | F038 | Fix: first dropdown menu item is clickable when the tab bar is open (tab-bar click interception skipped while a dropdown overlays row 1) | Complete |

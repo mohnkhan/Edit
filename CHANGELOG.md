@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 041: Split `app.rs` into focused submodules
+
+Behavior-preserving internal refactor — no user-visible change. The ~7,400-line `src/app.rs`
+god-file is carved into `src/app/*.rs` submodules, each an `impl App` block that reaches `App`'s
+private state through `use super::*` (a child module sees its ancestor's private items; moved methods
+are widened to `pub(super)` so sibling modules can still call them).
+
+#### Changed
+
+- `app.rs` shrinks **7361 → 1395 lines** (now just the types, `App` struct, constructor, core
+  accessors, event loop, and render entry). New submodules: `dispatch.rs` (key dispatch / `handle_action`),
+  `mouse.rs` (mouse + hit-testing), `dialogs.rs` (confirm + interactive dialogs), `search.rs`
+  (find/replace), `fileops.rs` (quit/session/save-as-encoding/reload), `actions.rs`
+  (save-as/buffer-nav/open), `softwrap.rs`, and the inline unit tests in `tests.rs`. No production
+  file exceeds ~840 lines.
+
+#### Notes
+
+- Pure relocation: no logic changed. Full suite passes unchanged (1262 passed / 0 failed / 11 ignored);
+  `cargo fmt --check` and `cargo clippy -D warnings` clean. Closes #71.
+
 ### feature 040: Finish active-buffer accessor standardization
 
 #### Changed
