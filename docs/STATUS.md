@@ -1,13 +1,14 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.4.0 (features 001–035 complete; 038–044 unreleased)
+**Version**: 0.4.0 (features 001–035 complete; 038–045 unreleased)
 **Last updated**: 2026-06-21
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F045 | Persist per-tab soft-wrap across restart: session `BufferEntry` gains `soft_wrap` (schema v2, v1 still loads); restore applies each tab's saved value | Complete |
 | F044 | Per-tab soft-wrap: `soft_wrap` moved from a global `App` flag to per-`Buffer` state; toggle/indicators act on the active tab; new tabs seed from config; split panes honor each buffer's flag | Complete |
 | F043 | Fix: soft-wrap cache leaking across tabs — tab-click/new_buffer switches now invalidate the wrap cache (via centralized `activate_buffer`), fixing ghost wrap + misaligned line numbers on other tabs | Complete |
 | F042 | Harden error handling (#72): 24 guarded `unwrap()`s in input/dialog code → pattern matches; `clippy::unwrap_used` guardrail on the app tree; deterministic no-panic fuzz sweep; fixed 2 latent stale-index panics (`char_idx_for`, `line_slice`). Behavior-preserving | Complete |

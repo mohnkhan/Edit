@@ -23,6 +23,11 @@ pub struct BufferEntry {
     pub cursor_line: u32,
     /// Cursor column, 1-based.
     pub cursor_col: u32,
+    /// Feature 045: this tab's soft-wrap setting at save time. `#[serde(default)]`
+    /// so session files written before this field (schema v1) load with `false`
+    /// (the configured default applies on restore), keeping old sessions valid.
+    #[serde(default)]
+    pub soft_wrap: bool,
 }
 
 /// How the editor area was split when the session was saved.
@@ -141,8 +146,9 @@ pub fn load_session() -> Result<Option<SessionData>, String> {
         }
     };
 
-    // (b) Unknown schema version.
-    if data.version != 1 {
+    // (b) Unknown schema version. Feature 045 bumped the schema to 2 (adds
+    // per-tab `soft_wrap`); v1 files remain loadable (the field defaults to false).
+    if data.version != 1 && data.version != 2 {
         let msg = format!(
             "session: unknown schema version {} in {:?}",
             data.version, path
@@ -214,6 +220,7 @@ mod tests {
                 path: "/tmp/test.txt".to_string(),
                 cursor_line: 5,
                 cursor_col: 10,
+                soft_wrap: false,
             }],
         }
     }
@@ -241,11 +248,13 @@ mod tests {
                         path: "/tmp/a.txt".to_string(),
                         cursor_line: 1,
                         cursor_col: 1,
+                        soft_wrap: false,
                     },
                     BufferEntry {
                         path: "/tmp/b.txt".to_string(),
                         cursor_line: 3,
                         cursor_col: 7,
+                        soft_wrap: false,
                     },
                 ],
             };
@@ -292,6 +301,59 @@ mod tests {
             save_session(&data).unwrap();
             let tmp = session_path().with_extension("toml.tmp");
             assert!(!tmp.exists(), "tmp file should not remain after rename");
+        });
+    }
+
+    // ── Feature 045: per-tab soft-wrap persistence ────────────────────────────
+
+    /// A v2 session round-trips each tab's `soft_wrap` value (mixed on/off).
+    #[test]
+    fn test_soft_wrap_round_trips() {
+        with_temp_state_dir(|| {
+            let data = SessionData {
+                version: 2,
+                active_buffer: 0,
+                split_layout: SplitLayoutKind::None,
+                active_pane: 0,
+                buffers: vec![
+                    BufferEntry {
+                        path: "/tmp/wrapped.txt".to_string(),
+                        cursor_line: 1,
+                        cursor_col: 1,
+                        soft_wrap: true,
+                    },
+                    BufferEntry {
+                        path: "/tmp/plain.txt".to_string(),
+                        cursor_line: 1,
+                        cursor_col: 1,
+                        soft_wrap: false,
+                    },
+                ],
+            };
+            save_session(&data).unwrap();
+            let loaded = load_session().unwrap().unwrap();
+            assert_eq!(loaded, data, "soft_wrap must round-trip per tab");
+            assert!(loaded.buffers[0].soft_wrap);
+            assert!(!loaded.buffers[1].soft_wrap);
+        });
+    }
+
+    /// A legacy (v1) session file with NO `soft_wrap` keys still loads; each tab's
+    /// `soft_wrap` defaults to false (the configured default applies on restore).
+    #[test]
+    fn test_legacy_session_without_soft_wrap_loads_with_default() {
+        with_temp_state_dir(|| {
+            let path = session_path();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let toml = "version = 1\nactive_buffer = 0\nactive_pane = 0\nsplit_layout = \"none\"\n\n[[buffers]]\npath = \"/tmp/x.txt\"\ncursor_line = 2\ncursor_col = 3\n";
+            std::fs::write(&path, toml).unwrap();
+            let loaded = load_session().unwrap().unwrap();
+            assert_eq!(loaded.version, 1, "v1 file still accepted");
+            assert_eq!(loaded.buffers.len(), 1);
+            assert!(
+                !loaded.buffers[0].soft_wrap,
+                "missing soft_wrap defaults to false"
+            );
         });
     }
 }

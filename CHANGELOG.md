@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 045: Persist per-tab soft-wrap across restart
+
+#### Changed
+
+- **Each tab's soft-wrap setting is now remembered across restarts.** The saved session records every
+  persisted tab's wrap on/off (alongside its path and cursor); on restore each tab comes back in the
+  wrap state it had at quit, completing the per-tab model from feature 044. The session schema is bumped
+  to v2; **older session files still load** (their tabs default to the configured wrap, exactly as
+  before). Newly opened tabs after a restore still seed from the configured default. Only the on/off
+  value is persisted (wrap cache/geometry are recomputed at runtime).
+
 ### feature 044: Per-tab soft-wrap
 
 #### Changed
