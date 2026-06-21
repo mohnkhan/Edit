@@ -67,6 +67,55 @@ enum InteractiveDialog {
     FileBrowser,
 }
 
+/// The single foreground modal layer (Feature 039). At most one overlay is ever
+/// open — the enum makes any other combination unrepresentable, replacing the prior
+/// bag of independent `Option`/`bool` flags. Key dispatch, mouse dispatch, and paint
+/// all derive which overlay is active from this one value.
+///
+/// State that legitimately coexists with editing (`menu_bar`, pointer drags) or that
+/// is adjunct focus/flow state (`dialog_focus`, `pending_save_as_encoding`) stays in
+/// its own field — see `data-model.md`.
+#[derive(Default)]
+enum Modal {
+    /// No overlay open — normal editing (possibly with the menu bar active).
+    #[default]
+    None,
+    /// Right-click editor context menu (Feature 030).
+    ContextMenu(crate::ui::contextmenu::ContextMenu),
+    /// Session-restore confirmation (Feature 003).
+    SessionRestore(crate::session::SessionData),
+    /// Unsaved-changes save-before-quit prompt.
+    SavePrompt,
+    /// Revert confirmation for the given (modified) buffer index (Feature 014).
+    RevertConfirm(usize),
+    /// Tab `[x]` close confirmation for the given buffer index (Feature 027).
+    CloseConfirm(usize),
+    /// Interactive Find/Replace dialog (Feature 015).
+    FindReplace(FindReplaceDialog),
+    /// Go-to-Line prompt: in-progress 1-based digits + caret index (Feature 025/031).
+    GotoLine { digits: String, caret: usize },
+    /// Encoding selection dialog: highlighted row in `ENCODING_OPTIONS` (US4).
+    EncodingSelect { row: usize },
+    /// Navigable Open/Save file browser (Feature 012).
+    FileBrowser(FileBrowser),
+    /// Help/About overlay + scroll offset (Feature 011/018).
+    Help { screen: HelpScreen, scroll: usize },
+    /// Options ▸ Plugins manager overlay + list cursor (Feature 008).
+    PluginManager { cursor: usize },
+}
+
+// Note (Feature 039): two overlays are intentionally NOT `Modal` variants because
+// they are set *asynchronously* and can be pending *underneath* a user-opened
+// overlay (a priority stack the original relied on — preserving FR-010):
+//   * `pending_external_change` — the file watcher (`handle_tick`, every 500ms)
+//     can detect a change while a dialog is open; it preempts by precedence and
+//     the dialog survives underneath until it is dismissed.
+//   * `pending_plugin_consent` — a startup queue that can sit behind a
+//     session-restore prompt and surface once it closes.
+// A single `Modal` value cannot hold both at once, so these stay independent
+// fields, like `pending_save_as_encoding` (flow state) and `dialog_focus`
+// (adjunct focus state). They keep their existing precedence slots in dispatch.
+
 /// Feature 024: which scroll offset a scrollbar interaction drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScrollTarget {
@@ -162,6 +211,10 @@ pub enum Direction {
 
 /// Top-level application state.
 pub struct App {
+    /// Feature 039: the single foreground overlay (at most one open at a time).
+    /// Replaces the former bag of `pending_*`/`file_browser` flags. Key/mouse/paint
+    /// all derive the active overlay from this field.
+    modal: Modal,
     /// Loaded configuration (merged with CLI flags).
     pub config: Config,
     /// Active keybinding map.
@@ -178,20 +231,14 @@ pub struct App {
     pub theme: &'static Theme,
     /// Split-view mode — Single (default) or Vertical (T067).
     pub split_mode: crate::ui::SplitMode,
-    /// Whether the menu bar is currently active (legacy flag; superseded by menu_bar.is_active()).
-    pub menu_active: bool,
     /// Pull-down menu state machine (T041).
     pub menu_bar: MenuBarState,
-    /// Whether the unsaved-changes save prompt is pending.
-    pub pending_save_prompt: bool,
     /// Whether the terminal is too small to render the editor.
     pub too_small: bool,
     /// Current search-and-replace session state (T055).
     pub search_state: SearchState,
     /// Transient message shown in the status bar (e.g. "Match 2/5").
     pub status_message: Option<String>,
-    /// Session data pending user confirmation; `Some` = restore dialog is visible.
-    pub pending_session_restore: Option<crate::session::SessionData>,
     /// Default encoding resolved from config/CLI at startup.
     pub default_encoding: EncodingId,
     /// Index into ENCODING_OPTIONS of the highlighted row; `Some` = dialog is open.
@@ -226,18 +273,6 @@ pub struct App {
     /// One-shot status-bar notice (e.g., file-deleted notice); cleared after one render frame.
     pub watcher_notice: Option<String>,
 
-    // ── Feature 014: Revert confirmation ──────────────────────────────────────
-    /// Set to the buffer index awaiting a Revert confirmation (buffer is modified);
-    /// `Some` shows a modal confirm dialog. Cleared on confirm/cancel.
-    pub pending_revert_confirm: Option<usize>,
-
-    // ── Feature 027: tab `[x]` close confirmation ─────────────────────────────
-    /// Set to the buffer index awaiting a close confirmation (the clicked tab's
-    /// buffer is modified). `Some` shows the [`ButtonDialog::CloseConfirm`] modal.
-    pub pending_close_confirm: Option<usize>,
-
-    /// Feature 030 (US3): the open editor right-click context menu, if any.
-    pub pending_context_menu: Option<crate::ui::contextmenu::ContextMenu>,
 
     // ── Feature 015: interactive Find / Replace dialog ────────────────────────
     /// `Some` while an interactive Find/Replace dialog is open (modal).
@@ -444,6 +479,9 @@ impl App {
         let status_message = initial_status;
 
         Self {
+            // Feature 039: a pending session-restore is the only overlay that can
+            // be open at construction time.
+            modal: session.map(Modal::SessionRestore).unwrap_or(Modal::None),
             config,
             keymap,
             buffers,
@@ -452,13 +490,10 @@ impl App {
             terminal_size: (80, 24),
             theme,
             split_mode: crate::ui::SplitMode::Single,
-            menu_active: false,
             menu_bar: MenuBarState::new(),
-            pending_save_prompt: false,
             too_small: false,
             search_state: SearchState::default(),
             status_message,
-            pending_session_restore: session,
             default_encoding,
             pending_encoding_select: None,
             file_browser: None,
@@ -473,9 +508,6 @@ impl App {
             self_write_times: std::collections::HashMap::new(),
             pending_external_change: None,
             watcher_notice,
-            pending_revert_confirm: None,
-            pending_close_confirm: None,
-            pending_context_menu: None,
             pending_find_replace: None,
             pending_goto_line: None,
             pending_goto_line_caret: 0,
@@ -556,6 +588,94 @@ impl App {
     /// Return a mutable reference to the currently active buffer.
     pub fn active_buffer_mut(&mut self) -> &mut Buffer {
         &mut self.buffers[self.active_idx]
+    }
+
+    // ── Feature 039: foreground modal accessors ──────────────────────────────
+    // The single source of truth for "which overlay is open". All key/mouse/paint
+    // dispatch reads through these; nothing reads a per-overlay flag any more.
+
+    /// The current foreground overlay (read-only). Crate-internal: `Modal` is a
+    /// private type, so integration tests use the typed `*()`/`*_is_open()`
+    /// accessors below instead of matching on this directly.
+    pub(crate) fn modal(&self) -> &Modal {
+        &self.modal
+    }
+
+    /// True iff a foreground overlay is open (≠ `Modal::None`).
+    pub fn modal_is_open(&self) -> bool {
+        !matches!(self.modal, Modal::None)
+    }
+
+    /// Close any open overlay (set to `Modal::None`). Idempotent. The pre-render
+    /// `clamp_all_cursors()` still runs, preserving the cursor-bounds invariant.
+    pub(crate) fn close_modal(&mut self) {
+        self.modal = Modal::None;
+    }
+
+    /// The open Find/Replace dialog, if that overlay is open.
+    pub fn find_replace(&self) -> Option<&FindReplaceDialog> {
+        match &self.modal {
+            Modal::FindReplace(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Mutable access to the open Find/Replace dialog.
+    pub(crate) fn find_replace_mut(&mut self) -> Option<&mut FindReplaceDialog> {
+        match &mut self.modal {
+            Modal::FindReplace(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// The open file browser, if that overlay is open.
+    pub fn file_browser(&self) -> Option<&FileBrowser> {
+        match &self.modal {
+            Modal::FileBrowser(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    /// Mutable access to the open file browser.
+    pub(crate) fn file_browser_mut(&mut self) -> Option<&mut FileBrowser> {
+        match &mut self.modal {
+            Modal::FileBrowser(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    /// The open editor context menu, if that overlay is open.
+    pub fn context_menu(&self) -> Option<&crate::ui::contextmenu::ContextMenu> {
+        match &self.modal {
+            Modal::ContextMenu(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// True iff the save-before-quit prompt is the open overlay.
+    pub fn is_save_prompt_open(&self) -> bool {
+        matches!(self.modal, Modal::SavePrompt)
+    }
+
+    /// True iff the session-restore prompt is the open overlay.
+    pub fn is_session_restore_open(&self) -> bool {
+        matches!(self.modal, Modal::SessionRestore(_))
+    }
+
+    /// Buffer index awaiting a Revert confirmation, if that overlay is open.
+    pub fn revert_confirm_target(&self) -> Option<usize> {
+        match self.modal {
+            Modal::RevertConfirm(i) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Buffer index awaiting a tab-close confirmation, if that overlay is open.
+    pub fn close_confirm_target(&self) -> Option<usize> {
+        match self.modal {
+            Modal::CloseConfirm(i) => Some(i),
+            _ => None,
+        }
     }
 
     // ── T011 — Encoding dialog helpers ───────────────────────────────────────
@@ -921,23 +1041,23 @@ impl App {
         // Feature 030 (US3): the editor context menu is modal while open — Up/Down
         // move focus, Enter/Space activate the focused item (routing to the real
         // action), Esc dismisses; all other keys are consumed.
-        if let Some(mut menu) = self.pending_context_menu {
+        if let Modal::ContextMenu(mut menu) = self.modal {
             match &action {
                 Action::MoveDown => {
                     menu.focus_next();
-                    self.pending_context_menu = Some(menu);
+                    self.modal = Modal::ContextMenu(menu);
                 }
                 Action::MoveUp => {
                     menu.focus_prev();
-                    self.pending_context_menu = Some(menu);
+                    self.modal = Modal::ContextMenu(menu);
                 }
                 Action::InsertNewline | Action::InsertChar(' ') => {
                     let act = crate::ui::contextmenu::ITEMS[menu.focus].1.clone();
-                    self.pending_context_menu = None;
+                    self.close_modal();
                     return self.handle_action(act);
                 }
                 Action::MenuClose | Action::Quit => {
-                    self.pending_context_menu = None;
+                    self.close_modal();
                 }
                 _ => {}
             }
@@ -1014,21 +1134,21 @@ impl App {
         // When the session restore dialog is active, only Y/y/Enter (confirm)
         // and N/n/Escape/Quit (decline) are forwarded; everything else is
         // dropped silently so the dialog stays visible.
-        if self.pending_session_restore.is_some() {
+        if matches!(self.modal, Modal::SessionRestore(_)) {
             match &action {
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'Y') => {
                     self.do_restore_session();
-                    self.pending_session_restore = None;
+                    self.close_modal();
                 }
                 Action::InsertNewline => {
                     self.do_restore_session();
-                    self.pending_session_restore = None;
+                    self.close_modal();
                 }
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
-                    self.pending_session_restore = None;
+                    self.close_modal();
                 }
                 Action::Quit | Action::MenuClose => {
-                    self.pending_session_restore = None;
+                    self.close_modal();
                 }
                 _ => {}
             }
@@ -1037,7 +1157,7 @@ impl App {
 
         // When the save-before-quit prompt is active, only S / D / C are valid.
         // All other actions are silently dropped so the prompt stays visible.
-        if self.pending_save_prompt {
+        if matches!(self.modal, Modal::SavePrompt) {
             match &action {
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'S') => {
                     self.prompt_save_and_quit();
@@ -1091,21 +1211,21 @@ impl App {
 
         // Feature 014 — Revert confirmation intercept: Y/Enter discards changes
         // and reloads from disk; N/Esc cancels (buffer untouched).
-        if let Some(buf_idx) = self.pending_revert_confirm {
+        if let Modal::RevertConfirm(buf_idx) = self.modal {
             match &action {
                 Action::InsertNewline => {
-                    self.pending_revert_confirm = None;
+                    self.close_modal();
                     self.reload_from_disk(buf_idx);
                 }
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'Y') => {
-                    self.pending_revert_confirm = None;
+                    self.close_modal();
                     self.reload_from_disk(buf_idx);
                 }
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
-                    self.pending_revert_confirm = None;
+                    self.close_modal();
                 }
                 Action::MenuClose | Action::Quit => {
-                    self.pending_revert_confirm = None;
+                    self.close_modal();
                 }
                 _ => {}
             }
@@ -1116,7 +1236,7 @@ impl App {
         // close), D (discard + close), C/Esc (cancel) are valid; all other input
         // is dropped so the modal stays visible. Mirrors the save-before-quit
         // prompt so the `(S)`/`(D)` label hints are accurate.
-        if self.pending_close_confirm.is_some() {
+        if matches!(self.modal, Modal::CloseConfirm(_)) {
             match &action {
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'S') => {
                     self.activate_dialog_button(0);
@@ -1692,7 +1812,7 @@ impl App {
 
     fn handle_quit(&mut self) {
         if self.active_buffer().modified {
-            self.pending_save_prompt = true;
+            self.modal = Modal::SavePrompt;
             // The actual dialog rendering is handled by the UI layer; here we
             // just gate the quit so the render loop can show the prompt.
             log::debug!("Buffer modified — showing save prompt before quit");
@@ -1714,7 +1834,7 @@ impl App {
                 if let Some(path) = self.buffers[self.active_idx].path.clone() {
                     self.self_write_times.insert(path, Instant::now());
                 }
-                self.pending_save_prompt = false;
+                self.close_modal();
                 if let Some(data) = self.build_session_data() {
                     if let Err(e) = crate::session::save_session(&data) {
                         log::warn!("session save failed: {}", e);
@@ -1731,7 +1851,7 @@ impl App {
 
     /// Called when the user chooses [D]iscard in the save-before-quit prompt.
     pub fn prompt_discard_and_quit(&mut self) {
-        self.pending_save_prompt = false;
+        self.close_modal();
         if let Some(data) = self.build_session_data() {
             if let Err(e) = crate::session::save_session(&data) {
                 log::warn!("session save failed: {}", e);
@@ -1742,7 +1862,7 @@ impl App {
 
     /// Called when the user chooses [C]ancel in the save-before-quit prompt.
     pub fn prompt_cancel_quit(&mut self) {
-        self.pending_save_prompt = false;
+        self.close_modal();
     }
 
     // ── Session save/restore ─────────────────────────────────────────────────
@@ -1809,9 +1929,13 @@ impl App {
         use crate::security::sanitize::{validate_path, PathError};
         use crate::session::SplitLayoutKind;
 
-        let session = match self.pending_session_restore.take() {
-            Some(s) => s,
-            None => return,
+        let session = match std::mem::take(&mut self.modal) {
+            Modal::SessionRestore(s) => s,
+            // Not the open overlay — restore state and bail.
+            other => {
+                self.modal = other;
+                return;
+            }
         };
 
         let mut new_buffers: Vec<Buffer> = Vec::new();
@@ -3586,7 +3710,7 @@ impl App {
             return;
         }
         if self.buffers[idx].modified {
-            self.pending_close_confirm = Some(idx);
+            self.modal = Modal::CloseConfirm(idx);
         } else {
             self.close_buffer_at(idx);
         }
@@ -3623,20 +3747,18 @@ impl App {
     /// The currently-open confirm/dismiss dialog that has a button bar, if any.
     /// Order matches modal precedence.
     fn open_button_dialog(&self) -> Option<ButtonDialog> {
-        if self.pending_session_restore.is_some() {
-            Some(ButtonDialog::SessionRestore)
-        } else if self.pending_save_prompt {
-            Some(ButtonDialog::SavePrompt)
-        } else if self.pending_external_change.is_some() {
-            Some(ButtonDialog::ExternalChange)
-        } else if self.pending_revert_confirm.is_some() {
-            Some(ButtonDialog::RevertConfirm)
-        } else if self.pending_close_confirm.is_some() {
-            Some(ButtonDialog::CloseConfirm)
-        } else if !self.pending_plugin_consent.is_empty() {
-            Some(ButtonDialog::PluginConsent)
-        } else {
-            None
+        // Precedence preserved from the original flag chain (Feature 039): the
+        // synchronously-opened button dialogs live in `self.modal`; the two async
+        // ones (`pending_external_change`, `pending_plugin_consent`) keep their
+        // original slots between `SavePrompt` and `RevertConfirm` / at the tail.
+        match &self.modal {
+            Modal::SessionRestore(_) => Some(ButtonDialog::SessionRestore),
+            Modal::SavePrompt => Some(ButtonDialog::SavePrompt),
+            _ if self.pending_external_change.is_some() => Some(ButtonDialog::ExternalChange),
+            Modal::RevertConfirm(_) => Some(ButtonDialog::RevertConfirm),
+            Modal::CloseConfirm(_) => Some(ButtonDialog::CloseConfirm),
+            _ if !self.pending_plugin_consent.is_empty() => Some(ButtonDialog::PluginConsent),
+            _ => None,
         }
     }
 
@@ -3693,7 +3815,7 @@ impl App {
                 if idx == 0 {
                     self.do_restore_session();
                 }
-                self.pending_session_restore = None;
+                self.close_modal();
             }
             Some(ButtonDialog::SavePrompt) => match idx {
                 0 => self.prompt_save_and_quit(),
@@ -3710,12 +3832,15 @@ impl App {
                 }
             }
             Some(ButtonDialog::RevertConfirm) => {
+                let b = match self.modal {
+                    Modal::RevertConfirm(b) => Some(b),
+                    _ => None,
+                };
+                self.close_modal();
                 if idx == 0 {
-                    if let Some(b) = self.pending_revert_confirm.take() {
+                    if let Some(b) = b {
                         self.reload_from_disk(b);
                     }
-                } else {
-                    self.pending_revert_confirm = None;
                 }
             }
             Some(ButtonDialog::PluginConsent) => self.consent_decide(idx == 0),
@@ -3724,7 +3849,12 @@ impl App {
                 // active buffer (M1). Save → save then close; Discard → close;
                 // Cancel → dismiss, nothing closes. A failed save keeps the
                 // dialog open so no changes are silently lost (Principle VII).
-                if let Some(bidx) = self.pending_close_confirm.take() {
+                let taken = match self.modal {
+                    Modal::CloseConfirm(bidx) => Some(bidx),
+                    _ => None,
+                };
+                self.close_modal();
+                if let Some(bidx) = taken {
                     match idx {
                         0 => match self.buffers.get(bidx).map(|b| b.save()) {
                             Some(Ok(())) => {
@@ -3735,12 +3865,12 @@ impl App {
                             }
                             Some(Err(e)) => {
                                 log::error!("Save failed on tab close: {}", e);
-                                self.pending_close_confirm = Some(bidx); // keep open
+                                self.modal = Modal::CloseConfirm(bidx); // keep open
                             }
                             None => {}
                         },
                         1 => self.close_buffer_at(bidx),
-                        _ => {} // Cancel — already cleared by take()
+                        _ => {} // Cancel — already cleared above
                     }
                 }
             }
@@ -3798,8 +3928,10 @@ impl App {
             }
             ButtonDialog::CloseConfirm => {
                 // Name the buffer being closed (the stored index, not active).
-                let name = self
-                    .pending_close_confirm
+                let name = match self.modal {
+                    Modal::CloseConfirm(i) => Some(i),
+                    _ => None,
+                }
                     .and_then(|i| self.buffers.get(i))
                     .and_then(|b| b.path.as_ref())
                     .and_then(|p| p.file_name())
@@ -4063,7 +4195,7 @@ impl App {
         }
         if self.buffers[idx].modified {
             // Confirm before discarding unsaved changes.
-            self.pending_revert_confirm = Some(idx);
+            self.modal = Modal::RevertConfirm(idx);
         } else {
             // Clean buffer — reload directly (harmless re-read).
             self.reload_from_disk(idx);
@@ -4214,7 +4346,7 @@ impl App {
 
         // Feature 030 (US3): while the context menu is open it is modal — a press
         // on an item activates it, a press elsewhere dismisses. (Wheel/drag ignored.)
-        if let Some(menu) = self.pending_context_menu {
+        if let Modal::ContextMenu(menu) = self.modal {
             if ev.kind == NormalizedMouseKind::Press {
                 let (w, h) = self.terminal_size;
                 let rect = crate::ui::contextmenu::menu_rect(
@@ -4224,12 +4356,12 @@ impl App {
                 if ev.button == MouseButton::Left {
                     if let Some(idx) = crate::ui::contextmenu::hit_test(rect, ev.col, ev.row) {
                         let act = crate::ui::contextmenu::ITEMS[idx].1.clone();
-                        self.pending_context_menu = None;
+                        self.close_modal();
                         return self.handle_action(act);
                     }
                 }
                 // Press outside the menu (or non-left) dismisses it.
-                self.pending_context_menu = None;
+                self.close_modal();
             }
             return Ok(());
         }
@@ -4245,8 +4377,8 @@ impl App {
                 || self.pending_goto_line.is_some()
                 || self.menu_bar.is_active();
             if in_editor && !any_modal {
-                self.pending_context_menu =
-                    Some(crate::ui::contextmenu::ContextMenu::new(ev.col, ev.row));
+                self.modal =
+                    Modal::ContextMenu(crate::ui::contextmenu::ContextMenu::new(ev.col, ev.row));
             }
             return Ok(());
         }
@@ -4586,17 +4718,21 @@ impl App {
         }
 
         // Modal dialogs win: ignore menu/editor mouse while one is open.
-        if self.pending_save_prompt
-            || self.pending_session_restore.is_some()
-            || self.pending_encoding_select.is_some()
+        // (ContextMenu / FileBrowser are handled earlier and have already returned,
+        // so they cannot be the active modal here.)
+        if matches!(
+            self.modal,
+            Modal::SavePrompt
+                | Modal::SessionRestore(_)
+                | Modal::RevertConfirm(_)
+                | Modal::CloseConfirm(_)
+        ) || self.pending_encoding_select.is_some()
             || self.pending_help.is_some()
             || self.pending_external_change.is_some()
             || !self.pending_plugin_consent.is_empty()
             || self.pending_plugin_manager
-            || self.pending_revert_confirm.is_some()
             || self.pending_find_replace.is_some()
             || self.pending_goto_line.is_some()
-            || self.pending_close_confirm.is_some()
         {
             return Ok(());
         }
@@ -5317,9 +5453,9 @@ mod tests {
     #[test]
     fn save_prompt_cancels_on_esc() {
         let mut a = make_app();
-        a.pending_save_prompt = true;
+        a.modal = Modal::SavePrompt;
         a.handle_action(Action::MenuClose).unwrap();
-        assert!(!a.pending_save_prompt, "Esc cancels the save prompt");
+        assert!(!a.is_save_prompt_open(), "Esc cancels the save prompt");
         assert!(a.running, "cancel does not quit");
     }
 
@@ -5690,7 +5826,7 @@ mod tests {
     fn arrow_keys_move_confirm_dialog_buttons() {
         let mut a = make_app();
         // SavePrompt has 3 buttons (Save/Discard/Cancel); default focus = 2 (Cancel).
-        a.pending_save_prompt = true;
+        a.modal = Modal::SavePrompt;
         a.handle_action(Action::MoveRight).unwrap(); // ensure sets 2, then next → 0
         assert_eq!(a.dialog_focus, 0);
         a.handle_action(Action::MoveRight).unwrap(); // → 1
@@ -5865,17 +6001,17 @@ mod tests {
         // Clean buffer (idx 0) closes immediately, no prompt.
         a.tab_close_clicked(0);
         assert_eq!(a.buffers.len(), 1);
-        assert!(a.pending_close_confirm.is_none());
+        assert!(a.close_confirm_target().is_none());
         // Re-create a modified second buffer; its [x] opens the confirm.
         a.buffers.push(crate::buffer::Buffer::new_empty());
         a.buffers[1].modified = true;
         a.tab_close_clicked(1);
         assert_eq!(a.buffers.len(), 2, "nothing closed yet");
-        assert_eq!(a.pending_close_confirm, Some(1));
+        assert_eq!(a.close_confirm_target(), Some(1));
         // Discard (button 1) closes it.
         a.activate_dialog_button(1);
         assert_eq!(a.buffers.len(), 1);
-        assert!(a.pending_close_confirm.is_none());
+        assert!(a.close_confirm_target().is_none());
     }
 
     // ── Feature 025 — Go-to-Line prompt render ────────────────────────────────
@@ -6226,7 +6362,7 @@ mod tests {
         let mut app = make_app();
         app.handle_action(Action::InsertChar('x')).unwrap();
         app.handle_action(Action::Quit).unwrap();
-        assert!(app.pending_save_prompt);
+        assert!(app.is_save_prompt_open());
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|f| app.render(f)).unwrap();
         let content: String = terminal

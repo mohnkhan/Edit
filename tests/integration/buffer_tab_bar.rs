@@ -103,7 +103,7 @@ fn close_box_on_clean_buffer_closes_immediately() {
     let close = r[1].close_rect; // close the second (clean) buffer
     click(&mut a, close.x, 1);
     assert_eq!(a.buffers.len(), 1);
-    assert!(a.pending_close_confirm.is_none());
+    assert!(a.close_confirm_target().is_none());
     // With one buffer left, the tab bar is hidden again.
     assert!(!a.tab_bar_visible());
 }
@@ -118,15 +118,15 @@ fn close_box_on_modified_buffer_opens_confirm() {
     click(&mut a, close.x, 1);
     // Nothing closed yet; the confirm targets the clicked (not active) buffer.
     assert_eq!(a.buffers.len(), 2);
-    assert_eq!(a.pending_close_confirm, Some(1));
+    assert_eq!(a.close_confirm_target(), Some(1));
     // Cancel (button 2) keeps the buffer.
     a.activate_dialog_button(2);
     assert_eq!(a.buffers.len(), 2);
-    assert!(a.pending_close_confirm.is_none());
+    assert!(a.close_confirm_target().is_none());
     // Re-open and Discard (button 1) closes it.
     a.buffers[1].modified = true;
     a.tab_close_clicked(1);
-    assert_eq!(a.pending_close_confirm, Some(1));
+    assert_eq!(a.close_confirm_target(), Some(1));
     a.activate_dialog_button(1);
     assert_eq!(a.buffers.len(), 1);
 }

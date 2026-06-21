@@ -47,7 +47,7 @@ fn save_prompt_letter_shortcut_still_works() {
     a.handle_action(Action::Quit).unwrap();
     // The 'C' shortcut still cancels (label change is informational only).
     a.handle_action(Action::InsertChar('c')).unwrap();
-    assert!(!a.pending_save_prompt, "Cancel shortcut still works");
+    assert!(!a.is_save_prompt_open(), "Cancel shortcut still works");
     assert!(a.running);
 }
 

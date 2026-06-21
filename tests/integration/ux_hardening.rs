@@ -45,7 +45,10 @@ fn save_browser_typing_accumulates_in_filename() {
 #[test]
 fn arrow_keys_navigate_confirm_dialog_buttons() {
     let mut a = app();
-    a.pending_save_prompt = true; // Save / Discard / Cancel; default focus = Cancel(2)
+    // Open the save-before-quit prompt the real way (modify, then quit):
+    // Save / Discard / Cancel; default focus = Cancel(2).
+    a.handle_action(Action::InsertChar('x')).unwrap();
+    a.handle_action(Action::Quit).unwrap();
     a.handle_action(Action::MoveRight).unwrap();
     assert_eq!(a.dialog_focus, 0);
     a.handle_action(Action::MoveLeft).unwrap();

@@ -124,7 +124,7 @@ fn revert_confirm_restores_disk_and_clears_modified() {
 
     app.handle_action(Action::Revert).unwrap();
     assert_eq!(
-        app.pending_revert_confirm,
+        app.revert_confirm_target(),
         Some(0),
         "modified buffer asks to confirm"
     );
@@ -132,7 +132,7 @@ fn revert_confirm_restores_disk_and_clears_modified() {
     // confirming is done with the 'Y' shortcut (or Tab to Revert + Enter).
     app.handle_action(Action::InsertChar('Y')).unwrap(); // confirm
 
-    assert_eq!(app.pending_revert_confirm, None);
+    assert_eq!(app.revert_confirm_target(), None);
     assert!(!modified(&app), "buffer clean after revert");
     assert_eq!(app.active_buffer().rope.to_string(), "original\n");
     let _ = std::fs::remove_file(&path);
@@ -144,10 +144,10 @@ fn revert_cancel_keeps_changes() {
     let mut app = app_with(&path);
     app.handle_action(Action::InsertChar('X')).unwrap();
     app.handle_action(Action::Revert).unwrap();
-    assert_eq!(app.pending_revert_confirm, Some(0));
+    assert_eq!(app.revert_confirm_target(), Some(0));
     app.handle_action(Action::InsertChar('n')).unwrap(); // cancel
 
-    assert_eq!(app.pending_revert_confirm, None);
+    assert_eq!(app.revert_confirm_target(), None);
     assert!(modified(&app), "edits preserved on cancel");
     assert!(app.active_buffer().rope.to_string().starts_with('X'));
     let _ = std::fs::remove_file(&path);
@@ -161,7 +161,7 @@ fn revert_clean_buffer_reloads_without_confirm() {
     std::fs::write(&path, "data2\n").unwrap();
     app.handle_action(Action::Revert).unwrap();
     assert_eq!(
-        app.pending_revert_confirm, None,
+        app.revert_confirm_target(), None,
         "no confirm for a clean buffer"
     );
     assert_eq!(app.active_buffer().rope.to_string(), "data2\n");
@@ -173,7 +173,7 @@ fn revert_pathless_buffer_is_noop_with_notice() {
     let mut app = App::new(Config::default(), vec![], EncodingId::Utf8, None, None);
     app.handle_action(Action::InsertChar('q')).unwrap();
     app.handle_action(Action::Revert).unwrap();
-    assert_eq!(app.pending_revert_confirm, None);
+    assert_eq!(app.revert_confirm_target(), None);
     assert!(modified(&app), "pathless buffer unchanged");
     assert_eq!(app.active_buffer().rope.to_string(), "q");
     assert!(app
@@ -191,7 +191,7 @@ fn revert_reload_failure_leaves_buffer_unchanged() {
     app.handle_action(Action::InsertChar('Z')).unwrap();
     std::fs::remove_file(&path).unwrap(); // make the on-disk file unreadable
     app.handle_action(Action::Revert).unwrap();
-    assert_eq!(app.pending_revert_confirm, Some(0));
+    assert_eq!(app.revert_confirm_target(), Some(0));
     app.handle_action(Action::InsertChar('Y')).unwrap(); // confirm → reload fails
 
     // Buffer content is preserved on a failed reload.

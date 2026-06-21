@@ -488,7 +488,7 @@ impl Ui {
 
         // Feature 030 (US3) — editor right-click context menu, drawn last so it
         // overlays everything (it only opens when no other modal is active).
-        if let Some(ref menu) = app.pending_context_menu {
+        if let Some(menu) = app.context_menu() {
             crate::ui::contextmenu::render(frame.buffer_mut(), size, menu, app.theme);
         }
     }
