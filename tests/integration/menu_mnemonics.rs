@@ -155,7 +155,10 @@ fn plugin_item_activates_by_accelerator() {
         app.handle_action(Action::InsertChar(c)).unwrap();
     }
 
-    let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+    let menus = resolve_menus(
+        &app.plugin_host.registry.menu_items(),
+        &app.recent_files.paths,
+    );
     let tools_idx = menus
         .iter()
         .position(|m| m.label == "Tools")

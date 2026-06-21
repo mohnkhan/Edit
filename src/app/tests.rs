@@ -1896,6 +1896,83 @@ fn save_while_soft_wrap_active_no_extra_newlines() {
     );
 }
 
+// ── Feature 049 (#81): recent-files list ──────────────────────────────────────
+
+#[test]
+fn recent_files_record_open_dispatch_and_menu() {
+    use std::sync::Mutex;
+    // Redirect the recent-files store to a throwaway dir so the test is hermetic
+    // and never touches the developer's real recent.toml.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    let _guard = ENV_LOCK.lock().unwrap();
+    let tmp = std::env::temp_dir().join(format!("edit_recent_test_{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::env::set_var("XDG_STATE_HOME", &tmp);
+
+    let a_path = tmp.join("alpha.txt");
+    let b_path = tmp.join("beta.txt");
+    std::fs::write(&a_path, "alpha\n").unwrap();
+    std::fs::write(&b_path, "beta\n").unwrap();
+
+    let mut app = make_app();
+
+    // Opening records most-recent-first.
+    app.handle_open_file(a_path.clone());
+    app.handle_open_file(b_path.clone());
+    assert_eq!(
+        app.recent_files.paths,
+        vec![
+            b_path.to_string_lossy().to_string(),
+            a_path.to_string_lossy().to_string()
+        ],
+        "most-recently opened is first"
+    );
+
+    // Re-opening alpha moves it to the front (dedup, no duplicate).
+    app.handle_open_file(a_path.clone());
+    assert_eq!(app.recent_files.paths.len(), 2, "no duplicate entries");
+    assert_eq!(
+        app.recent_files.paths[0],
+        a_path.to_string_lossy().to_string()
+    );
+
+    // resolve_menus injects the recent entries into the File menu, labelled by
+    // basename, firing OpenRecent(i) in list order.
+    let menus = app.resolved_menus();
+    let file = &menus[0];
+    let labels: Vec<&str> = file.items.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.contains(&"alpha.txt"));
+    assert!(labels.contains(&"beta.txt"));
+
+    // OpenRecent(i) opens recent_files.paths[i] via the validated open path.
+    let n_before = app.buffers.len();
+    app.handle_action(Action::OpenRecent(1)).unwrap();
+    assert_eq!(app.buffers.len(), n_before + 1, "OpenRecent adds a buffer");
+
+    // A missing recent entry drops from the list and surfaces a status (no crash).
+    std::fs::remove_file(&b_path).unwrap();
+    let target = app
+        .recent_files
+        .paths
+        .iter()
+        .position(|p| p == &b_path.to_string_lossy().to_string())
+        .expect("beta still tracked");
+    app.handle_action(Action::OpenRecent(target)).unwrap();
+    assert!(
+        !app.recent_files
+            .paths
+            .contains(&b_path.to_string_lossy().to_string()),
+        "missing file is pruned from the recent list"
+    );
+
+    // Persistence round-trip: the saved store reloads identically.
+    let reloaded = crate::recent::load();
+    assert_eq!(reloaded.paths, app.recent_files.paths);
+
+    std::env::remove_var("XDG_STATE_HOME");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 // ── Feature 042 (#72): deterministic no-panic fuzz sweep ──────────────────────
 // Drives long pseudo-random sequences of keyboard Actions + mouse events across
 // overlay states and several terminal sizes (incl. the 80×24 minimum and a

@@ -115,6 +115,15 @@ pub struct Config {
     /// Does not modify persisted per-plugin consent in `plugins.toml`.
     #[serde(skip)]
     pub no_plugins: bool,
+
+    /// Feature 049: maximum number of recently-opened files remembered and shown in
+    /// the File menu. `0` disables the recent-files list. Default: `10`.
+    #[serde(default = "default_recent_files_limit")]
+    pub recent_files_limit: usize,
+}
+
+fn default_recent_files_limit() -> usize {
+    10
 }
 
 impl Default for Config {
@@ -135,6 +144,7 @@ impl Default for Config {
             no_session: false,
             no_watch: false,
             no_plugins: false,
+            recent_files_limit: default_recent_files_limit(),
         }
     }
 }

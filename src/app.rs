@@ -333,6 +333,9 @@ pub struct App {
     /// Plugins awaiting a first-run consent decision; the front item is prompted.
     /// Async queue kept as a field (not a `Modal` variant) — see the note on `Modal`.
     pub pending_plugin_consent: Vec<crate::plugin::PluginMeta>,
+    /// Feature 049: recently-opened files (most-recent first), shown in the File
+    /// menu and persisted to `$XDG_STATE_HOME/edit/recent.toml`.
+    pub recent_files: crate::recent::RecentFiles,
 }
 
 // ── App impl (split across `src/app/*.rs` submodules — Feature 041) ───────────
@@ -541,6 +544,7 @@ impl App {
             scrollbar_drag: None,
             plugin_host,
             pending_plugin_consent,
+            recent_files: crate::recent::load(),
         }
     }
 

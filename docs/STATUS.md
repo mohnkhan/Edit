@@ -1,13 +1,14 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.4.0 (features 001–035 complete; 038–048 unreleased)
+**Version**: 0.4.0 (features 001–035 complete; 038–049 unreleased)
 **Last updated**: 2026-06-21
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F049 | Recent-files list: open/save-as record paths (deduped, most-recent-first, capped at `recent_files_limit`, default 10) shown at the bottom of the File menu and persisted to `recent.toml`; `OpenRecent` reopens, missing entries pruned gracefully | Complete |
 | F048 | Per-pane wrap cache for split view: each pane wraps at its own half width (active + non-active), correct scrollbars; single view unchanged | Complete |
 | F047 | Session restore also brings back scroll offset, selection, and encoding per tab (additive, backward-compatible) | Complete |
 | F046 | Harden raw slice/index access (#78): checked .get() for selection/cursor-driven list + stored buffer-index lookups; content-bearing no-panic fuzz sweep. Behavior-preserving | Complete |

@@ -233,7 +233,10 @@ impl Ui {
         let toggle_states: &[(Action, bool)] =
             &[(Action::ToggleSoftWrap, app.active_buffer().soft_wrap)];
         // Feature 009: render the composite menu list (built-in + active plugin menus).
-        let menus = resolve_menus(&app.plugin_host.registry.menu_items());
+        let menus = resolve_menus(
+            &app.plugin_host.registry.menu_items(),
+            &app.recent_files.paths,
+        );
         let menubar = MenuBarWidget::new(app.theme, &app.menu_bar, toggle_states, &menus);
         frame.render_widget(menubar, menubar_area);
 

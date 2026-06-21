@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 049: Recent-files list
+
+#### Added
+
+- **The File menu now lists recently opened files.** Opening a file (and choosing a destination with
+  Save As) records its path most-recent-first in a de-duplicated list, capped at
+  `recent_files_limit` (default 10; set to `0` to disable). Entries appear at the bottom of the File
+  menu labelled by file name and reopen the file when chosen; a recent entry whose file has since been
+  removed is pruned with a status message instead of failing. The list persists across restarts in
+  `$XDG_STATE_HOME/edit/recent.toml` (a missing or corrupt store simply starts empty).
+
 ### feature 048: Per-pane wrap cache for split view
 
 #### Fixed

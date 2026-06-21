@@ -12,6 +12,7 @@ pub mod diagnostics;
 pub mod encoding;
 pub mod highlight;
 pub mod input;
+pub mod recent;
 pub mod search;
 pub mod security;
 pub mod session;

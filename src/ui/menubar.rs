@@ -298,8 +298,18 @@ pub struct ResolvedMenu {
 /// 4. Items within a group are ordered by `position` (ascending) when set,
 ///    otherwise by stable load order.
 ///
-/// `resolve_menus(&[])` returns exactly the built-in set (parity invariant for
+/// `resolve_menus(&[], &[])` returns exactly the built-in set (parity invariant for
 /// FR-011 / SC-003).
+/// Feature 049: display label for a recent-files entry — the bare file name. The
+/// full path remains the stored/opened value; on basename collisions the menu may
+/// show the same name twice, which is acceptable per spec.
+fn recent_label(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
 /// Canonical lowercase form of a char (first scalar of its Unicode lowercase).
 fn lc(c: char) -> char {
     c.to_lowercase().next().unwrap_or(c)
@@ -332,7 +342,7 @@ pub fn underline_col(label: &str, mnemonic: Option<char>) -> Option<u16> {
         .map(|i| i as u16)
 }
 
-pub fn resolve_menus(plugin_items: &[PluginMenuItem]) -> Vec<ResolvedMenu> {
+pub fn resolve_menus(plugin_items: &[PluginMenuItem], recent: &[String]) -> Vec<ResolvedMenu> {
     // 1. Seed from built-ins. Top-level accelerator = first letter (f/e/s/v/o/h);
     //    items copy their hand-authored DOS accelerator.
     let mut menus: Vec<ResolvedMenu> = BAR_LABELS
@@ -352,7 +362,22 @@ pub fn resolve_menus(plugin_items: &[PluginMenuItem]) -> Vec<ResolvedMenu> {
         })
         .collect();
 
-    // Parity fast-path: no plugin menus → identical to built-ins.
+    // Feature 049: append the recent-files list to the File menu (first built-in).
+    // Each entry opens `recent[i]` via `Action::OpenRecent(i)`; the label is the
+    // bare file name (the full path is the stored value). Empty list ⇒ no change.
+    if !recent.is_empty() {
+        if let Some(file_menu) = menus.first_mut() {
+            for (i, path) in recent.iter().enumerate() {
+                file_menu.items.push(ResolvedItem {
+                    label: recent_label(path),
+                    action: Action::OpenRecent(i),
+                    mnemonic: None,
+                });
+            }
+        }
+    }
+
+    // Parity fast-path: no plugin menus → identical to built-ins (plus any recent).
     if plugin_items.is_empty() {
         return menus;
     }
@@ -1034,7 +1059,7 @@ mod tests {
     // Built-in resolved menus (no plugins) — used by the geometry tests so
     // their assertions stay identical to the pre-feature layout.
     fn builtin_menus() -> Vec<ResolvedMenu> {
-        resolve_menus(&[])
+        resolve_menus(&[], &[])
     }
 
     // T009: shared helpers — open a specific menu dropdown for rendering.
@@ -1267,7 +1292,7 @@ mod tests {
 
     #[test]
     fn test_resolve_menus_empty_matches_builtin() {
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         let labels: Vec<&str> = menus.iter().map(|m| m.label.as_str()).collect();
         assert_eq!(
             labels,
@@ -1282,9 +1307,33 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_menus_appends_recent_to_file_menu() {
+        // Feature 049: recent paths become File-menu items labelled by basename,
+        // each firing Action::OpenRecent(i) in list order.
+        let recent = vec!["/home/u/notes.txt".to_string(), "/tmp/draft.md".to_string()];
+        let menus = resolve_menus(&[], &recent);
+        let file = &menus[0];
+        assert_eq!(file.label, "File");
+        let n = file.items.len();
+        assert_eq!(file.items[n - 2].label, "notes.txt");
+        assert_eq!(file.items[n - 2].action, Action::OpenRecent(0));
+        assert_eq!(file.items[n - 1].label, "draft.md");
+        assert_eq!(file.items[n - 1].action, Action::OpenRecent(1));
+    }
+
+    #[test]
+    fn test_resolve_menus_empty_recent_unchanged() {
+        // FR-006: an empty recent list leaves the File menu byte-identical.
+        let with = resolve_menus(&[], &[]);
+        let file_items: Vec<&str> = with[0].items.iter().map(|i| i.label.as_str()).collect();
+        let builtin: Vec<&str> = FILE_MENU.iter().map(|i| i.label).collect();
+        assert_eq!(file_items, builtin);
+    }
+
+    #[test]
     fn test_resolve_menus_inserts_plugin_before_help() {
         let items = vec![plugin_item("Tools", "Word Count", "wc", "word-count")];
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         // "Tools" is at len-2; Help remains last.
         assert_eq!(menus.last().unwrap().label, "Help");
         assert_eq!(menus[menus.len() - 2].label, "Tools");
@@ -1299,7 +1348,7 @@ mod tests {
     #[test]
     fn test_resolve_menus_merges_into_builtin_on_name_collision() {
         let items = vec![plugin_item("Edit", "Sort Lines", "sort", "sorter")];
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         // Exactly one "Edit" top-level menu (no duplicate).
         assert_eq!(menus.iter().filter(|m| m.label == "Edit").count(), 1);
         let edit = menus.iter().find(|m| m.label == "Edit").unwrap();
@@ -1317,7 +1366,7 @@ mod tests {
             plugin_item("Tools", "Word Count", "wc", "word-count"),
             plugin_item("Tools", "Line Count", "lc", "line-count"),
         ];
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         let tools: Vec<&ResolvedMenu> = menus.iter().filter(|m| m.label == "Tools").collect();
         assert_eq!(tools.len(), 1, "a single shared Tools menu");
         assert_eq!(tools[0].items.len(), 2);
@@ -1330,7 +1379,7 @@ mod tests {
         let mut b = plugin_item("Tools", "First", "a", "p");
         b.position = Some(1);
         let c = plugin_item("Tools", "Loadorder", "c", "p"); // None position → after positioned
-        let menus = resolve_menus(&[a, b, c]);
+        let menus = resolve_menus(&[a, b, c], &[]);
         let tools = menus.iter().find(|m| m.label == "Tools").unwrap();
         let labels: Vec<&str> = tools.items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(labels, ["First", "Second", "Loadorder"]);
@@ -1340,7 +1389,7 @@ mod tests {
     fn test_resolve_menus_widechar_plugin_label_preserved() {
         // FR-014 / remediation M2: UTF-8 wide-character labels survive resolution intact.
         let items = vec![plugin_item("ツール", "文字数", "wc", "jp")];
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         let tools = menus.iter().find(|m| m.label == "ツール").unwrap();
         assert_eq!(tools.items[0].label, "文字数");
     }
@@ -1487,7 +1536,7 @@ mod tests {
     #[test]
     fn test_select_item_returns_plugin_activated_action() {
         let items = vec![plugin_item("Tools", "Word Count", "wc", "word-count")];
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         let tools_idx = menus.iter().position(|m| m.label == "Tools").unwrap();
         let mut s = MenuBarState::new();
         s.open_menu(tools_idx, &menus);
@@ -1556,7 +1605,7 @@ mod tests {
     fn test_plugin_menu_renders_between_options_and_help() {
         // Rendering smoke: the Tools label appears in the bar to the left of Help.
         let items = vec![plugin_item("Tools", "Word Count", "wc", "word-count")];
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         let state = MenuBarState::new();
         let buf = render_into_with_menus(&state, &[], &menus, 60, 1);
         let row: String = (0..60)
@@ -1571,7 +1620,7 @@ mod tests {
 
     #[test]
     fn hit_test_top_level_each_builtin_menu() {
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         let st = MenuState::Inactive;
         // File col 1, Edit col 7, Search col 13, View col 21, Options 28, Help 37.
         for (col, idx) in [(1u16, 0usize), (7, 1), (13, 2), (21, 3), (28, 4), (37, 5)] {
@@ -1585,7 +1634,7 @@ mod tests {
 
     #[test]
     fn hit_test_top_level_gap_is_outside() {
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         // Column 5 is between "File" (1-4) and "Edit" (7-10).
         assert_eq!(
             hit_test_menu(&menus, &MenuState::Inactive, &[], 80, 5, 0),
@@ -1595,7 +1644,7 @@ mod tests {
 
     #[test]
     fn hit_test_dropdown_item_rows() {
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         let st = MenuState::DropDown {
             top_idx: 0,
             item_idx: 0,
@@ -1625,7 +1674,7 @@ mod tests {
 
     #[test]
     fn hit_test_dropdown_outside_columns() {
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         let st = MenuState::DropDown {
             top_idx: 0,
             item_idx: 0,
@@ -1636,7 +1685,7 @@ mod tests {
 
     #[test]
     fn dropdown_layout_reserves_checkable_width() {
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         // View (index 3) contains the checkable "Soft Wrap (ext)" item.
         let view = &menus[3];
         let plain = dropdown_layout(view, 21, &[], 80);
@@ -1693,7 +1742,7 @@ mod tests {
     // T005 — built-in authored mnemonics: present, unique per menu, match R4.
     #[test]
     fn builtin_mnemonics_present_and_unique_per_menu() {
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         for menu in &menus {
             let mut seen = HashSet::new();
             for it in &menu.items {
@@ -1732,7 +1781,7 @@ mod tests {
     fn top_level_mnemonics_match_alt_bindings() {
         use crate::input::keymap::Action as A;
         use crate::input::KeybindingMap;
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         let km = KeybindingMap::default_map();
         let expect = [
             (0usize, A::MenuFile),
@@ -1797,7 +1846,7 @@ mod tests {
     // T016 — select_item_by_mnemonic.
     #[test]
     fn select_item_by_mnemonic_activates_and_is_case_insensitive() {
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         let mut s = file_open();
         // 'N'/'n' → New action; menu closes.
         assert_eq!(s.select_item_by_mnemonic(&menus, 'N'), Some(Action::New));
@@ -1815,7 +1864,7 @@ mod tests {
     // T020 — open_menu_by_mnemonic.
     #[test]
     fn open_menu_by_mnemonic_opens_matching_top_level() {
-        let menus = resolve_menus(&[]);
+        let menus = resolve_menus(&[], &[]);
         let mut s = MenuBarState::new();
         s.activate_bar(); // TopActive(0)
         assert!(s.open_menu_by_mnemonic(&menus, 'v'));
@@ -1841,7 +1890,7 @@ mod tests {
             plugin_item("Edit", "Sort", "srt", "p"),
             plugin_item("Edit", "Dedup", "dd", "p"),
         ];
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         let edit = menus.iter().find(|m| m.label == "Edit").unwrap();
         let mut seen = HashSet::new();
         for it in &edit.items {
@@ -1857,7 +1906,7 @@ mod tests {
     #[test]
     fn plugin_top_level_menu_gets_unique_letter() {
         let items = vec![plugin_item("Tools", "Word Count", "wc", "p")];
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         let tools = menus.iter().find(|m| m.label == "Tools").unwrap();
         let m = tools.mnemonic.expect("plugin top-level gets a letter");
         assert!(
@@ -1872,7 +1921,7 @@ mod tests {
     fn plugin_item_with_no_free_letter_gets_none() {
         // A merged item whose only letter is already used resolves to None (FR-006).
         let items = vec![plugin_item("Edit", "Sssss", "s5", "p")]; // only 's', taken by Select All
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         let edit = menus.iter().find(|m| m.label == "Edit").unwrap();
         let it = edit.items.iter().find(|i| i.label == "Sssss").unwrap();
         assert_eq!(it.mnemonic, None);
@@ -1881,7 +1930,7 @@ mod tests {
     #[test]
     fn plugin_widechar_label_does_not_panic() {
         let items = vec![plugin_item("ツール", "文字数", "wc", "jp")];
-        let menus = resolve_menus(&items);
+        let menus = resolve_menus(&items, &[]);
         let tools = menus.iter().find(|m| m.label == "ツール").unwrap();
         // Whatever is chosen, it must render without panic and be Some or None.
         let _ = tools.mnemonic;
