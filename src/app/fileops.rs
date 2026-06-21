@@ -83,6 +83,16 @@ impl App {
                     cursor_col: (buf.cursor.grapheme_col + 1) as u32,
                     // Feature 045: persist this tab's wrap setting.
                     soft_wrap: buf.soft_wrap,
+                    // Feature 047: scroll offset, selection, and encoding.
+                    scroll_line: buf.scroll_offset.0 as u32,
+                    scroll_col: buf.scroll_offset.1 as u32,
+                    selection: buf.selection.map(|s| crate::session::SelectionEntry {
+                        anchor_line: (s.anchor.line + 1) as u32,
+                        anchor_col: (s.anchor.grapheme_col + 1) as u32,
+                        active_line: (s.active.line + 1) as u32,
+                        active_col: (s.active.grapheme_col + 1) as u32,
+                    }),
+                    encoding: crate::encoding::encoding_to_str(buf.encoding).to_string(),
                 })
             })
             .collect();
@@ -157,8 +167,14 @@ impl App {
                 }
             };
 
-            // T021: attempt to open the buffer.
-            match Buffer::open(open_path.clone(), self.default_encoding) {
+            // T021: attempt to open the buffer. Feature 047: decode in the recorded
+            // encoding (empty/absent → the default decode, as before).
+            let open_encoding = if entry.encoding.is_empty() {
+                self.default_encoding
+            } else {
+                crate::encoding::encoding_from_str(&entry.encoding)
+            };
+            match Buffer::open(open_path.clone(), open_encoding) {
                 Ok(mut buf) => {
                     // Seek cursor to saved position (convert 1-based → 0-based).
                     let target_line = (entry.cursor_line as usize).saturating_sub(1);
@@ -180,6 +196,36 @@ impl App {
                     // Feature 045: restore this tab's saved soft-wrap setting
                     // (v1 sessions have no value → `false` → the configured default).
                     buf.soft_wrap = entry.soft_wrap;
+                    // Feature 047: restore scroll offset (clamped to content) and the
+                    // active selection (each endpoint clamped; degenerate → none).
+                    buf.scroll_offset = (
+                        (entry.scroll_line as usize).min(line_count.saturating_sub(1)),
+                        entry.scroll_col as usize,
+                    );
+                    if let Some(sel) = &entry.selection {
+                        let clamp = |line1: u32, col1: u32| -> crate::buffer::CursorPos {
+                            let l = (line1 as usize)
+                                .saturating_sub(1)
+                                .min(line_count.saturating_sub(1));
+                            let g = (col1 as usize)
+                                .saturating_sub(1)
+                                .min(buf.rope.grapheme_count_on_line(l));
+                            crate::buffer::CursorPos {
+                                line: l,
+                                grapheme_col: g,
+                                visual_col: crate::buffer::CursorPos::visual_col_from_grapheme_col(
+                                    &buf.rope, l, g,
+                                ),
+                            }
+                        };
+                        let anchor = clamp(sel.anchor_line, sel.anchor_col);
+                        let active = clamp(sel.active_line, sel.active_col);
+                        // Drop a degenerate (empty) selection.
+                        if anchor.line != active.line || anchor.grapheme_col != active.grapheme_col
+                        {
+                            buf.selection = Some(crate::buffer::Selection { anchor, active });
+                        }
+                    }
                     // Apply syntax highlighting if configured (plugin highlighter wins).
                     if self.config.highlight {
                         if let Some(ref path) = buf.path.clone() {

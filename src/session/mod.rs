@@ -28,6 +28,28 @@ pub struct BufferEntry {
     /// (the configured default applies on restore), keeping old sessions valid.
     #[serde(default)]
     pub soft_wrap: bool,
+    /// Feature 047: viewport scroll offset (0-based row, col). `serde(default)` → 0
+    /// for older files (top-of-file, today's behavior).
+    #[serde(default)]
+    pub scroll_line: u32,
+    #[serde(default)]
+    pub scroll_col: u32,
+    /// Feature 047: active selection at save time, if any (None for older files).
+    #[serde(default)]
+    pub selection: Option<SelectionEntry>,
+    /// Feature 047: canonical encoding name (e.g. "utf-16-le"). Empty for older
+    /// files → the buffer is opened in the default decode (today's behavior).
+    #[serde(default)]
+    pub encoding: String,
+}
+
+/// Feature 047: a recorded selection (anchor + active), 1-based to mirror cursor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SelectionEntry {
+    pub anchor_line: u32,
+    pub anchor_col: u32,
+    pub active_line: u32,
+    pub active_col: u32,
 }
 
 /// How the editor area was split when the session was saved.
@@ -221,6 +243,10 @@ mod tests {
                 cursor_line: 5,
                 cursor_col: 10,
                 soft_wrap: false,
+                scroll_line: 0,
+                scroll_col: 0,
+                selection: None,
+                encoding: String::new(),
             }],
         }
     }
@@ -249,12 +275,20 @@ mod tests {
                         cursor_line: 1,
                         cursor_col: 1,
                         soft_wrap: false,
+                        scroll_line: 0,
+                        scroll_col: 0,
+                        selection: None,
+                        encoding: String::new(),
                     },
                     BufferEntry {
                         path: "/tmp/b.txt".to_string(),
                         cursor_line: 3,
                         cursor_col: 7,
                         soft_wrap: false,
+                        scroll_line: 0,
+                        scroll_col: 0,
+                        selection: None,
+                        encoding: String::new(),
                     },
                 ],
             };
@@ -321,12 +355,20 @@ mod tests {
                         cursor_line: 1,
                         cursor_col: 1,
                         soft_wrap: true,
+                        scroll_line: 0,
+                        scroll_col: 0,
+                        selection: None,
+                        encoding: String::new(),
                     },
                     BufferEntry {
                         path: "/tmp/plain.txt".to_string(),
                         cursor_line: 1,
                         cursor_col: 1,
                         soft_wrap: false,
+                        scroll_line: 0,
+                        scroll_col: 0,
+                        selection: None,
+                        encoding: String::new(),
                     },
                 ],
             };
@@ -354,6 +396,37 @@ mod tests {
                 !loaded.buffers[0].soft_wrap,
                 "missing soft_wrap defaults to false"
             );
+        });
+    }
+
+    /// Feature 047: scroll/selection/encoding round-trip through save+load.
+    #[test]
+    fn test_scroll_selection_encoding_round_trip() {
+        with_temp_state_dir(|| {
+            let data = SessionData {
+                version: 2,
+                active_buffer: 0,
+                split_layout: SplitLayoutKind::None,
+                active_pane: 0,
+                buffers: vec![BufferEntry {
+                    path: "/tmp/x.txt".to_string(),
+                    cursor_line: 3,
+                    cursor_col: 2,
+                    soft_wrap: false,
+                    scroll_line: 7,
+                    scroll_col: 4,
+                    selection: Some(SelectionEntry {
+                        anchor_line: 1,
+                        anchor_col: 1,
+                        active_line: 3,
+                        active_col: 2,
+                    }),
+                    encoding: "utf-16-le".to_string(),
+                }],
+            };
+            save_session(&data).unwrap();
+            let loaded = load_session().unwrap().unwrap();
+            assert_eq!(loaded, data, "scroll/selection/encoding must round-trip");
         });
     }
 }
