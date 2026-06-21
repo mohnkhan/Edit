@@ -1,6 +1,6 @@
 [package]
 name = "edit"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["Mohiuddin Khan Inamdar"]
 description = "Cross-platform reimplementation of MS-DOS EDIT.COM (Linux, BSD, macOS, MyOS)"
@@ -203,4 +203,11 @@ priority = "optional"
 assets = [
   ["target/release/edit", "usr/bin/edit", "755"],
   ["man/edit.1", "usr/share/man/man1/edit.1", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "MS-DOS EDIT.COM reimplementation for Linux"
+assets = [
+  { source = "target/release/edit", dest = "/usr/bin/edit", mode = "755" },
+  { source = "man/edit.1", dest = "/usr/share/man/man1/edit.1", mode = "644", doc = true },
 ]
