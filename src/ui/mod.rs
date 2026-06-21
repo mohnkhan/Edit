@@ -127,7 +127,7 @@ impl Ui {
                 )
                 .with_matches(&app.search_state.matches, app.search_state.active_match);
                 frame.render_widget(editor_widget, text);
-                render_editor_scrollbars(frame, app, buf, text, vbar, hbar);
+                render_editor_scrollbars(frame, app, buf, app.active_idx, text, vbar, hbar);
             }
             SplitMode::Vertical => {
                 let half_width = editor_area.width / 2;
@@ -139,15 +139,11 @@ impl Ui {
                     editor_area.width - half_width,
                     editor_area.height,
                 );
-                // Feature 044: each pane uses its OWN buffer's wrap flag; the single
-                // active-buffer wrap cache is handed only to the pane that IS the
-                // active buffer (the other pane renders best-effort with no cache).
+                // Feature 044/048: each pane uses its OWN buffer's wrap flag and its
+                // OWN wrap cache (active → primary, the other visible pane → alt),
+                // so both panes wrap correctly at their half width.
                 let left_wrap = app.buffers[0].soft_wrap;
-                let left_cache = if app.active_idx == 0 {
-                    app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice())
-                } else {
-                    None
-                };
+                let left_cache = app.pane_wrap_starts(0);
                 let (l_text, l_vbar, l_hbar) = editor_panes(left_area, left_wrap);
                 frame.render_widget(
                     EditorWidget::new(
@@ -159,18 +155,14 @@ impl Ui {
                     ),
                     l_text,
                 );
-                render_editor_scrollbars(frame, app, &app.buffers[0], l_text, l_vbar, l_hbar);
+                render_editor_scrollbars(frame, app, &app.buffers[0], 0, l_text, l_vbar, l_hbar);
                 let right_buf_idx = if app.buffers.len() > 1 {
                     app.active_idx.max(1)
                 } else {
                     0
                 };
                 let right_wrap = app.buffers[right_buf_idx].soft_wrap;
-                let right_cache = if app.active_idx == right_buf_idx {
-                    app.wrap_cache.as_ref().map(|c| c.visual_starts.as_slice())
-                } else {
-                    None
-                };
+                let right_cache = app.pane_wrap_starts(right_buf_idx);
                 let (r_text, r_vbar, r_hbar) = editor_panes(right_area, right_wrap);
                 frame.render_widget(
                     EditorWidget::new(
@@ -186,6 +178,7 @@ impl Ui {
                     frame,
                     app,
                     &app.buffers[right_buf_idx],
+                    right_buf_idx,
                     r_text,
                     r_vbar,
                     r_hbar,
@@ -557,24 +550,19 @@ fn render_editor_scrollbars(
     frame: &mut Frame,
     app: &App,
     buf: &crate::buffer::Buffer,
+    buf_idx: usize,
     text: Rect,
     vbar: Rect,
     hbar: Option<Rect>,
 ) {
     // Vertical: lines (or total visual rows in soft-wrap) vs visible rows.
-    // Feature 044: wrap is per-buffer; the single wrap cache belongs to the active
-    // buffer, so only consult it when this pane IS the active buffer.
+    // Feature 048: use THIS pane's own wrap cache (active → primary, other visible
+    // pane → alt) so each pane's scrollbar total reflects its own wrapped rows.
     let viewport_v = text.height as usize;
     let content_v = if buf.soft_wrap {
-        let cache_applies = std::ptr::eq(buf, app.active_buffer());
-        if cache_applies {
-            app.wrap_cache
-                .as_ref()
-                .map(|c| c.total_visual_rows())
-                .unwrap_or_else(|| buf.rope.line_count())
-        } else {
-            buf.rope.line_count()
-        }
+        app.pane_wrap_starts(buf_idx)
+            .map(|starts| starts.iter().map(|s| s.len().max(1)).sum())
+            .unwrap_or_else(|| buf.rope.line_count())
     } else {
         buf.rope.line_count()
     };

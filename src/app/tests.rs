@@ -2258,3 +2258,51 @@ fn no_panic_random_input_with_multibyte_content() {
         }
     }
 }
+
+// ── Feature 048: per-pane wrap cache in split view ─────────────────────────────
+// A wrapped non-active split pane must get its own wrap cache (so it renders
+// wrapped, not unwrapped), computed at its own half width.
+#[test]
+fn split_view_builds_per_pane_wrap_caches() {
+    let mut a = make_app();
+    a.terminal_size = (80, 24);
+    let long = "word ".repeat(40); // ~200 cols → wraps at any half width
+    a.buffers[0].rope = crate::buffer::rope::EditorRope::from_str(&format!("{long}\n"));
+    a.buffers.push(crate::buffer::Buffer::new_empty());
+    a.buffers[1].rope = crate::buffer::rope::EditorRope::from_str(&format!("{long}\n"));
+    a.buffers[0].soft_wrap = true;
+    a.buffers[1].soft_wrap = true;
+    a.split_mode = crate::ui::SplitMode::Vertical;
+    a.active_idx = 0;
+
+    a.refresh_wrap_caches();
+
+    // Active pane (buffer 0) has the primary cache; the non-active visible pane
+    // (buffer 1) has the alt cache — both present, so both render wrapped.
+    assert!(
+        a.pane_wrap_starts(0).is_some(),
+        "active pane has a wrap cache"
+    );
+    assert!(
+        a.pane_wrap_starts(1).is_some(),
+        "non-active visible pane has its own wrap cache (not unwrapped)"
+    );
+    assert_eq!(a.wrap_alt_for, Some(1));
+    // The long line wraps into multiple visual rows at the half (≈40-col) width.
+    let alt_rows: usize = a.pane_wrap_starts(1).unwrap()[0].len();
+    assert!(
+        alt_rows > 1,
+        "the long line wraps into multiple rows at the pane's half width (got {alt_rows})"
+    );
+
+    // Switching the active tab re-targets the caches (043/048 invalidation).
+    a.activate_buffer(1);
+    assert_eq!(a.wrap_alt_for, None, "switch clears the stale alt cache");
+    a.refresh_wrap_caches();
+    assert!(
+        a.pane_wrap_starts(1).is_some(),
+        "buffer 1 now active → primary"
+    );
+    assert!(a.pane_wrap_starts(0).is_some(), "buffer 0 now the alt pane");
+    assert_eq!(a.wrap_alt_for, Some(0));
+}
