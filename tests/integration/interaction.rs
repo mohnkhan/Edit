@@ -102,7 +102,7 @@ fn right_click_opens_menu_and_copy_runs_and_esc_dismisses() {
 #[test]
 fn right_click_does_not_open_over_a_modal() {
     let mut a = app();
-    a.pending_help = Some(edit::app::HelpScreen::Help);
+    a.open_help(edit::app::HelpScreen::Help);
     press(&mut a, MouseButton::Right, 5, 5);
     assert!(a.context_menu().is_none(), "no context menu over a modal");
 }

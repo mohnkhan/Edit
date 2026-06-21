@@ -392,12 +392,12 @@ impl Ui {
         }
 
         // Feature 025 — Go-to-Line prompt overlay.
-        if let Some(ref entry) = app.pending_goto_line {
+        if let Some(entry) = app.goto_line_digits() {
             let base = ratatui::style::Style::default()
                 .fg(app.theme.menubar_fg)
                 .bg(app.theme.menubar_bg);
             // Feature 031: embed the caret glyph at the caret position (mid-string).
-            let caret = app.pending_goto_line_caret.min(entry.len());
+            let caret = app.goto_line_caret().min(entry.len());
             let body = format!("Go to line: {}▏{}", &entry[..caret], &entry[caret..]);
             // A compact centered box; width fits the prompt + padding, clamped.
             let dw = (body.len() as u16 + 4).clamp(20, size.width.max(1));
@@ -429,7 +429,7 @@ impl Ui {
         }
 
         // Feature 011 — Help / About overlay.
-        if let Some(screen) = app.pending_help {
+        if let Some(screen) = app.help_screen() {
             render_help_overlay(frame, app, screen, size);
         }
 
@@ -866,7 +866,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, screen: HelpScreen, size: R
     let body_rows = inner_h.saturating_sub(1 + button_reserved); // 1 row = footer hint
     let total = lines.len();
     let max_scroll = total.saturating_sub(body_rows);
-    let scroll = app.help_scroll.min(max_scroll);
+    let scroll = app.help_scroll().min(max_scroll);
 
     let mut shown: Vec<Line> = lines
         .into_iter()

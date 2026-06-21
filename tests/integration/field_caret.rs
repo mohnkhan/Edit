@@ -78,14 +78,13 @@ fn click_and_arrows_edit_name_field() {
 #[test]
 fn click_in_goto_line_positions_caret() {
     let mut a = app();
-    a.pending_goto_line = Some("12345".to_string());
-    a.pending_goto_line_caret = 5;
+    a.open_goto_line("12345".to_string(), 5);
     // Box: dw = (19 + 5).clamp(20, 80) = 24; dx = (80-24)/2 = 28; dy = (24-3)/2 = 10.
     // Digits start at dx + 1 + 12 = 41, on row dy+1 = 11. Click 2 cols in → caret 2.
     let value_x = 28 + 1 + 12;
     left_click(&mut a, value_x + 2, 11);
-    assert_eq!(a.pending_goto_line_caret, 2);
+    assert_eq!(a.goto_line_caret(), 2);
     // Insert mid-string via the key path.
     a.handle_action(Action::InsertChar('0')).unwrap();
-    assert_eq!(a.pending_goto_line.as_deref(), Some("120345"));
+    assert_eq!(a.goto_line_digits(), Some("120345"));
 }

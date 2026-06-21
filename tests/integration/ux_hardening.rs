@@ -61,13 +61,13 @@ fn arrow_keys_navigate_confirm_dialog_buttons() {
 fn help_overlay_scrolls_and_closes_from_keyboard() {
     let mut a = app();
     a.handle_action(Action::Help).unwrap();
-    assert!(a.pending_help.is_some());
+    assert!(a.help_screen().is_some());
     a.handle_action(Action::MovePageDown).unwrap();
-    assert!(a.help_scroll > 0, "PageDown scrolls Help");
+    assert!(a.help_scroll() > 0, "PageDown scrolls Help");
     a.handle_action(Action::MoveLineStart).unwrap();
-    assert_eq!(a.help_scroll, 0, "Home returns to the top");
+    assert_eq!(a.help_scroll(), 0, "Home returns to the top");
     a.handle_action(Action::MenuClose).unwrap();
-    assert!(a.pending_help.is_none(), "Esc closes Help");
+    assert!(a.help_screen().is_none(), "Esc closes Help");
 }
 
 // ── US6: Home/End move the editor cursor ────────────────────────────────────

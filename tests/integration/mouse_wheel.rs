@@ -75,9 +75,9 @@ fn wheel_on_menu_or_status_row_is_ignored() {
 fn wheel_scrolls_help_not_editor() {
     let mut a = tall_app();
     a.handle_action(Action::Help).unwrap();
-    assert!(a.pending_help.is_some());
+    assert!(a.help_screen().is_some());
     wheel(&mut a, MouseEventKind::ScrollDown, 10, 5);
-    assert_eq!(a.help_scroll, 3, "Help scrolls on wheel");
+    assert_eq!(a.help_scroll(), 3, "Help scrolls on wheel");
     assert_eq!(
         a.buffers[0].scroll_offset.0, 0,
         "editor under the modal does not scroll"
@@ -85,7 +85,7 @@ fn wheel_scrolls_help_not_editor() {
     // Clamp at top.
     wheel(&mut a, MouseEventKind::ScrollUp, 10, 5);
     wheel(&mut a, MouseEventKind::ScrollUp, 10, 5);
-    assert_eq!(a.help_scroll, 0, "Help scroll clamps at 0");
+    assert_eq!(a.help_scroll(), 0, "Help scroll clamps at 0");
 }
 
 #[test]

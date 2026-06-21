@@ -76,7 +76,7 @@ enum InteractiveDialog {
 /// is adjunct focus/flow state (`dialog_focus`, `pending_save_as_encoding`) stays in
 /// its own field — see `data-model.md`.
 #[derive(Default)]
-enum Modal {
+pub(crate) enum Modal {
     /// No overlay open — normal editing (possibly with the menu bar active).
     #[default]
     None,
@@ -248,8 +248,6 @@ pub struct App {
     /// Feature 030: last editor left-press `(col, row, count, time)` for
     /// double/triple-click detection (count 1=single, 2=word, 3=line).
     pub last_editor_click: Option<(u16, u16, u8, Instant)>,
-    /// Which Help overlay is open, if any (Feature 011).
-    pub pending_help: Option<HelpScreen>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
     pub pending_save_as_encoding: Option<EncodingId>,
     /// Whether soft-wrap visual rendering is active (Feature 005).
@@ -269,14 +267,6 @@ pub struct App {
     /// One-shot status-bar notice (e.g., file-deleted notice); cleared after one render frame.
     pub watcher_notice: Option<String>,
 
-    // ── Feature 025: Go-to-Line prompt ────────────────────────────────────────
-    /// `Some(digits)` while the Go-to-Line prompt is open (modal); holds the
-    /// in-progress 1-based line number being typed.
-    pub pending_goto_line: Option<String>,
-    /// Feature 031: caret position (index into the digit string) for the
-    /// Go-to-Line input — supports mid-string edit and click-to-position.
-    pub pending_goto_line_caret: usize,
-
     // ── Feature 016: focused dialog button ────────────────────────────────────
     /// Index of the focused button in the currently open confirm/dismiss dialog.
     /// Only one modal is open at a time, so a single field suffices. Reset to the
@@ -294,10 +284,6 @@ pub struct App {
     /// Feature 024: in-progress scrollbar thumb drag; `Some` between a thumb press
     /// and the button release. While set, mouse drags scroll instead of selecting.
     scrollbar_drag: Option<ScrollbarDrag>,
-
-    // ── Feature 018: Help scroll ──────────────────────────────────────────────
-    /// First visible row of the Help cheat-sheet (scroll offset); reset on open.
-    pub help_scroll: usize,
 
     // ── Feature 008: plugin subsystem ────────────────────────────────────────
     /// The Rhai plugin host owning the engine and registry for this session.
@@ -485,7 +471,6 @@ impl App {
             default_encoding,
             last_browser_click: None,
             last_editor_click: None,
-            pending_help: None,
             pending_save_as_encoding: None,
             soft_wrap: soft_wrap_initial,
             wrap_cache: None,
@@ -494,13 +479,10 @@ impl App {
             self_write_times: std::collections::HashMap::new(),
             pending_external_change: None,
             watcher_notice,
-            pending_goto_line: None,
-            pending_goto_line_caret: 0,
             dialog_focus: 0,
             dialog_focus_init: false,
             drag_anchor: None,
             scrollbar_drag: None,
-            help_scroll: 0,
             plugin_host,
             pending_plugin_consent,
         }
@@ -694,6 +676,56 @@ impl App {
         self.modal = Modal::PluginManager { cursor: 0 };
     }
 
+    /// Open the Go-to-Line prompt with the given in-progress digits and caret.
+    pub fn open_goto_line(&mut self, digits: String, caret: usize) {
+        self.modal = Modal::GotoLine { digits, caret };
+    }
+
+    /// Open the Help/About overlay at the given screen (scroll reset to top).
+    pub fn open_help(&mut self, screen: HelpScreen) {
+        self.modal = Modal::Help { screen, scroll: 0 };
+    }
+
+    /// The Go-to-Line digits (in progress), if that prompt is open.
+    pub fn goto_line_digits(&self) -> Option<&str> {
+        match &self.modal {
+            Modal::GotoLine { digits, .. } => Some(digits.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The Go-to-Line caret index (0 when the prompt is not open).
+    pub fn goto_line_caret(&self) -> usize {
+        match self.modal {
+            Modal::GotoLine { caret, .. } => caret,
+            _ => 0,
+        }
+    }
+
+    /// The open Help/About overlay screen, if that overlay is open.
+    pub fn help_screen(&self) -> Option<HelpScreen> {
+        match self.modal {
+            Modal::Help { screen, .. } => Some(screen),
+            _ => None,
+        }
+    }
+
+    /// The Help overlay scroll offset (0 when Help is not open).
+    pub fn help_scroll(&self) -> usize {
+        match self.modal {
+            Modal::Help { scroll, .. } => scroll,
+            _ => 0,
+        }
+    }
+
+    /// Mutable Help scroll offset, if the Help overlay is open.
+    pub(crate) fn help_scroll_mut(&mut self) -> Option<&mut usize> {
+        match &mut self.modal {
+            Modal::Help { scroll, .. } => Some(scroll),
+            _ => None,
+        }
+    }
+
     /// Plugin-manager list cursor (0 when the overlay is not open — callers read
     /// it only inside manager-open contexts).
     pub(crate) fn plugin_manager_cursor(&self) -> usize {
@@ -796,7 +828,7 @@ impl App {
         let (w, h) = self.terminal_size;
         let full = Rect::new(0, 0, w, h);
         let mut out = Vec::new();
-        if let Some(screen) = self.pending_help {
+        if let Some(screen) = self.help_screen() {
             let dw = 64u16.min(w.max(1));
             let dh = 20u16.min(h.max(1));
             let dx = w.saturating_sub(dw) / 2;
@@ -809,7 +841,7 @@ impl App {
                     axis: ScrollAxis::Vertical,
                     content,
                     viewport: body_rows,
-                    offset: self.help_scroll.min(content),
+                    offset: self.help_scroll().min(content),
                     target: ScrollTarget::Help,
                 });
             }
@@ -856,7 +888,7 @@ impl App {
                     target: ScrollTarget::Plugin,
                 });
             }
-        } else if self.find_replace().is_some() || self.pending_goto_line.is_some() {
+        } else if self.find_replace().is_some() || self.goto_line_digits().is_some() {
             // Find/Replace and Go-to-Line have no scrollable content.
         } else {
             // Editor — the pane under the cursor column. Feature 027: the editor
@@ -952,7 +984,9 @@ impl App {
                 }
             }
             ScrollTarget::Help => {
-                self.help_scroll = offset;
+                if let Some(s) = self.help_scroll_mut() {
+                    *s = offset;
+                }
             }
             ScrollTarget::Encoding => {
                 let n = crate::ui::dialog::ENCODING_OPTIONS.len();
@@ -1369,37 +1403,55 @@ impl App {
         // Feature 025 — Go-to-Line prompt intercept: digits edit the number,
         // Enter jumps (clamped) to the line start, Esc cancels; everything else is
         // consumed so the buffer is never modified while the prompt is open.
-        if self.pending_goto_line.is_some() {
+        if matches!(self.modal, Modal::GotoLine { .. }) {
             // Feature 031: caret-aware digit editing. The value is ASCII digits, so
             // the caret index equals a byte offset.
             match &action {
                 Action::InsertChar(c) if c.is_ascii_digit() => {
-                    let entry = self.pending_goto_line.as_mut().unwrap();
-                    let caret = self.pending_goto_line_caret.min(entry.len());
-                    entry.insert(caret, *c);
-                    self.pending_goto_line_caret = caret + 1;
+                    if let Modal::GotoLine { digits, caret } = &mut self.modal {
+                        let c0 = (*caret).min(digits.len());
+                        digits.insert(c0, *c);
+                        *caret = c0 + 1;
+                    }
                 }
                 Action::Backspace => {
-                    let entry = self.pending_goto_line.as_mut().unwrap();
-                    let caret = self.pending_goto_line_caret.min(entry.len());
-                    if caret > 0 {
-                        entry.remove(caret - 1);
-                        self.pending_goto_line_caret = caret - 1;
+                    if let Modal::GotoLine { digits, caret } = &mut self.modal {
+                        let c0 = (*caret).min(digits.len());
+                        if c0 > 0 {
+                            digits.remove(c0 - 1);
+                            *caret = c0 - 1;
+                        }
                     }
                 }
                 Action::MoveLeft => {
-                    self.pending_goto_line_caret = self.pending_goto_line_caret.saturating_sub(1);
+                    if let Modal::GotoLine { caret, .. } = &mut self.modal {
+                        *caret = caret.saturating_sub(1);
+                    }
                 }
                 Action::MoveRight => {
-                    let len = self.pending_goto_line.as_ref().unwrap().len();
-                    self.pending_goto_line_caret = (self.pending_goto_line_caret + 1).min(len);
+                    if let Modal::GotoLine { digits, caret } = &mut self.modal {
+                        *caret = (*caret + 1).min(digits.len());
+                    }
                 }
-                Action::MoveLineStart => self.pending_goto_line_caret = 0,
+                Action::MoveLineStart => {
+                    if let Modal::GotoLine { caret, .. } = &mut self.modal {
+                        *caret = 0;
+                    }
+                }
                 Action::MoveLineEnd => {
-                    self.pending_goto_line_caret = self.pending_goto_line.as_ref().unwrap().len();
+                    if let Modal::GotoLine { digits, caret } = &mut self.modal {
+                        *caret = digits.len();
+                    }
                 }
                 Action::InsertNewline => {
-                    let entry = self.pending_goto_line.take().unwrap_or_default();
+                    // Take the digits out and close the prompt (mem::take → None).
+                    let entry = match std::mem::take(&mut self.modal) {
+                        Modal::GotoLine { digits, .. } => digits,
+                        other => {
+                            self.modal = other;
+                            String::new()
+                        }
+                    };
                     if let Ok(n) = entry.parse::<usize>() {
                         let count = self.buffers[self.active_idx].rope.line_count();
                         let line1 = n.clamp(1, count.max(1));
@@ -1408,7 +1460,7 @@ impl App {
                     // Empty / non-numeric → closed with no movement.
                 }
                 Action::MenuClose | Action::Quit => {
-                    self.pending_goto_line = None;
+                    self.close_modal();
                 }
                 _ => {}
             }
@@ -1515,25 +1567,45 @@ impl App {
         // cheat sheet; Esc/Enter/Quit close; other input is consumed (modal).
         // Feature 028: Home/End jump to top/bottom and every scroll is clamped to
         // the content so keyboard scrolling stays in range.
-        if let Some(screen) = self.pending_help {
+        if let Some(screen) = self.help_screen() {
             let (max_scroll, page) = self.help_view_metrics(screen);
             match &action {
                 Action::MoveDown => {
-                    self.help_scroll = (self.help_scroll + 1).min(max_scroll);
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = (*s + 1).min(max_scroll);
+                    }
                 }
-                Action::MoveUp => self.help_scroll = self.help_scroll.saturating_sub(1),
+                Action::MoveUp => {
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = s.saturating_sub(1);
+                    }
+                }
                 Action::MovePageDown => {
-                    self.help_scroll = (self.help_scroll + page).min(max_scroll);
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = (*s + page).min(max_scroll);
+                    }
                 }
-                Action::MovePageUp => self.help_scroll = self.help_scroll.saturating_sub(page),
-                Action::MoveLineStart => self.help_scroll = 0,
-                Action::MoveLineEnd => self.help_scroll = max_scroll,
+                Action::MovePageUp => {
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = s.saturating_sub(page);
+                    }
+                }
+                Action::MoveLineStart => {
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = 0;
+                    }
+                }
+                Action::MoveLineEnd => {
+                    if let Some(s) = self.help_scroll_mut() {
+                        *s = max_scroll;
+                    }
+                }
                 Action::MenuClose | Action::InsertNewline | Action::Quit => {
-                    self.pending_help = None;
+                    self.close_modal();
                 }
                 // A printable key also dismisses (legacy behavior), except none
                 // that we use for scrolling above.
-                Action::InsertChar(_) => self.pending_help = None,
+                Action::InsertChar(_) => self.close_modal(),
                 _ => {}
             }
             return Ok(());
@@ -1735,12 +1807,16 @@ impl App {
 
             // Help menu (Feature 011).
             Action::Help => {
-                self.help_scroll = 0;
-                self.pending_help = Some(HelpScreen::Help);
+                self.modal = Modal::Help {
+                    screen: HelpScreen::Help,
+                    scroll: 0,
+                };
             }
             Action::About => {
-                self.help_scroll = 0;
-                self.pending_help = Some(HelpScreen::About);
+                self.modal = Modal::Help {
+                    screen: HelpScreen::About,
+                    scroll: 0,
+                };
             }
 
             // Save prompt responses (T033)
@@ -1764,13 +1840,16 @@ impl App {
             Action::GoToLine => {
                 if self.open_button_dialog().is_none()
                     && self.interactive_dialog().is_none()
-                    && self.pending_help.is_none()
-                    && self.pending_goto_line.is_none()
+                    && self.help_screen().is_none()
+                    && self.goto_line_digits().is_none()
                     && !self.menu_bar.is_active()
                 // Feature 029: don't open over a menu
                 {
-                    self.pending_goto_line = Some(String::new());
-                    self.pending_goto_line_caret = 0; // Feature 031
+                    // Feature 031: caret starts at 0.
+                    self.modal = Modal::GotoLine {
+                        digits: String::new(),
+                        caret: 0,
+                    };
                 }
             }
             // Search-option toggles and Tab focus are only meaningful inside an
@@ -4419,8 +4498,8 @@ impl App {
             let in_editor = ev.row >= self.editor_top() && ev.row + 1 < term_rows;
             let any_modal = self.open_button_dialog().is_some()
                 || self.interactive_dialog().is_some()
-                || self.pending_help.is_some()
-                || self.pending_goto_line.is_some()
+                || self.help_screen().is_some()
+                || self.goto_line_digits().is_some()
                 || self.menu_bar.is_active();
             if in_editor && !any_modal {
                 self.modal =
@@ -4475,11 +4554,11 @@ impl App {
         ) {
             let down = ev.kind == NormalizedMouseKind::ScrollDown;
             let step = WHEEL_STEP;
-            if self.pending_help.is_some() {
-                self.help_scroll = if down {
-                    self.help_scroll.saturating_add(step)
+            if let Some(s) = self.help_scroll_mut() {
+                *s = if down {
+                    s.saturating_add(step)
                 } else {
-                    self.help_scroll.saturating_sub(step)
+                    s.saturating_sub(step)
                 };
             } else if let Modal::EncodingSelect { row: idx } = self.modal {
                 let n = crate::ui::dialog::ENCODING_OPTIONS.len();
@@ -4512,7 +4591,7 @@ impl App {
                         };
                     }
                 }
-            } else if self.find_replace().is_some() || self.pending_goto_line.is_some() {
+            } else if self.find_replace().is_some() || self.goto_line_digits().is_some() {
                 // Find/Replace and Go-to-Line have no scrollable content — ignore.
             } else {
                 // Editor: ignore the menu/tab rows (above editor_top) and the
@@ -4588,11 +4667,11 @@ impl App {
 
         // Feature 021 — Help/About overlay: a click on the boxed Close button
         // dismisses it (same effect as Esc). Other clicks are inert (modal).
-        if self.pending_help.is_some() {
+        if self.help_screen().is_some() {
             let (w, h) = self.terminal_size;
             let rects = crate::ui::help_close_button_rects(ratatui::layout::Rect::new(0, 0, w, h));
             if crate::ui::buttons::hit_test_buttons(&rects, ev.col, ev.row).is_some() {
-                self.pending_help = None;
+                self.close_modal();
             }
             return Ok(());
         }
@@ -4601,7 +4680,7 @@ impl App {
         // caret. Geometry mirrors the render: a centered box of width
         // `(19 + digits.len()).clamp(20, w)`; the digits start after the border +
         // the "Go to line: " (12-col) prefix.
-        if let Some(entry) = self.pending_goto_line.clone() {
+        if let Some(entry) = self.goto_line_digits().map(|s| s.to_owned()) {
             let (w, h) = self.terminal_size;
             let dw = ((19 + entry.len()) as u16).clamp(20, w.max(1));
             let dh = 3u16.min(h.max(1));
@@ -4610,8 +4689,10 @@ impl App {
             let value_x = dx + 1 + "Go to line: ".len() as u16;
             let field_w = dw.saturating_sub(2 + 12);
             if ev.row == dy + 1 && ev.col >= value_x && ev.col < value_x + field_w {
-                self.pending_goto_line_caret =
-                    crate::ui::width::field_caret_at(&entry, field_w, ev.col - value_x);
+                let new_caret = crate::ui::width::field_caret_at(&entry, field_w, ev.col - value_x);
+                if let Modal::GotoLine { caret, .. } = &mut self.modal {
+                    *caret = new_caret;
+                }
             }
             return Ok(());
         }
@@ -4773,12 +4854,12 @@ impl App {
                 | Modal::RevertConfirm(_)
                 | Modal::CloseConfirm(_)
         ) || self.encoding_select_row().is_some()
-            || self.pending_help.is_some()
+            || self.help_screen().is_some()
             || self.pending_external_change.is_some()
             || !self.pending_plugin_consent.is_empty()
             || self.is_plugin_manager_open()
             || self.find_replace().is_some()
-            || self.pending_goto_line.is_some()
+            || self.goto_line_digits().is_some()
         {
             return Ok(());
         }
@@ -5468,33 +5549,38 @@ mod tests {
     #[test]
     fn goto_line_caret_editing() {
         let mut a = make_app();
-        a.pending_goto_line = Some(String::new());
-        a.pending_goto_line_caret = 0;
+        a.modal = Modal::GotoLine {
+            digits: String::new(),
+            caret: 0,
+        };
+        if let Modal::GotoLine { caret, .. } = &mut a.modal {
+            *caret = 0;
+        }
         for c in ['1', '2', '3'] {
             a.handle_action(Action::InsertChar(c)).unwrap();
         }
-        assert_eq!(a.pending_goto_line.as_deref(), Some("123"));
-        assert_eq!(a.pending_goto_line_caret, 3);
+        assert_eq!(a.goto_line_digits(), Some("123"));
+        assert_eq!(a.goto_line_caret(), 3);
         // Home, then insert mid-string.
         a.handle_action(Action::MoveLineStart).unwrap();
-        assert_eq!(a.pending_goto_line_caret, 0);
+        assert_eq!(a.goto_line_caret(), 0);
         a.handle_action(Action::InsertChar('9')).unwrap();
-        assert_eq!(a.pending_goto_line.as_deref(), Some("9123"));
-        assert_eq!(a.pending_goto_line_caret, 1);
+        assert_eq!(a.goto_line_digits(), Some("9123"));
+        assert_eq!(a.goto_line_caret(), 1);
         // Non-digit rejected; caret unchanged.
         a.handle_action(Action::InsertChar('x')).unwrap();
-        assert_eq!(a.pending_goto_line.as_deref(), Some("9123"));
+        assert_eq!(a.goto_line_digits(), Some("9123"));
         // Right then Backspace removes the grapheme before the caret.
         a.handle_action(Action::MoveRight).unwrap(); // caret 2
         a.handle_action(Action::Backspace).unwrap(); // removes '1' → "923"
-        assert_eq!(a.pending_goto_line.as_deref(), Some("923"));
-        assert_eq!(a.pending_goto_line_caret, 1);
+        assert_eq!(a.goto_line_digits(), Some("923"));
+        assert_eq!(a.goto_line_caret(), 1);
         // End clamps; Left clamps at 0.
         a.handle_action(Action::MoveLineEnd).unwrap();
-        assert_eq!(a.pending_goto_line_caret, 3);
+        assert_eq!(a.goto_line_caret(), 3);
         a.handle_action(Action::MoveLineStart).unwrap();
         a.handle_action(Action::MoveLeft).unwrap();
-        assert_eq!(a.pending_goto_line_caret, 0);
+        assert_eq!(a.goto_line_caret(), 0);
     }
 
     // T017 (Feature 029): the save-before-quit prompt cancels on Esc.
@@ -5516,7 +5602,7 @@ mod tests {
         assert!(a.menu_bar.is_active());
         a.handle_action(Action::GoToLine).unwrap();
         assert!(
-            a.pending_goto_line.is_none(),
+            a.goto_line_digits().is_none(),
             "Go-to-Line must not open over an active menu"
         );
     }
@@ -5828,28 +5914,31 @@ mod tests {
     fn help_keyboard_scroll_clamps() {
         let mut a = make_app();
         a.terminal_size = (80, 24);
-        a.pending_help = Some(HelpScreen::Help);
+        a.modal = Modal::Help {
+            screen: HelpScreen::Help,
+            scroll: 0,
+        };
         let (max_scroll, _page) = a.help_view_metrics(HelpScreen::Help);
         assert!(max_scroll > 0, "Help overflows a 24-row terminal");
         // End → bottom; Home → top.
         a.handle_action(Action::MoveLineEnd).unwrap();
-        assert_eq!(a.help_scroll, max_scroll);
+        assert_eq!(a.help_scroll(), max_scroll);
         a.handle_action(Action::MoveLineStart).unwrap();
-        assert_eq!(a.help_scroll, 0);
+        assert_eq!(a.help_scroll(), 0);
         // PageDown clamps to max even when pressed many times.
         for _ in 0..50 {
             a.handle_action(Action::MovePageDown).unwrap();
         }
-        assert_eq!(a.help_scroll, max_scroll);
+        assert_eq!(a.help_scroll(), max_scroll);
         // Down never exceeds max; Up returns toward 0.
         a.handle_action(Action::MoveDown).unwrap();
-        assert_eq!(a.help_scroll, max_scroll);
+        assert_eq!(a.help_scroll(), max_scroll);
         for _ in 0..200 {
             a.handle_action(Action::MoveUp).unwrap();
         }
-        assert_eq!(a.help_scroll, 0);
+        assert_eq!(a.help_scroll(), 0);
         // Help is still open (scroll keys don't dismiss it).
-        assert_eq!(a.pending_help, Some(HelpScreen::Help));
+        assert_eq!(a.help_screen(), Some(HelpScreen::Help));
     }
 
     // T019 (Feature 028): Home/End move the editor cursor to line start/end.
@@ -6071,7 +6160,10 @@ mod tests {
         let render = |w: u16, h: u16| -> String {
             let mut a = make_app();
             a.terminal_size = (w, h);
-            a.pending_goto_line = Some("42".to_string());
+            a.modal = Modal::GotoLine {
+                digits: "42".to_string(),
+                caret: 0,
+            };
             let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
             t.draw(|f| a.render(f)).unwrap();
             t.backend()
@@ -6631,9 +6723,9 @@ mod tests {
     fn test_about_action_opens_and_closes() {
         let mut app = make_app();
         app.handle_action(Action::About).unwrap();
-        assert_eq!(app.pending_help, Some(HelpScreen::About));
+        assert_eq!(app.help_screen(), Some(HelpScreen::About));
         app.handle_action(Action::MenuClose).unwrap();
-        assert_eq!(app.pending_help, None);
+        assert_eq!(app.help_screen(), None);
     }
 
     #[test]
