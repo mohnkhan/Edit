@@ -397,19 +397,15 @@ impl Ui {
         }
 
         // Feature 025 — Go-to-Line prompt overlay.
-        if let Some(entry) = app.goto_line_digits() {
+        // Feature 039 (FR-006): the box geometry comes from the single shared
+        // `App::goto_line_rect`, the same source the mouse hit-test uses.
+        if let (Some(entry), Some(area)) = (app.goto_line_digits(), app.goto_line_rect()) {
             let base = ratatui::style::Style::default()
                 .fg(app.theme.menubar_fg)
                 .bg(app.theme.menubar_bg);
             // Feature 031: embed the caret glyph at the caret position (mid-string).
             let caret = app.goto_line_caret().min(entry.len());
             let body = format!("Go to line: {}▏{}", &entry[..caret], &entry[caret..]);
-            // A compact centered box; width fits the prompt + padding, clamped.
-            let dw = (body.len() as u16 + 4).clamp(20, size.width.max(1));
-            let dh = 3u16.min(size.height.max(1));
-            let dx = size.x + size.width.saturating_sub(dw) / 2;
-            let dy = size.y + size.height.saturating_sub(dh) / 2;
-            let area = ratatui::layout::Rect::new(dx, dy, dw, dh);
             frame.render_widget(ratatui::widgets::Clear, area);
             frame.render_widget(
                 ratatui::widgets::Paragraph::new(body).style(base).block(

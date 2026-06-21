@@ -726,6 +726,31 @@ impl App {
         }
     }
 
+    /// Feature 039 (FR-006): the Go-to-Line dialog box rect — the single geometry
+    /// source shared by the renderer and mouse hit-testing, so a click can never
+    /// diverge from the drawn box. `None` when the prompt is closed.
+    pub(crate) fn goto_line_rect(&self) -> Option<ratatui::layout::Rect> {
+        let digits = self.goto_line_digits()?;
+        let (w, h) = self.terminal_size;
+        // Width fits "Go to line: " (12) + digits + the caret glyph + borders,
+        // clamped to the terminal; centered. (Equivalent to the prior render-side
+        // `body.len() + 4`, since the caret glyph "▏" is 3 bytes.)
+        let dw = ((19 + digits.len()) as u16).clamp(20, w.max(1));
+        let dh = 3u16.min(h.max(1));
+        let dx = w.saturating_sub(dw) / 2;
+        let dy = h.saturating_sub(dh) / 2;
+        Some(ratatui::layout::Rect::new(dx, dy, dw, dh))
+    }
+
+    /// The digit-input field rect inside the Go-to-Line box (where a caret click
+    /// lands). Derived from [`Self::goto_line_rect`] so render and hit-test agree.
+    pub(crate) fn goto_line_field_rect(&self) -> Option<ratatui::layout::Rect> {
+        let rect = self.goto_line_rect()?;
+        let value_x = rect.x + 1 + "Go to line: ".len() as u16;
+        let field_w = rect.width.saturating_sub(2 + 12);
+        Some(ratatui::layout::Rect::new(value_x, rect.y + 1, field_w, 1))
+    }
+
     /// The Go-to-Line caret index (0 when the prompt is not open).
     pub fn goto_line_caret(&self) -> usize {
         match self.modal {
@@ -2313,7 +2338,7 @@ impl App {
             ));
             if let Some(ref cache) = self.wrap_cache {
                 let total_vr = cache.total_visual_rows();
-                let buf = &mut self.buffers[self.active_idx];
+                let buf = self.active_buffer_mut();
                 if buf.scroll_offset.0 >= total_vr {
                     buf.scroll_offset.0 = total_vr.saturating_sub(1);
                 }
@@ -2333,12 +2358,12 @@ impl App {
             .clamp(1, 300);
 
         if !self.config.no_autosave {
-            let buf = &self.buffers[self.active_idx];
+            let buf = self.active_buffer();
             if buf.autosave.enabled && buf.modified {
                 let elapsed = buf.autosave.last_save_at.elapsed().as_secs() as u32;
                 if elapsed >= interval {
                     let ok = crate::buffer::autosave::write_recovery_for_buffer(
-                        &mut self.buffers[self.active_idx],
+                        self.active_buffer_mut(),
                         interval,
                     );
                     // Feature 029: surface a recovery-write failure instead of
@@ -2421,7 +2446,7 @@ impl App {
     /// updating `scroll_offset` as necessary.
     /// Compute the cursor position one step in `dir` (no mutation, no selection).
     fn next_cursor_pos(&self, dir: Direction) -> (usize, usize) {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let line_count = buf.rope.line_count();
         let cur = buf.cursor;
         match dir {
@@ -2510,7 +2535,7 @@ impl App {
     /// whitespace + that token's run). Crosses line boundaries; a buffer end
     /// returns the cursor unchanged (no-op).
     fn next_word_pos(&self, dir: Direction) -> (usize, usize) {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let line = buf.cursor.line;
         let gcol = buf.cursor.grapheme_col;
         let graphemes: Vec<String> = buf
@@ -2614,13 +2639,13 @@ impl App {
 
     /// The current selection's anchor, or the cursor position if there is none.
     fn selection_anchor_or_cursor(&self) -> CursorPos {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         buf.selection.map(|s| s.anchor).unwrap_or(buf.cursor)
     }
 
     /// Set `selection` to span `anchor`→cursor, or `None` if empty (Feature 017).
     fn update_selection_to_cursor(&mut self, anchor: CursorPos) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let active = buf.cursor;
         buf.selection = if active.line == anchor.line && active.grapheme_col == anchor.grapheme_col
         {
@@ -2633,7 +2658,7 @@ impl App {
     /// Move the cursor to column 0 of the current line.
     pub fn move_line_start(&mut self) {
         self.buffers[self.active_idx].selection = None; // Feature 017: plain move clears
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor.grapheme_col = 0;
         buf.cursor.visual_col = 0;
         self.clamp_scroll();
@@ -2671,7 +2696,7 @@ impl App {
     /// Move the cursor up by one viewport page.
     pub fn move_page_up(&mut self) {
         let vh = self.viewport_height();
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let target_line = buf.cursor.line.saturating_sub(vh);
         let max_gcol = buf.rope.grapheme_count_on_line(target_line);
         let new_gcol = buf.cursor.grapheme_col.min(max_gcol);
@@ -2689,7 +2714,7 @@ impl App {
     /// Move the cursor down by one viewport page.
     pub fn move_page_down(&mut self) {
         let vh = self.viewport_height();
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let line_count = buf.rope.line_count();
         let target_line = (buf.cursor.line + vh).min(line_count.saturating_sub(1));
         let max_gcol = buf.rope.grapheme_count_on_line(target_line);
@@ -2705,14 +2730,14 @@ impl App {
 
     /// Move cursor to the very first character of the document.
     pub fn move_doc_start(&mut self) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor = CursorPos::default();
         buf.scroll_offset = (0, 0);
     }
 
     /// Move cursor to the very last line of the document.
     pub fn move_doc_end(&mut self) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let last_line = buf.rope.line_count().saturating_sub(1);
         let gcol = buf.rope.grapheme_count_on_line(last_line);
         let vcol = CursorPos::visual_col_from_grapheme_col(&buf.rope, last_line, gcol);
@@ -2763,7 +2788,7 @@ impl App {
 
     /// Select the word (run of same-class graphemes) under the cursor (US2).
     fn select_word_at_cursor(&mut self) {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let line = buf.cursor.line;
         let graphemes: Vec<String> = buf
             .rope
@@ -2802,7 +2827,7 @@ impl App {
     /// Set the active selection to `[start, end)` grapheme columns on `line`, with
     /// the cursor at `end`. A degenerate range clears the selection.
     fn set_selection_on_line(&mut self, line: usize, start: usize, end: usize) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         if start >= end {
             buf.selection = None;
             return;
@@ -2859,7 +2884,7 @@ impl App {
 
         if self.soft_wrap && self.wrap_cache.is_some() {
             let cursor_vr = self.cursor_visual_row();
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             if cursor_vr < buf.scroll_offset.0 {
                 buf.scroll_offset.0 = cursor_vr;
             } else if cursor_vr >= buf.scroll_offset.0 + vh {
@@ -2867,7 +2892,7 @@ impl App {
             }
         } else {
             let cur_line = self.buffers[self.active_idx].cursor.line;
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             if cur_line < buf.scroll_offset.0 {
                 buf.scroll_offset.0 = cur_line;
             } else if cur_line >= buf.scroll_offset.0 + vh {
@@ -2880,13 +2905,13 @@ impl App {
 
     /// Convert the current cursor position to a rope char index.
     fn cursor_char_idx(&self) -> usize {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         self.char_idx_for(buf.cursor.line, buf.cursor.grapheme_col)
     }
 
     /// Return the rope char index for a given (line, grapheme_col) position.
     fn char_idx_for(&self, line: usize, gcol: usize) -> usize {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         // Start of line in chars
         let line_start: usize = (0..line)
             .map(|l| {
@@ -2934,7 +2959,7 @@ impl App {
         let s = c.to_string();
 
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.insert_str(char_idx, &s);
             buf.undo_stack.push(EditOp::Insert {
                 at: char_idx,
@@ -2961,7 +2986,7 @@ impl App {
         let char_idx = self.cursor_char_idx();
 
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.insert_str(char_idx, "\n");
             buf.undo_stack.push(EditOp::Insert {
                 at: char_idx,
@@ -3016,7 +3041,7 @@ impl App {
 
         // Collect the grapheme text (may be multi-char for combining sequences)
         let deleted_text: String = {
-            let buf = &self.buffers[self.active_idx];
+            let buf = self.active_buffer();
             let line_str = buf.rope.line_slice(del_line);
             line_str
                 .graphemes(true)
@@ -3028,7 +3053,7 @@ impl App {
         let del_char_len = deleted_text.chars().count();
 
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope
                 .delete_range(del_char_idx..del_char_idx + del_char_len);
             buf.undo_stack.push(EditOp::Delete {
@@ -3045,7 +3070,7 @@ impl App {
             del_line,
             del_gcol,
         );
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor = CursorPos {
             line: del_line,
             grapheme_col: del_gcol,
@@ -3086,7 +3111,7 @@ impl App {
         // Determine the text being deleted
         let deleted_text: String = if cur.grapheme_col < gcol_count {
             // Delete grapheme at current column
-            let buf = &self.buffers[self.active_idx];
+            let buf = self.active_buffer();
             let line_str = buf.rope.line_slice(cur.line);
             line_str
                 .graphemes(true)
@@ -3101,7 +3126,7 @@ impl App {
         let del_char_len = deleted_text.chars().count();
 
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope
                 .delete_range(del_char_idx..del_char_idx + del_char_len);
             buf.undo_stack.push(EditOp::Delete {
@@ -3124,7 +3149,7 @@ impl App {
     /// reversed/degenerate range to empty rather than panicking — defense-in-depth
     /// for copy/cut.
     pub fn selection_text(&self) -> Option<String> {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let sel = buf.selection.as_ref()?;
         let (start, end) = sel.ordered_range();
         let s_idx = self.char_idx_for(start.line, start.grapheme_col);
@@ -3205,7 +3230,7 @@ impl App {
         let char_idx = self.cursor_char_idx();
         let char_count = text.chars().count();
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.insert_str(char_idx, &text);
             buf.undo_stack.push(EditOp::Insert {
                 at: char_idx,
@@ -3237,7 +3262,7 @@ impl App {
         // text by chars (byte-slicing a String with char indices panics on
         // multibyte content) — same hazard fixed in `copy_selection`/`selection_text`.
         let deleted: String = {
-            let buf = &self.buffers[self.active_idx];
+            let buf = self.active_buffer();
             let full = buf.rope.to_string();
             let total = full.chars().count();
             let lo = s_idx.min(e_idx).min(total);
@@ -3245,7 +3270,7 @@ impl App {
             full.chars().skip(lo).take(hi - lo).collect()
         };
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.delete_range(s_idx..e_idx);
             buf.undo_stack.push(EditOp::Delete {
                 at: s_idx,
@@ -3288,7 +3313,7 @@ impl App {
     /// Char index of the cursor in the active buffer (for "first match at/after
     /// the cursor").
     fn cursor_char_index(&self) -> usize {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let text = buf.rope.to_string();
         let mut char_count = 0usize;
         for (line_idx, line_text) in text.split('\n').enumerate() {
@@ -3397,7 +3422,7 @@ impl App {
             full[bs..be].to_string()
         };
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.rope.delete_range(range.start..range.end);
             buf.rope.insert_str(range.start, &replacement);
             buf.undo_stack.push(EditOp::Composite(vec![
@@ -3597,7 +3622,7 @@ impl App {
             target_gcol,
         );
 
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor = CursorPos {
             line: target_line,
             grapheme_col: target_gcol,
@@ -3656,7 +3681,7 @@ impl App {
             let del_len = m.end - m.start;
             // Capture the text that will be deleted for undo.
             let deleted_text: String = {
-                let buf = &self.buffers[self.active_idx];
+                let buf = self.active_buffer();
                 let full = buf.rope.to_string();
                 // Convert char indices to byte indices for slicing.
                 let byte_start = full
@@ -3674,7 +3699,7 @@ impl App {
 
             // Apply the deletion.
             {
-                let buf = &mut self.buffers[self.active_idx];
+                let buf = self.active_buffer_mut();
                 buf.rope.delete_range(m.start..m.end);
             }
             ops.push(EditOp::Delete {
@@ -3684,7 +3709,7 @@ impl App {
 
             // Apply the insertion.
             {
-                let buf = &mut self.buffers[self.active_idx];
+                let buf = self.active_buffer_mut();
                 buf.rope.insert_str(m.start, &replacement);
             }
             ops.push(EditOp::Insert {
@@ -3695,7 +3720,7 @@ impl App {
 
         // Push all ops as one composite undo entry.
         {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.undo_stack.push(EditOp::Composite(ops));
             buf.modified = true;
         }
@@ -4413,7 +4438,7 @@ impl App {
 
     /// Select the entire buffer (Edit ▸ Select All / Ctrl+A).
     pub fn select_all(&mut self) {
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         let line_count = buf.rope.line_count();
         if line_count == 0 {
             return;
@@ -4441,7 +4466,7 @@ impl App {
             return;
         }
         let op = {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.undo_stack.undo(&mut buf.rope)
         };
         match op {
@@ -4459,7 +4484,7 @@ impl App {
             return;
         }
         let op = {
-            let buf = &mut self.buffers[self.active_idx];
+            let buf = self.active_buffer_mut();
             buf.undo_stack.redo(&mut buf.rope)
         };
         match op {
@@ -4475,7 +4500,7 @@ impl App {
     /// the wrap cache, and move the cursor to `char_idx` (clamped to the buffer).
     fn apply_history_cursor(&mut self, char_idx: usize) {
         let (line, gcol) = self.line_col_for_char_idx(char_idx);
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         // Feature 014: undo/redo may return the content to the saved baseline —
         // derive Modified from the undo history instead of forcing it true.
         buf.refresh_modified();
@@ -4493,7 +4518,7 @@ impl App {
     /// Convert a rope char index into a `(line, grapheme_col)` position — the
     /// inverse of [`Self::char_idx_for`]. Clamps past-end indices to the end.
     fn line_col_for_char_idx(&self, char_idx: usize) -> (usize, usize) {
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let line_count = buf.rope.line_count();
         let mut remaining = char_idx;
         for line in 0..line_count {
@@ -4742,17 +4767,14 @@ impl App {
         // `(19 + digits.len()).clamp(20, w)`; the digits start after the border +
         // the "Go to line: " (12-col) prefix.
         if let Some(entry) = self.goto_line_digits().map(|s| s.to_owned()) {
-            let (w, h) = self.terminal_size;
-            let dw = ((19 + entry.len()) as u16).clamp(20, w.max(1));
-            let dh = 3u16.min(h.max(1));
-            let dx = w.saturating_sub(dw) / 2;
-            let dy = h.saturating_sub(dh) / 2;
-            let value_x = dx + 1 + "Go to line: ".len() as u16;
-            let field_w = dw.saturating_sub(2 + 12);
-            if ev.row == dy + 1 && ev.col >= value_x && ev.col < value_x + field_w {
-                let new_caret = crate::ui::width::field_caret_at(&entry, field_w, ev.col - value_x);
-                if let Modal::GotoLine { caret, .. } = &mut self.modal {
-                    *caret = new_caret;
+            // Feature 039 (FR-006): hit-test the digit field via the shared rect.
+            if let Some(fr) = self.goto_line_field_rect() {
+                if ev.row == fr.y && ev.col >= fr.x && ev.col < fr.x + fr.width {
+                    let new_caret =
+                        crate::ui::width::field_caret_at(&entry, fr.width, ev.col - fr.x);
+                    if let Modal::GotoLine { caret, .. } = &mut self.modal {
+                        *caret = new_caret;
+                    }
                 }
             }
             return Ok(());
@@ -5090,7 +5112,7 @@ impl App {
                         logical_line,
                         found_gcol,
                     );
-                    let buf = &mut self.buffers[self.active_idx];
+                    let buf = self.active_buffer_mut();
                     buf.cursor = CursorPos {
                         line: logical_line,
                         grapheme_col: found_gcol,
@@ -5103,7 +5125,7 @@ impl App {
         }
 
         // Normal mode (non-wrap): existing logic.
-        let buf = &self.buffers[self.active_idx];
+        let buf = self.active_buffer();
         let scroll_line = buf.scroll_offset.0;
         let target_line = scroll_line + clicked_row;
         let line_count = buf.rope.line_count();
@@ -5135,7 +5157,7 @@ impl App {
             found_gcol,
         );
 
-        let buf = &mut self.buffers[self.active_idx];
+        let buf = self.active_buffer_mut();
         buf.cursor = CursorPos {
             line: target_line,
             grapheme_col: found_gcol,
