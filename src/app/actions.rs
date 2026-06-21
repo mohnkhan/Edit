@@ -38,6 +38,10 @@ impl App {
     /// generation makes `WrapCache::is_stale` true on the next render-loop check.
     pub(super) fn invalidate_wrap_cache(&mut self) {
         self.wrap_text_gen = self.wrap_text_gen.wrapping_add(1);
+        // Feature 048: the non-active-pane cache is keyed to the previous active
+        // buffer; drop it so the next frame rebuilds it for the new layout.
+        self.wrap_cache_alt = None;
+        self.wrap_alt_for = None;
     }
 
     /// Switch the active buffer to `idx` (clamped into range) and reset the

@@ -289,8 +289,13 @@ pub struct App {
     pub last_editor_click: Option<(u16, u16, u8, Instant)>,
     /// Encoding selected in the dialog, held across the filename prompt (US4).
     pub pending_save_as_encoding: Option<EncodingId>,
-    /// Computed wrap cache; `None` when soft_wrap is false.
+    /// Computed wrap cache for the ACTIVE buffer; `None` when its wrap is off.
     pub wrap_cache: Option<crate::ui::wrap::WrapCache>,
+    /// Feature 048: wrap cache for the NON-active visible pane in a vertical split
+    /// (computed at that pane's own width). `None` outside split / when off.
+    pub wrap_cache_alt: Option<crate::ui::wrap::WrapCache>,
+    /// Feature 048: which buffer index `wrap_cache_alt` belongs to (`None` if unset).
+    pub wrap_alt_for: Option<usize>,
     /// Generation counter incremented on every buffer mutation for cache invalidation.
     pub wrap_text_gen: u64,
 
@@ -523,6 +528,8 @@ impl App {
             last_editor_click: None,
             pending_save_as_encoding: None,
             wrap_cache: None,
+            wrap_cache_alt: None,
+            wrap_alt_for: None,
             wrap_text_gen: 0,
             file_watcher,
             self_write_times: std::collections::HashMap::new(),
@@ -1113,23 +1120,8 @@ impl App {
         let mut last_tick = Instant::now();
 
         while self.running {
-            // Ensure wrap cache is current before rendering (Feature 005).
-            if self.active_buffer().soft_wrap {
-                let w = self.content_width();
-                if self
-                    .wrap_cache
-                    .as_ref()
-                    .map(|c| c.is_stale(w, self.wrap_text_gen))
-                    .unwrap_or(true)
-                {
-                    let rope = &self.active_buffer().rope;
-                    self.wrap_cache = Some(crate::ui::wrap::WrapCache::compute(
-                        rope,
-                        w,
-                        self.wrap_text_gen,
-                    ));
-                }
-            }
+            // Ensure both panes' wrap caches are current before rendering.
+            self.refresh_wrap_caches();
 
             terminal.draw(|frame| self.render(frame))?;
             // Feature 007: watcher_notice is one-shot — clear after one rendered frame.
