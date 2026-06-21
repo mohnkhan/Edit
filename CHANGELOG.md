@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 042: Harden error handling — eliminate residual panic surfaces
+
+Issue #72. Removes the residual *panic class* in the editor's input handling and adds a standing
+no-crash guarantee. Behavior-preserving; no user-visible change.
+
+#### Changed
+
+- **24 guarded `unwrap()`/`expect()` calls** in the App input/dialog code (`dispatch.rs`, `mouse.rs`,
+  `dialogs.rs`) are converted to pattern matches (`if let` / `let … else` / `.map()`) whose
+  absent-arm reproduces the prior no-op — the invariant is now compiler-enforced instead of relying on
+  a programmer-tracked check.
+- A **`clippy::unwrap_used` / `expect_used` guardrail** (`#![deny(...)]` on the `app` module tree,
+  re-allowed in test code) fails the build if a new guarded unwrap is introduced in core input code.
+  The accepted cases (syntax-highlight `Regex::new("<literal>").unwrap()`, best-effort `let _ =`
+  cleanup) are in other modules and unaffected.
+
+#### Added
+
+- A **deterministic no-panic fuzz sweep** (`no_panic_under_random_input_sweep`): a fixed-seed
+  `xorshift64` PRNG (no `rand`, no wall-clock) drives thousands of random keyboard + mouse events
+  across every overlay state and four terminal sizes (incl. the 80×24 minimum and a sub-minimum),
+  asserting the editor never panics. File-I/O actions are excluded so the test never touches the real
+  filesystem.
+
+#### Fixed
+
+- The fuzz immediately surfaced **two latent stale-index panics** (reachable only between renders, but
+  real robustness gaps), now fixed at the source: `char_idx_for` clamps the line into range (a stale
+  selection endpoint can no longer index past the rope), and `EditorRope::line_slice` is now truly
+  total — an out-of-range index logs at debug level and returns `""` in every build (was a
+  `debug_assert!` that aborted debug/test builds, contradicting the function's documented graceful
+  contract). Both are behavior-preserving in release.
+
+#### Notes
+
+- The crash-recovery net (panic hook + terminal restore + SIGSEGV handler in `src/diagnostics/`) is
+  unchanged — this feature reduces how often it is needed. Full suite 1264 passed / 0 failed / 11
+  ignored; `cargo fmt --check` and `cargo clippy -D warnings` clean.
+
 ### feature 041: Split `app.rs` into focused submodules
 
 Behavior-preserving internal refactor — no user-visible change. The ~7,400-line `src/app.rs`

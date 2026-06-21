@@ -1,13 +1,14 @@
 # Project Status
 
 **Project**: Linux EDIT.COM Clone (`edit`)
-**Version**: 0.4.0 (features 001–035 complete; 038–041 unreleased)
+**Version**: 0.4.0 (features 001–035 complete; 038–042 unreleased)
 **Last updated**: 2026-06-21
 
 ## Implementation Status
 
 | User Story | Description | Status |
 |---|---|---|
+| F042 | Harden error handling (#72): 24 guarded `unwrap()`s in input/dialog code → pattern matches; `clippy::unwrap_used` guardrail on the app tree; deterministic no-panic fuzz sweep; fixed 2 latent stale-index panics (`char_idx_for`, `line_slice`). Behavior-preserving | Complete |
 | F041 | Split `app.rs` (7361→1395 lines) into focused `src/app/*.rs` submodules (dispatch/mouse/dialogs/search/fileops/actions/softwrap/tests). Pure relocation; behavior-preserving (#71) | Complete |
 | F040 | Finish active-buffer accessor standardization (FR-008 / #68): all `self.buffers[self.active_idx]` field access routed through `active_buffer()`/`active_buffer_mut()`. Behavior-preserving | Complete |
 | F039 | Centralize UI state: one `Modal` enum (illegal two-overlay states unrepresentable) + single `LAYER_PRECEDENCE` driving paint & hit-test + shared Go-to-Line geometry. Behavior-preserving refactor; no user-visible change | Complete |
