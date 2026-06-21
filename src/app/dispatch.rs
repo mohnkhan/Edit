@@ -35,9 +35,12 @@ impl App {
                     self.modal = Modal::ContextMenu(menu);
                 }
                 Action::InsertNewline | Action::InsertChar(' ') => {
-                    let act = crate::ui::contextmenu::ITEMS[menu.focus].1.clone();
-                    self.close_modal();
-                    return self.handle_action(act);
+                    // Feature 046: checked access — a stale focus can't index past ITEMS.
+                    if let Some(item) = crate::ui::contextmenu::ITEMS.get(menu.focus) {
+                        let act = item.1.clone();
+                        self.close_modal();
+                        return self.handle_action(act);
+                    }
                 }
                 Action::MenuClose | Action::Quit => {
                     self.close_modal();
@@ -182,12 +185,16 @@ impl App {
                 }
                 Action::InsertChar(c) if matches!(c.to_ascii_uppercase(), 'N') => {
                     if let Some(ec) = self.pending_external_change.take() {
-                        self.buffers[ec.buf_idx].modified = true;
+                        if let Some(b) = self.buffers.get_mut(ec.buf_idx) {
+                            b.modified = true;
+                        }
                     }
                 }
                 Action::MenuClose | Action::DismissExternalChange => {
                     if let Some(ec) = self.pending_external_change.take() {
-                        self.buffers[ec.buf_idx].modified = true;
+                        if let Some(b) = self.buffers.get_mut(ec.buf_idx) {
+                            b.modified = true;
+                        }
                     }
                 }
                 _ => {}
@@ -441,9 +448,11 @@ impl App {
                     self.set_encoding_select(idx.saturating_sub(DIALOG_LIST_PAGE));
                 }
                 Action::InsertNewline => {
-                    let enc = crate::ui::dialog::ENCODING_OPTIONS[idx].0;
-                    self.close_modal();
-                    self.do_save_as_encoding(enc);
+                    // Feature 046: checked list access (stale row → no-op, not panic).
+                    if let Some(enc) = crate::ui::dialog::ENCODING_OPTIONS.get(idx).map(|o| o.0) {
+                        self.close_modal();
+                        self.do_save_as_encoding(enc);
+                    }
                 }
                 _ => {}
             }

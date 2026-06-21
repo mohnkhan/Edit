@@ -27,9 +27,12 @@ impl App {
                 );
                 if ev.button == MouseButton::Left {
                     if let Some(idx) = crate::ui::contextmenu::hit_test(rect, ev.col, ev.row) {
-                        let act = crate::ui::contextmenu::ITEMS[idx].1.clone();
-                        self.close_modal();
-                        return self.handle_action(act);
+                        // Feature 046: checked access (hit-test idx can't outrun ITEMS).
+                        if let Some(item) = crate::ui::contextmenu::ITEMS.get(idx) {
+                            let act = item.1.clone();
+                            self.close_modal();
+                            return self.handle_action(act);
+                        }
                     }
                 }
                 // Press outside the menu (or non-left) dismisses it.
