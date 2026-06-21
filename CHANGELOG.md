@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 044: Per-tab soft-wrap
+
+#### Changed
+
+- **Soft-wrap is now per tab, not global.** Each open tab keeps its own word-wrap on/off setting.
+  Toggling `View ▸ Soft Wrap` (Ctrl+W) affects only the active tab; switching tabs shows that tab's own
+  setting; the View-menu check mark and the status-bar wrap indicator track the active tab. New, opened,
+  and session-restored tabs start from the configured default (`config.soft_wrap`). In split view each
+  pane honors its own buffer's wrap setting. Toggling no longer rewrites the config file (the config
+  value is now just the default seed for new tabs).
+
+  The setting moved from a single global flag to per-buffer state, which also removes the last way the
+  global wrap mode could feel like it "leaked" between tabs (complementing the feature-043 cache fix).
+  Persisting each tab's wrap state across restart is not included (restored tabs use the default).
+
 ### feature 043: Fix soft-wrap cache leaking across tabs
 
 #### Fixed
