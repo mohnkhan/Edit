@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feature 048: Per-pane wrap cache for split view
+
+#### Fixed
+
+- **Split view now wraps each pane correctly.** Previously the single wrap cache belonged to the active
+  buffer and was computed at the full terminal width, so in a vertical split the active pane wrapped at
+  the wrong width and the other pane fell back to rendering unwrapped. Each visible pane now wraps at its
+  own half width with its own cache (and a correct vertical scrollbar); switching tabs re-targets the
+  caches. Single-pane view is unchanged.
+
 ### feature 047: Restore scroll, selection & encoding in session
 
 #### Changed
