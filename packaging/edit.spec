@@ -1,10 +1,10 @@
 Name:           edit
-Version:        0.1.0
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        MS-DOS EDIT.COM reimplementation for Linux
 
-License:        MIT
-URL:            https://example.com/edit
+License:        MPL-2.0
+URL:            https://github.com/mohnkhan/Edit
 
 BuildRequires:  rust >= 1.74.0
 BuildRequires:  cargo
@@ -29,5 +29,9 @@ install -D -m 644 man/edit.1 %{buildroot}%{_mandir}/man1/edit.1
 %{_mandir}/man1/edit.1
 
 %changelog
+* Sun Jun 21 2026 The edit contributors - 0.5.0-1
+- Release 0.5.0: rolls up features 038-050 (recent-files list, per-tab and
+  per-pane soft-wrap, session scroll/selection/encoding restore, panic-surface
+  hardening, and the app.rs module split). See CHANGELOG.md for full detail.
 * Thu Jun 18 2026 The edit contributors - 0.1.0-1
 - Initial release

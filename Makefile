@@ -63,7 +63,7 @@ package-deb:
 
 package-rpm:
 	$(CARGO) build --release
-	rpmbuild -bb packaging/edit.spec
+	cargo generate-rpm
 
 docs-gate:
 	@echo "Checking docs gate..."
@@ -109,7 +109,7 @@ help:
 	@echo "  perf-check   Run criterion benchmarks"
 	@echo "  static       Build musl static binary for x86_64"
 	@echo "  package-deb  Build .deb package via cargo-deb"
-	@echo "  package-rpm  Build .rpm package via rpmbuild"
+	@echo "  package-rpm  Build .rpm package via cargo-generate-rpm"
 	@echo "  docs-gate    Verify CHANGELOG.md and docs/STATUS.md are present"
 	@echo "  stress-test  Run 5-minute stress test (EDIT_STRESS_DURATION_SECS=300)"
 	@echo "  ci-local     Full CI gate: fmt + clippy + test + smoke + bench"
