@@ -110,7 +110,7 @@ fn backspace_edits_and_non_digits_rejected_buffer_untouched() {
 fn go_to_line_does_not_open_over_another_modal() {
     let mut a = app_with_lines(10);
     a.handle_action(Action::Find).unwrap(); // open Find dialog
-    assert!(a.pending_find_replace.is_some());
+    assert!(a.find_replace().is_some());
     a.handle_action(Action::GoToLine).unwrap();
     assert!(
         a.pending_goto_line.is_none(),

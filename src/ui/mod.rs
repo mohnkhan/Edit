@@ -264,7 +264,7 @@ impl Ui {
         }
 
         // Feature 015 — interactive Find / Replace dialog overlay.
-        if let Some(ref d) = app.pending_find_replace {
+        if let Some(d) = app.find_replace() {
             use crate::ui::dialog::{DialogField, DialogMode};
             use crate::ui::file_browser::truncate_to_width;
             let base = ratatui::style::Style::default()
@@ -381,7 +381,7 @@ impl Ui {
         }
 
         // T015 — Encoding select dialog overlay.
-        if let Some(cursor_idx) = app.pending_encoding_select {
+        if let Some(cursor_idx) = app.encoding_select_row() {
             use crate::ui::dialog::EncodingSelectDialog;
             let dialog = EncodingSelectDialog {
                 cursor_idx,
@@ -418,7 +418,7 @@ impl Ui {
         }
 
         // Feature 012 — File browser overlay (Open / Save As).
-        if let Some(ref browser) = app.file_browser {
+        if let Some(browser) = app.file_browser() {
             use crate::ui::file_browser::FileBrowserWidget;
             let widget = FileBrowserWidget {
                 browser,
@@ -434,14 +434,14 @@ impl Ui {
         }
 
         // Feature 008 — Plugin manager dialog (Feature 020: + boxed Close button).
-        if app.pending_plugin_manager {
+        if app.is_plugin_manager_open() {
             let body = crate::ui::plugin_manager::manager_body(
                 &app.plugin_host,
-                app.plugin_manager_cursor,
+                app.plugin_manager_cursor(),
             );
             let dialog_area = crate::ui::plugin_manager::manager_rect(
                 &app.plugin_host,
-                app.plugin_manager_cursor,
+                app.plugin_manager_cursor(),
                 size,
             );
             let dialog = ratatui::widgets::Paragraph::new(body)
@@ -471,7 +471,7 @@ impl Ui {
                 ),
                 app.plugin_host.registry.instances.len(),
                 body_rows,
-                app.plugin_manager_cursor,
+                app.plugin_manager_cursor(),
                 app.theme,
             );
             // Boxed Close button in the bottom interior rows.

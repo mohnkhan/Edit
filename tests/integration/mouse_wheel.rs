@@ -97,17 +97,17 @@ fn wheel_scrolls_file_browser_listing() {
         fs::write(base.join(format!("f{i:02}.txt")), b"x").unwrap();
     }
     let mut a = app();
-    a.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
-    let sel0 = a.file_browser.as_ref().unwrap().selected;
+    a.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
+    let sel0 = a.file_browser().unwrap().selected;
     wheel(&mut a, MouseEventKind::ScrollDown, 10, 5);
-    let sel1 = a.file_browser.as_ref().unwrap().selected;
+    let sel1 = a.file_browser().unwrap().selected;
     assert!(
         sel1 > sel0,
         "wheel advances the file-browser selection/listing"
     );
     wheel(&mut a, MouseEventKind::ScrollUp, 10, 5);
     assert!(
-        a.file_browser.as_ref().unwrap().selected < sel1,
+        a.file_browser().unwrap().selected < sel1,
         "wheel up reverses"
     );
     let _ = fs::remove_dir_all(&base);

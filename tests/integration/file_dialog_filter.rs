@@ -29,8 +29,7 @@ fn tree(tag: &str) -> PathBuf {
 }
 
 fn names(app: &App) -> Vec<String> {
-    app.file_browser
-        .as_ref()
+    app.file_browser()
         .unwrap()
         .entries
         .iter()
@@ -47,7 +46,7 @@ fn typing_glob_filters_live() {
     fs::write(base.join("a.log"), b"x").unwrap();
     fs::write(base.join("b.txt"), b"x").unwrap();
     let mut a = make_app();
-    a.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    a.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
 
     for c in "*.log".chars() {
         a.handle_action(Action::InsertChar(c)).unwrap();
@@ -69,7 +68,7 @@ fn substring_filters_and_backspace_restores() {
     fs::write(base.join("report.txt"), b"x").unwrap();
     fs::write(base.join("data.csv"), b"x").unwrap();
     let mut a = make_app();
-    a.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    a.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
     let full = names(&a).len();
 
     for c in "rep".chars() {
@@ -95,13 +94,13 @@ fn absolute_path_still_jumps() {
     let base = tree("jump");
     fs::create_dir_all(base.join("target")).unwrap();
     let mut a = make_app();
-    a.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    a.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
     let abs = base.join("target");
     for c in abs.to_string_lossy().chars() {
         a.handle_action(Action::InsertChar(c)).unwrap();
     }
     // Absolute path is not a filter — listing stays full while typing it.
-    let fb = a.file_browser.as_ref().unwrap();
+    let fb = a.file_browser().unwrap();
     assert_eq!(
         fb.entries.len(),
         fb.all_entries.len(),
@@ -109,7 +108,7 @@ fn absolute_path_still_jumps() {
     );
     a.handle_action(Action::InsertNewline).unwrap(); // jump
     assert!(
-        a.file_browser.as_ref().unwrap().cwd.ends_with("target"),
+        a.file_browser().unwrap().cwd.ends_with("target"),
         "absolute path jumped into the directory"
     );
     let _ = fs::remove_dir_all(&base);
@@ -125,7 +124,7 @@ fn save_mode_confirm_saves_typed_name_even_if_no_match() {
     // Put some content in the active buffer to save.
     a.handle_action(Action::InsertChar('h')).unwrap();
     a.handle_action(Action::InsertChar('i')).unwrap();
-    a.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Save));
+    a.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Save));
     for c in "brandnew.txt".chars() {
         a.handle_action(Action::InsertChar(c)).unwrap();
     }
@@ -148,7 +147,7 @@ fn buttons_and_scrollbar_work_with_filter_active() {
     }
     fs::write(base.join("other.txt"), b"x").unwrap();
     let mut a = make_app();
-    a.file_browser = Some(FileBrowser::open(base.clone(), BrowseMode::Open));
+    a.open_file_browser(FileBrowser::open(base.clone(), BrowseMode::Open));
     for c in "*.log".chars() {
         a.handle_action(Action::InsertChar(c)).unwrap();
     }
@@ -165,7 +164,7 @@ fn buttons_and_scrollbar_work_with_filter_active() {
     })
     .unwrap();
     assert!(
-        a.file_browser.is_none(),
+        a.file_browser().is_none(),
         "Cancel button works under a filter"
     );
     let _ = fs::remove_dir_all(&base);

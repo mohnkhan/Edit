@@ -79,14 +79,14 @@ fn find_replace_labels_carry_keys_and_dispatch_by_index() {
     assert!(has_key(&labels, "(Enter)") && has_key(&labels, "(Esc)"));
     // Dispatch is by index: button 3 (Close) closes regardless of label text.
     a.activate_interactive_button(3);
-    assert!(a.pending_find_replace.is_none(), "index-3 button is Close");
+    assert!(a.find_replace().is_none(), "index-3 button is Close");
 }
 
 #[test]
 fn file_browser_labels_carry_keys() {
     let base = tree("fb");
     let mut a = app();
-    a.file_browser = Some(FileBrowser::open(base, BrowseMode::Open));
+    a.open_file_browser(FileBrowser::open(base, BrowseMode::Open));
     let labels = a.interactive_button_labels();
     assert!(has_key(&labels, "Open (Enter)") || has_key(&labels, "(Enter)"));
     assert!(has_key(&labels, "(Esc)"));

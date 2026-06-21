@@ -161,7 +161,8 @@ fn revert_clean_buffer_reloads_without_confirm() {
     std::fs::write(&path, "data2\n").unwrap();
     app.handle_action(Action::Revert).unwrap();
     assert_eq!(
-        app.revert_confirm_target(), None,
+        app.revert_confirm_target(),
+        None,
         "no confirm for a clean buffer"
     );
     assert_eq!(app.active_buffer().rope.to_string(), "data2\n");

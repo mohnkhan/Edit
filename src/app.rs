@@ -241,10 +241,6 @@ pub struct App {
     pub status_message: Option<String>,
     /// Default encoding resolved from config/CLI at startup.
     pub default_encoding: EncodingId,
-    /// Index into ENCODING_OPTIONS of the highlighted row; `Some` = dialog is open.
-    pub pending_encoding_select: Option<usize>,
-    /// The navigable file browser (Open/Save); `Some` = a file dialog is open (Feature 012).
-    pub file_browser: Option<FileBrowser>,
     /// Last file-browser entry click (index + time) for double-click detection.
     /// A single click selects the row; a second click on the same row within
     /// [`DOUBLE_CLICK_MS`] activates it (enter folder / open file) — Feature 012.
@@ -272,11 +268,6 @@ pub struct App {
     pub pending_external_change: Option<crate::watcher::ExternalChange>,
     /// One-shot status-bar notice (e.g., file-deleted notice); cleared after one render frame.
     pub watcher_notice: Option<String>,
-
-
-    // ── Feature 015: interactive Find / Replace dialog ────────────────────────
-    /// `Some` while an interactive Find/Replace dialog is open (modal).
-    pub pending_find_replace: Option<FindReplaceDialog>,
 
     // ── Feature 025: Go-to-Line prompt ────────────────────────────────────────
     /// `Some(digits)` while the Go-to-Line prompt is open (modal); holds the
@@ -312,11 +303,8 @@ pub struct App {
     /// The Rhai plugin host owning the engine and registry for this session.
     pub plugin_host: crate::plugin::PluginHost,
     /// Plugins awaiting a first-run consent decision; the front item is prompted.
+    /// Async queue kept as a field (not a `Modal` variant) — see the note on `Modal`.
     pub pending_plugin_consent: Vec<crate::plugin::PluginMeta>,
-    /// When true, the Options > Plugins manager overlay is open.
-    pub pending_plugin_manager: bool,
-    /// Cursor index within the plugin manager list.
-    pub plugin_manager_cursor: usize,
 }
 
 // ── App impl ─────────────────────────────────────────────────────────────────
@@ -495,8 +483,6 @@ impl App {
             search_state: SearchState::default(),
             status_message,
             default_encoding,
-            pending_encoding_select: None,
-            file_browser: None,
             last_browser_click: None,
             last_editor_click: None,
             pending_help: None,
@@ -508,7 +494,6 @@ impl App {
             self_write_times: std::collections::HashMap::new(),
             pending_external_change: None,
             watcher_notice,
-            pending_find_replace: None,
             pending_goto_line: None,
             pending_goto_line_caret: 0,
             dialog_focus: 0,
@@ -518,8 +503,6 @@ impl App {
             help_scroll: 0,
             plugin_host,
             pending_plugin_consent,
-            pending_plugin_manager: false,
-            plugin_manager_cursor: 0,
         }
     }
 
@@ -621,11 +604,16 @@ impl App {
     }
 
     /// Mutable access to the open Find/Replace dialog.
-    pub(crate) fn find_replace_mut(&mut self) -> Option<&mut FindReplaceDialog> {
+    pub fn find_replace_mut(&mut self) -> Option<&mut FindReplaceDialog> {
         match &mut self.modal {
             Modal::FindReplace(d) => Some(d),
             _ => None,
         }
+    }
+
+    /// Open the interactive Find/Replace dialog with the given dialog state.
+    pub fn open_find_replace(&mut self, dialog: FindReplaceDialog) {
+        self.modal = Modal::FindReplace(dialog);
     }
 
     /// The open file browser, if that overlay is open.
@@ -637,11 +625,16 @@ impl App {
     }
 
     /// Mutable access to the open file browser.
-    pub(crate) fn file_browser_mut(&mut self) -> Option<&mut FileBrowser> {
+    pub fn file_browser_mut(&mut self) -> Option<&mut FileBrowser> {
         match &mut self.modal {
             Modal::FileBrowser(b) => Some(b),
             _ => None,
         }
+    }
+
+    /// Open the file browser (Open/Save) with the given browser state.
+    pub fn open_file_browser(&mut self, browser: FileBrowser) {
+        self.modal = Modal::FileBrowser(browser);
     }
 
     /// The open editor context menu, if that overlay is open.
@@ -674,6 +667,46 @@ impl App {
     pub fn close_confirm_target(&self) -> Option<usize> {
         match self.modal {
             Modal::CloseConfirm(i) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Highlighted row of the encoding-select dialog, if that overlay is open.
+    pub fn encoding_select_row(&self) -> Option<usize> {
+        match self.modal {
+            Modal::EncodingSelect { row } => Some(row),
+            _ => None,
+        }
+    }
+
+    /// Open (or re-point) the encoding-select dialog at `row`.
+    pub fn set_encoding_select(&mut self, row: usize) {
+        self.modal = Modal::EncodingSelect { row };
+    }
+
+    /// True iff the plugin-manager overlay is open.
+    pub fn is_plugin_manager_open(&self) -> bool {
+        matches!(self.modal, Modal::PluginManager { .. })
+    }
+
+    /// Open the Options ▸ Plugins manager overlay (cursor at the top).
+    pub fn open_plugin_manager(&mut self) {
+        self.modal = Modal::PluginManager { cursor: 0 };
+    }
+
+    /// Plugin-manager list cursor (0 when the overlay is not open — callers read
+    /// it only inside manager-open contexts).
+    pub(crate) fn plugin_manager_cursor(&self) -> usize {
+        match self.modal {
+            Modal::PluginManager { cursor } => cursor,
+            _ => 0,
+        }
+    }
+
+    /// Mutable plugin-manager list cursor, if the overlay is open.
+    pub(crate) fn plugin_manager_cursor_mut(&mut self) -> Option<&mut usize> {
+        match &mut self.modal {
+            Modal::PluginManager { cursor } => Some(cursor),
             _ => None,
         }
     }
@@ -780,7 +813,7 @@ impl App {
                     target: ScrollTarget::Help,
                 });
             }
-        } else if let Some(idx) = self.pending_encoding_select {
+        } else if let Modal::EncodingSelect { row: idx } = self.modal {
             let rect = crate::ui::dialog::encoding_dialog_rect(full);
             let body_rows = (rect.height as usize).saturating_sub(2 + 4);
             let content = crate::ui::dialog::ENCODING_OPTIONS.len();
@@ -794,7 +827,7 @@ impl App {
                     target: ScrollTarget::Encoding,
                 });
             }
-        } else if let Some(fb) = self.file_browser.as_ref() {
+        } else if let Some(fb) = self.file_browser() {
             if let Some((rect, content, viewport, offset)) = fb.list_scrollbar(full) {
                 out.push(ScrollbarRegion {
                     rect,
@@ -805,10 +838,10 @@ impl App {
                     target: ScrollTarget::FileBrowser,
                 });
             }
-        } else if self.pending_plugin_manager {
+        } else if self.is_plugin_manager_open() {
             let rect = crate::ui::plugin_manager::manager_rect(
                 &self.plugin_host,
-                self.plugin_manager_cursor,
+                self.plugin_manager_cursor(),
                 full,
             );
             let body_rows = (rect.height as usize).saturating_sub(2 + 4);
@@ -819,11 +852,11 @@ impl App {
                     axis: ScrollAxis::Vertical,
                     content,
                     viewport: body_rows,
-                    offset: self.plugin_manager_cursor,
+                    offset: self.plugin_manager_cursor(),
                     target: ScrollTarget::Plugin,
                 });
             }
-        } else if self.pending_find_replace.is_some() || self.pending_goto_line.is_some() {
+        } else if self.find_replace().is_some() || self.pending_goto_line.is_some() {
             // Find/Replace and Go-to-Line have no scrollable content.
         } else {
             // Editor — the pane under the cursor column. Feature 027: the editor
@@ -914,7 +947,7 @@ impl App {
                 self.buffers[i].scroll_offset.1 = offset;
             }
             ScrollTarget::FileBrowser => {
-                if let Some(fb) = self.file_browser.as_mut() {
+                if let Some(fb) = self.file_browser_mut() {
                     fb.set_scroll(offset, viewport);
                 }
             }
@@ -923,11 +956,13 @@ impl App {
             }
             ScrollTarget::Encoding => {
                 let n = crate::ui::dialog::ENCODING_OPTIONS.len();
-                self.pending_encoding_select = Some(offset.min(n.saturating_sub(1)));
+                self.set_encoding_select(offset.min(n.saturating_sub(1)));
             }
             ScrollTarget::Plugin => {
                 let n = self.plugin_host.registry.instances.len();
-                self.plugin_manager_cursor = offset.min(n.saturating_sub(1));
+                if let Some(c) = self.plugin_manager_cursor_mut() {
+                    *c = offset.min(n.saturating_sub(1));
+                }
             }
         }
     }
@@ -1258,9 +1293,8 @@ impl App {
         // Feature 015 — Find/Replace dialog intercept. While open, keystrokes
         // edit the dialog fields and drive the search; the buffer is only touched
         // by an explicit Replace/Replace-All. All input is consumed.
-        if self.pending_find_replace.is_some() {
-            let is_replace =
-                self.pending_find_replace.as_ref().unwrap().mode == DialogMode::Replace;
+        if self.find_replace().is_some() {
+            let is_replace = self.find_replace().unwrap().mode == DialogMode::Replace;
             // Dialog-global keys (work regardless of which stop is focused):
             // close, option toggles, and match navigation. Feature 020 keeps
             // these unchanged from feature 015.
@@ -1270,23 +1304,23 @@ impl App {
                     return Ok(());
                 }
                 Action::ToggleSearchCase => {
-                    let d = self.pending_find_replace.as_mut().unwrap();
+                    let d = self.find_replace_mut().unwrap();
                     d.case_sensitive = !d.case_sensitive;
                     self.run_find_from_dialog();
                     return Ok(());
                 }
                 Action::ToggleSearchWrap => {
-                    self.pending_find_replace.as_mut().unwrap().wrap ^= true;
+                    self.find_replace_mut().unwrap().wrap ^= true;
                     return Ok(());
                 }
                 Action::ToggleSearchRegex => {
-                    let d = self.pending_find_replace.as_mut().unwrap();
+                    let d = self.find_replace_mut().unwrap();
                     d.regex = !d.regex;
                     self.run_find_from_dialog();
                     return Ok(());
                 }
                 Action::ToggleSearchWholeWord => {
-                    let d = self.pending_find_replace.as_mut().unwrap();
+                    let d = self.find_replace_mut().unwrap();
                     d.whole_word = !d.whole_word;
                     self.run_find_from_dialog();
                     return Ok(());
@@ -1316,12 +1350,10 @@ impl App {
             }
             // A field stop is focused: edit the field / run the per-mode action.
             match &action {
-                Action::InsertChar(c) => {
-                    self.pending_find_replace.as_mut().unwrap().insert_char(*c)
-                }
-                Action::Backspace => self.pending_find_replace.as_mut().unwrap().backspace(),
-                Action::MoveLeft => self.pending_find_replace.as_mut().unwrap().move_left(),
-                Action::MoveRight => self.pending_find_replace.as_mut().unwrap().move_right(),
+                Action::InsertChar(c) => self.find_replace_mut().unwrap().insert_char(*c),
+                Action::Backspace => self.find_replace_mut().unwrap().backspace(),
+                Action::MoveLeft => self.find_replace_mut().unwrap().move_left(),
+                Action::MoveRight => self.find_replace_mut().unwrap().move_right(),
                 Action::InsertNewline => {
                     if is_replace {
                         self.replace_current_from_dialog();
@@ -1386,11 +1418,11 @@ impl App {
         // T012 — Encoding-dialog intercept: when the dialog is open, only
         // Up/Down (navigate), Enter (confirm), and Esc/MenuClose (cancel) are
         // processed; all other actions are silently consumed.
-        if let Some(idx) = self.pending_encoding_select {
+        if let Modal::EncodingSelect { row: idx } = self.modal {
             let n = crate::ui::dialog::ENCODING_OPTIONS.len();
             // Esc always cancels, from any focus stop.
             if matches!(&action, Action::MenuClose) {
-                self.pending_encoding_select = None;
+                self.close_modal();
                 return Ok(());
             }
             // Button focused (OK/Cancel): Enter/Space activate; arrows no-op.
@@ -1404,20 +1436,20 @@ impl App {
             // Feature 028: PageUp/PageDown jump by a page, clamped (no wrap).
             match &action {
                 Action::MoveUp => {
-                    self.pending_encoding_select = Some((idx + n - 1) % n);
+                    self.set_encoding_select((idx + n - 1) % n);
                 }
                 Action::MoveDown => {
-                    self.pending_encoding_select = Some((idx + 1) % n);
+                    self.set_encoding_select((idx + 1) % n);
                 }
                 Action::MovePageDown => {
-                    self.pending_encoding_select = Some((idx + DIALOG_LIST_PAGE).min(n - 1));
+                    self.set_encoding_select((idx + DIALOG_LIST_PAGE).min(n - 1));
                 }
                 Action::MovePageUp => {
-                    self.pending_encoding_select = Some(idx.saturating_sub(DIALOG_LIST_PAGE));
+                    self.set_encoding_select(idx.saturating_sub(DIALOG_LIST_PAGE));
                 }
                 Action::InsertNewline => {
                     let enc = crate::ui::dialog::ENCODING_OPTIONS[idx].0;
-                    self.pending_encoding_select = None;
+                    self.close_modal();
                     self.do_save_as_encoding(enc);
                 }
                 _ => {}
@@ -1429,10 +1461,10 @@ impl App {
         // Enter/Right activate, Left/Backspace go to parent, printable chars edit
         // the filename/path field, Esc cancels. All other actions are consumed so
         // the browser stays modal over the buffer.
-        if self.file_browser.is_some() {
+        if self.file_browser().is_some() {
             // Esc always cancels, from any focus stop.
             if matches!(&action, Action::MenuClose) {
-                self.file_browser = None;
+                self.close_modal();
                 return Ok(());
             }
             // Button focused (Open|Save / Cancel): Enter/Space activate; other
@@ -1446,14 +1478,13 @@ impl App {
             // Browser focused: existing navigation/edit behavior (feature 012).
             let vis = {
                 let (w, h) = self.terminal_size;
-                self.file_browser
-                    .as_ref()
+                self.file_browser()
                     .unwrap()
                     .visible_rows(ratatui::layout::Rect::new(0, 0, w, h))
             };
             let mut outcome: Option<BrowseOutcome> = None;
             {
-                let fb = self.file_browser.as_mut().unwrap();
+                let fb = self.file_browser_mut().unwrap();
                 // Feature 031: while a filename is being typed, Left/Right/Home/End
                 // edit the field caret; with an empty field they keep the list
                 // navigation semantics (← parent, → activate).
@@ -1526,11 +1557,11 @@ impl App {
 
         // Feature 008 — Plugin manager dialog intercept: Up/Down navigate,
         // Space/Enter toggle enabled, Esc closes.
-        if self.pending_plugin_manager {
+        if self.is_plugin_manager_open() {
             let n = self.plugin_host.registry.instances.len();
             // Esc/Quit always close, from any focus stop.
             if matches!(&action, Action::MenuClose | Action::Quit) {
-                self.pending_plugin_manager = false;
+                self.close_modal();
                 return Ok(());
             }
             // Button focused (Close): Enter/Space activate; arrows no-op.
@@ -1544,18 +1575,24 @@ impl App {
             // Feature 028: PageUp/PageDown jump by a page, clamped (no wrap).
             match &action {
                 Action::MoveUp if n > 0 => {
-                    self.plugin_manager_cursor = (self.plugin_manager_cursor + n - 1) % n;
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = (*c + n - 1) % n;
+                    }
                 }
                 Action::MoveDown if n > 0 => {
-                    self.plugin_manager_cursor = (self.plugin_manager_cursor + 1) % n;
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = (*c + 1) % n;
+                    }
                 }
                 Action::MovePageDown if n > 0 => {
-                    self.plugin_manager_cursor =
-                        (self.plugin_manager_cursor + DIALOG_LIST_PAGE).min(n - 1);
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = (*c + DIALOG_LIST_PAGE).min(n - 1);
+                    }
                 }
                 Action::MovePageUp if n > 0 => {
-                    self.plugin_manager_cursor =
-                        self.plugin_manager_cursor.saturating_sub(DIALOG_LIST_PAGE);
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = c.saturating_sub(DIALOG_LIST_PAGE);
+                    }
                 }
                 Action::InsertChar(' ') | Action::InsertNewline => {
                     self.plugin_manager_toggle_current();
@@ -1665,13 +1702,13 @@ impl App {
 
             // File browser (Feature 012). Open/Save As show the navigable browser.
             Action::Open => {
-                self.file_browser = Some(FileBrowser::open(
+                self.modal = Modal::FileBrowser(FileBrowser::open(
                     self.browser_start_dir(),
                     BrowseMode::Open,
                 ));
             }
             Action::SaveAs => {
-                self.file_browser = Some(FileBrowser::open(
+                self.modal = Modal::FileBrowser(FileBrowser::open(
                     self.browser_start_dir(),
                     BrowseMode::Save,
                 ));
@@ -1713,7 +1750,7 @@ impl App {
             Action::SaveAsEncoding => {
                 if !self.buffers.is_empty() {
                     let idx = Self::encoding_to_idx(self.buffers[self.active_idx].encoding);
-                    self.pending_encoding_select = Some(idx);
+                    self.set_encoding_select(idx);
                 }
             }
 
@@ -1788,8 +1825,7 @@ impl App {
 
             // Feature 008 — Plugin API
             Action::OpenPluginManager => {
-                self.pending_plugin_manager = true;
-                self.plugin_manager_cursor = 0;
+                self.modal = Modal::PluginManager { cursor: 0 };
             }
             Action::PluginMenuActivated(plugin_id, item_id) => {
                 let content = self.active_buffer().rope.to_string();
@@ -2049,7 +2085,7 @@ impl App {
         // Feature 012: an unnamed buffer has no path to save to — open the Save
         // browser so the user can choose a destination.
         if self.active_buffer().path.is_none() {
-            self.file_browser = Some(FileBrowser::open(
+            self.modal = Modal::FileBrowser(FileBrowser::open(
                 self.browser_start_dir(),
                 BrowseMode::Save,
             ));
@@ -3089,7 +3125,7 @@ impl App {
     /// Open the Find dialog (Ctrl+F / Search ▸ Find), seeded with the last query.
     pub fn open_find_dialog(&mut self) {
         let seed = self.search_state.query.clone();
-        self.pending_find_replace = Some(FindReplaceDialog::new(DialogMode::Find, seed));
+        self.modal = Modal::FindReplace(FindReplaceDialog::new(DialogMode::Find, seed));
     }
 
     /// Open the Replace dialog (Ctrl+H / Search ▸ Find Replace).
@@ -3099,12 +3135,12 @@ impl App {
         if let Some(r) = &self.search_state.replacement {
             d.replacement = r.clone();
         }
-        self.pending_find_replace = Some(d);
+        self.modal = Modal::FindReplace(d);
     }
 
     /// Close the Find/Replace dialog and clear the active match highlights.
     pub fn close_find_replace(&mut self) {
-        self.pending_find_replace = None;
+        self.close_modal();
         self.search_state.matches.clear();
         self.search_state.active_match = None;
     }
@@ -3132,7 +3168,7 @@ impl App {
     /// highlight matches, and jump to the first match at/after the cursor.
     fn run_find_from_dialog(&mut self) {
         let (query, case, regex, whole, wrap, replacement) = {
-            let d = match self.pending_find_replace.as_ref() {
+            let d = match self.find_replace() {
                 Some(d) => d,
                 None => return,
             };
@@ -3193,8 +3229,7 @@ impl App {
             self.run_find_from_dialog();
         }
         let replacement = self
-            .pending_find_replace
-            .as_ref()
+            .find_replace()
             .map(|d| d.replacement.clone())
             .unwrap_or_default();
         let idx = match self.search_state.active_match {
@@ -3266,15 +3301,30 @@ impl App {
     /// Replace all occurrences (Ctrl+A in Replace mode), reporting the count.
     fn replace_all_from_dialog(&mut self) {
         // Sync the dialog query/replacement/options into search_state first.
-        if let Some(d) = self.pending_find_replace.as_ref() {
-            self.search_state.query = d.query.clone();
-            self.search_state.replacement = Some(d.replacement.clone());
-            self.search_state.case_sensitive = d.case_sensitive;
-            self.search_state.regex_mode = d.regex;
-            self.search_state.whole_word = d.whole_word;
-            self.search_state.wrap = d.wrap;
-        }
+        self.sync_search_state_from_find_replace();
         self.replace_all();
+    }
+
+    /// Copy the open Find/Replace dialog's query/options into `search_state`.
+    /// (Values are cloned out first so `self.search_state` can be mutated without
+    /// holding a borrow of the dialog now nested inside `self.modal` — Feature 039.)
+    fn sync_search_state_from_find_replace(&mut self) {
+        if let Some(d) = self.find_replace() {
+            let (query, replacement, case_sensitive, regex, whole_word, wrap) = (
+                d.query.clone(),
+                d.replacement.clone(),
+                d.case_sensitive,
+                d.regex,
+                d.whole_word,
+                d.wrap,
+            );
+            self.search_state.query = query;
+            self.search_state.replacement = Some(replacement);
+            self.search_state.case_sensitive = case_sensitive;
+            self.search_state.regex_mode = regex;
+            self.search_state.whole_word = whole_word;
+            self.search_state.wrap = wrap;
+        }
     }
 
     /// Jump to the next search match, wrapping at end-of-document when
@@ -3653,11 +3703,11 @@ impl App {
         match outcome {
             BrowseOutcome::Navigated | BrowseOutcome::None => {}
             BrowseOutcome::OpenFile(path) => {
-                self.file_browser = None;
+                self.close_modal();
                 self.handle_open_file(path);
             }
             BrowseOutcome::SaveFile(path) => {
-                self.file_browser = None;
+                self.close_modal();
                 self.do_save_as(path);
             }
         }
@@ -3932,11 +3982,11 @@ impl App {
                     Modal::CloseConfirm(i) => Some(i),
                     _ => None,
                 }
-                    .and_then(|i| self.buffers.get(i))
-                    .and_then(|b| b.path.as_ref())
-                    .and_then(|p| p.file_name())
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "[No Name]".to_string());
+                .and_then(|i| self.buffers.get(i))
+                .and_then(|b| b.path.as_ref())
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "[No Name]".to_string());
                 (
                     "Unsaved Changes",
                     vec![format!("Save changes to {} before closing?", name)],
@@ -4005,13 +4055,13 @@ impl App {
     /// The currently-open interactive/list dialog, if any. These are mutually
     /// exclusive in practice; the order is a defensive precedence.
     fn interactive_dialog(&self) -> Option<InteractiveDialog> {
-        if self.pending_find_replace.is_some() {
+        if self.find_replace().is_some() {
             Some(InteractiveDialog::FindReplace)
-        } else if self.pending_encoding_select.is_some() {
+        } else if self.encoding_select_row().is_some() {
             Some(InteractiveDialog::EncodingSelect)
-        } else if self.file_browser.is_some() {
+        } else if self.file_browser().is_some() {
             Some(InteractiveDialog::FileBrowser)
-        } else if self.pending_plugin_manager {
+        } else if self.is_plugin_manager_open() {
             Some(InteractiveDialog::PluginManager)
         } else {
             None
@@ -4022,12 +4072,10 @@ impl App {
     /// (1 for the list/browser dialogs; 1 in Find mode and 2 in Replace mode).
     fn interactive_field_stops(&self) -> usize {
         match self.interactive_dialog() {
-            Some(InteractiveDialog::FindReplace) => {
-                match self.pending_find_replace.as_ref().map(|d| d.mode) {
-                    Some(DialogMode::Replace) => 2,
-                    _ => 1,
-                }
-            }
+            Some(InteractiveDialog::FindReplace) => match self.find_replace().map(|d| d.mode) {
+                Some(DialogMode::Replace) => 2,
+                _ => 1,
+            },
             Some(_) => 1,
             None => 0,
         }
@@ -4044,7 +4092,7 @@ impl App {
             Some(InteractiveDialog::PluginManager) => vec!["Close (Esc)"],
             Some(InteractiveDialog::FileBrowser) => {
                 let save = matches!(
-                    self.file_browser.as_ref().map(|b| b.mode),
+                    self.file_browser().map(|b| b.mode),
                     Some(crate::ui::file_browser::BrowseMode::Save)
                 );
                 if save {
@@ -4055,7 +4103,7 @@ impl App {
             }
             Some(InteractiveDialog::FindReplace) => {
                 let replace = matches!(
-                    self.pending_find_replace.as_ref().map(|d| d.mode),
+                    self.find_replace().map(|d| d.mode),
                     Some(DialogMode::Replace)
                 );
                 if replace {
@@ -4096,7 +4144,7 @@ impl App {
     /// Replacement). No-op when a button stop is focused.
     fn sync_find_replace_focus(&mut self) {
         let f = self.dialog_focus;
-        if let Some(d) = self.pending_find_replace.as_mut() {
+        if let Some(d) = self.find_replace_mut() {
             let field = match f {
                 0 => DialogField::Query,
                 1 if d.mode == DialogMode::Replace => DialogField::Replacement,
@@ -4118,14 +4166,12 @@ impl App {
             }
             InteractiveDialog::PluginManager => Some(crate::ui::plugin_manager::manager_rect(
                 &self.plugin_host,
-                self.plugin_manager_cursor,
+                self.plugin_manager_cursor(),
                 area,
             )),
-            InteractiveDialog::FileBrowser => {
-                Some(self.file_browser.as_ref().unwrap().box_rect(area))
-            }
+            InteractiveDialog::FileBrowser => Some(self.file_browser().unwrap().box_rect(area)),
             InteractiveDialog::FindReplace => Some(crate::ui::find_replace_rect(
-                self.pending_find_replace.as_ref().unwrap(),
+                self.find_replace().unwrap(),
                 area,
             )),
         }
@@ -4137,25 +4183,25 @@ impl App {
         match self.interactive_dialog() {
             Some(InteractiveDialog::EncodingSelect) => {
                 if idx == 0 {
-                    if let Some(sel) = self.pending_encoding_select {
+                    if let Modal::EncodingSelect { row: sel } = self.modal {
                         let enc = crate::ui::dialog::ENCODING_OPTIONS[sel].0;
-                        self.pending_encoding_select = None;
+                        self.close_modal();
                         self.do_save_as_encoding(enc);
                     }
                 } else {
-                    self.pending_encoding_select = None;
+                    self.close_modal();
                 }
             }
             Some(InteractiveDialog::PluginManager) => {
                 // Sole button is Close.
-                self.pending_plugin_manager = false;
+                self.close_modal();
             }
             Some(InteractiveDialog::FileBrowser) => {
                 if idx == 0 {
-                    let outcome = self.file_browser.as_mut().unwrap().activate();
+                    let outcome = self.file_browser_mut().unwrap().activate();
                     self.apply_browse_outcome(outcome);
                 } else {
-                    self.file_browser = None;
+                    self.close_modal();
                 }
             }
             Some(InteractiveDialog::FindReplace) => {
@@ -4163,7 +4209,7 @@ impl App {
                 // Find mode ring buttons: [Find, Close]; Replace mode:
                 // [Find, Replace, Replace All, Close].
                 let replace = matches!(
-                    self.pending_find_replace.as_ref().map(|d| d.mode),
+                    self.find_replace().map(|d| d.mode),
                     Some(DialogMode::Replace)
                 );
                 if replace {
@@ -4435,17 +4481,17 @@ impl App {
                 } else {
                     self.help_scroll.saturating_sub(step)
                 };
-            } else if let Some(idx) = self.pending_encoding_select {
+            } else if let Modal::EncodingSelect { row: idx } = self.modal {
                 let n = crate::ui::dialog::ENCODING_OPTIONS.len();
-                self.pending_encoding_select = Some(if down {
+                self.set_encoding_select(if down {
                     (idx + step).min(n - 1)
                 } else {
                     idx.saturating_sub(step)
                 });
-            } else if self.file_browser.is_some() {
+            } else if self.file_browser().is_some() {
                 let (w, h) = self.terminal_size;
                 let vis = ratatui::layout::Rect::new(0, 0, w, h);
-                if let Some(fb) = self.file_browser.as_mut() {
+                if let Some(fb) = self.file_browser_mut() {
                     let rows = fb.visible_rows(vis);
                     for _ in 0..step {
                         if down {
@@ -4455,16 +4501,18 @@ impl App {
                         }
                     }
                 }
-            } else if self.pending_plugin_manager {
+            } else if self.is_plugin_manager_open() {
                 let n = self.plugin_host.registry.instances.len();
                 if n > 0 {
-                    self.plugin_manager_cursor = if down {
-                        (self.plugin_manager_cursor + step).min(n - 1)
-                    } else {
-                        self.plugin_manager_cursor.saturating_sub(step)
-                    };
+                    if let Some(c) = self.plugin_manager_cursor_mut() {
+                        *c = if down {
+                            (*c + step).min(n - 1)
+                        } else {
+                            c.saturating_sub(step)
+                        };
+                    }
                 }
-            } else if self.pending_find_replace.is_some() || self.pending_goto_line.is_some() {
+            } else if self.find_replace().is_some() || self.pending_goto_line.is_some() {
                 // Find/Replace and Go-to-Line have no scrollable content — ignore.
             } else {
                 // Editor: ignore the menu/tab rows (above editor_top) and the
@@ -4586,7 +4634,7 @@ impl App {
                     Some(InteractiveDialog::EncodingSelect) => {
                         if let Some(idx) = crate::ui::dialog::encoding_row_hit(rect, ev.col, ev.row)
                         {
-                            self.pending_encoding_select = Some(idx);
+                            self.set_encoding_select(idx);
                             self.dialog_focus = 0;
                             return Ok(());
                         }
@@ -4598,7 +4646,9 @@ impl App {
                             ev.col,
                             ev.row,
                         ) {
-                            self.plugin_manager_cursor = idx;
+                            if let Some(c) = self.plugin_manager_cursor_mut() {
+                                *c = idx;
+                            }
                             self.dialog_focus = 0;
                             return Ok(());
                         }
@@ -4608,7 +4658,7 @@ impl App {
                         // caret to the clicked grapheme and focuses that field.
                         let (w, h) = self.terminal_size;
                         let full = ratatui::layout::Rect::new(0, 0, w, h);
-                        if let Some(d) = self.pending_find_replace.as_ref() {
+                        if let Some(d) = self.find_replace() {
                             let fields = crate::ui::find_replace_field_rects(d, full);
                             for (field, fr) in fields {
                                 if ev.row == fr.y && ev.col >= fr.x && ev.col < fr.x + fr.width {
@@ -4623,7 +4673,7 @@ impl App {
                                         fr.width,
                                         ev.col - fr.x,
                                     );
-                                    let d = self.pending_find_replace.as_mut().unwrap();
+                                    let d = self.find_replace_mut().unwrap();
                                     d.set_focus(field);
                                     d.caret = caret;
                                     self.dialog_focus = match field {
@@ -4648,24 +4698,20 @@ impl App {
         // double-click on a folder navigating in and then immediately opening
         // whatever file lands under the cursor in the new listing. A click
         // outside the box cancels.
-        if self.file_browser.is_some() {
+        if self.file_browser().is_some() {
             let (w, h) = self.terminal_size;
             let area = ratatui::layout::Rect::new(0, 0, w, h);
             // Feature 031 (#58): a click inside the Name/path field box positions
             // the caret there (checked before the list/outside hit-test).
             {
-                let fb = self.file_browser.as_ref().unwrap();
+                let fb = self.file_browser().unwrap();
                 let fr = fb.field_text_rect(area);
                 if ev.row == fr.y && ev.col >= fr.x && ev.col < fr.x + fr.width {
-                    self.file_browser.as_mut().unwrap().caret_click(fr, ev.col);
+                    self.file_browser_mut().unwrap().caret_click(fr, ev.col);
                     return Ok(());
                 }
             }
-            let hit = self
-                .file_browser
-                .as_ref()
-                .unwrap()
-                .hit_test(area, ev.col, ev.row);
+            let hit = self.file_browser().unwrap().hit_test(area, ev.col, ev.row);
             match hit {
                 BrowserHit::Entry(idx) => {
                     let now = Instant::now();
@@ -4675,17 +4721,17 @@ impl App {
                     });
                     if double {
                         self.last_browser_click = None;
-                        let outcome = self.file_browser.as_mut().unwrap().activate_index(idx);
+                        let outcome = self.file_browser_mut().unwrap().activate_index(idx);
                         self.apply_browse_outcome(outcome);
                     } else {
                         // First click: just move the highlight to the row.
                         self.last_browser_click = Some((idx, now));
-                        self.file_browser.as_mut().unwrap().selected = idx;
+                        self.file_browser_mut().unwrap().selected = idx;
                     }
                 }
                 BrowserHit::Outside => {
                     self.last_browser_click = None;
-                    self.file_browser = None;
+                    self.close_modal();
                 }
                 BrowserHit::Inside => self.last_browser_click = None,
             }
@@ -4726,12 +4772,12 @@ impl App {
                 | Modal::SessionRestore(_)
                 | Modal::RevertConfirm(_)
                 | Modal::CloseConfirm(_)
-        ) || self.pending_encoding_select.is_some()
+        ) || self.encoding_select_row().is_some()
             || self.pending_help.is_some()
             || self.pending_external_change.is_some()
             || !self.pending_plugin_consent.is_empty()
-            || self.pending_plugin_manager
-            || self.pending_find_replace.is_some()
+            || self.is_plugin_manager_open()
+            || self.find_replace().is_some()
             || self.pending_goto_line.is_some()
         {
             return Ok(());
@@ -5005,7 +5051,7 @@ impl App {
 
     /// Toggle the enabled state of the plugin under the manager cursor and persist it.
     fn plugin_manager_toggle_current(&mut self) {
-        let idx = self.plugin_manager_cursor;
+        let idx = self.plugin_manager_cursor();
         let Some((id, new_enabled, version)) =
             self.plugin_host.registry.instances.get(idx).map(|i| {
                 (
@@ -5213,19 +5259,19 @@ mod tests {
         a.terminal_size = (80, 24);
         assert_eq!(a.interactive_ring_len(), 0, "no dialog open");
 
-        a.pending_encoding_select = Some(0);
+        a.set_encoding_select(0);
         assert_eq!(a.interactive_field_stops(), 1);
         assert_eq!(a.interactive_ring_len(), 3); // List + OK + Cancel
-        a.pending_encoding_select = None;
+        a.close_modal();
 
-        a.pending_plugin_manager = true;
+        a.modal = Modal::PluginManager { cursor: 0 };
         assert_eq!(a.interactive_ring_len(), 2); // List + Close
-        a.pending_plugin_manager = false;
+        a.close_modal();
 
-        a.pending_find_replace = Some(FindReplaceDialog::new(DialogMode::Find, String::new()));
+        a.modal = Modal::FindReplace(FindReplaceDialog::new(DialogMode::Find, String::new()));
         assert_eq!(a.interactive_field_stops(), 1);
         assert_eq!(a.interactive_ring_len(), 3); // Query + Find + Close
-        a.pending_find_replace = Some(FindReplaceDialog::new(DialogMode::Replace, String::new()));
+        a.modal = Modal::FindReplace(FindReplaceDialog::new(DialogMode::Replace, String::new()));
         assert_eq!(a.interactive_field_stops(), 2);
         assert_eq!(a.interactive_ring_len(), 6); // Query+Replacement + 4 buttons
     }
@@ -5234,7 +5280,7 @@ mod tests {
     #[test]
     fn interactive_focus_is_button_boundary() {
         let mut a = make_app();
-        a.pending_encoding_select = Some(0); // field_stops 1, ring 3
+        a.set_encoding_select(0); // field_stops 1, ring 3
         a.dialog_focus = 0;
         assert_eq!(a.interactive_focus_is_button(), None);
         a.dialog_focus = 1;
@@ -5253,15 +5299,17 @@ mod tests {
             let mut a = make_app();
             a.terminal_size = (w, h);
             for setup in 0..3 {
-                a.pending_encoding_select = None;
-                a.pending_plugin_manager = false;
-                a.pending_find_replace = None;
+                a.close_modal();
+                a.close_modal();
+                a.close_modal();
                 match setup {
-                    0 => a.pending_encoding_select = Some(3),
-                    1 => a.pending_plugin_manager = true,
+                    0 => a.set_encoding_select(3),
+                    1 => a.modal = Modal::PluginManager { cursor: 0 },
                     _ => {
-                        a.pending_find_replace =
-                            Some(FindReplaceDialog::new(DialogMode::Replace, "abc".into()))
+                        a.modal = Modal::FindReplace(FindReplaceDialog::new(
+                            DialogMode::Replace,
+                            "abc".into(),
+                        ))
                     }
                 }
                 if let Some(r) = a.interactive_dialog_rect() {
@@ -5308,11 +5356,11 @@ mod tests {
             let mut a = make_app();
             a.terminal_size = (80, 24);
             match setup {
-                0 => a.pending_encoding_select = Some(0),
-                1 => a.pending_plugin_manager = true,
+                0 => a.set_encoding_select(0),
+                1 => a.modal = Modal::PluginManager { cursor: 0 },
                 _ => {
-                    a.pending_find_replace =
-                        Some(FindReplaceDialog::new(DialogMode::Replace, "x".into()))
+                    a.modal =
+                        Modal::FindReplace(FindReplaceDialog::new(DialogMode::Replace, "x".into()))
                 }
             }
             // Focus the first button (stop = field_stops) and keep it across the
@@ -5746,31 +5794,30 @@ mod tests {
     fn page_keys_clamp_encoding_select_list() {
         let mut a = make_app();
         let n = crate::ui::dialog::ENCODING_OPTIONS.len();
-        a.pending_encoding_select = Some(0);
+        a.set_encoding_select(0);
         a.handle_action(Action::MovePageDown).unwrap();
-        assert_eq!(a.pending_encoding_select, Some(DIALOG_LIST_PAGE.min(n - 1)));
+        assert_eq!(a.encoding_select_row(), Some(DIALOG_LIST_PAGE.min(n - 1)));
         // Repeated page-downs clamp to the last item.
         for _ in 0..5 {
             a.handle_action(Action::MovePageDown).unwrap();
         }
-        assert_eq!(a.pending_encoding_select, Some(n - 1));
+        assert_eq!(a.encoding_select_row(), Some(n - 1));
         for _ in 0..5 {
             a.handle_action(Action::MovePageUp).unwrap();
         }
-        assert_eq!(a.pending_encoding_select, Some(0));
+        assert_eq!(a.encoding_select_row(), Some(0));
     }
 
     #[test]
     fn page_keys_clamp_plugin_manager_list() {
         let mut a = make_app();
         // With no plugins installed the list is empty — paging must be a safe no-op.
-        a.pending_plugin_manager = true;
-        a.plugin_manager_cursor = 0;
+        a.modal = Modal::PluginManager { cursor: 0 };
         a.handle_action(Action::MovePageDown).unwrap();
         a.handle_action(Action::MovePageUp).unwrap();
-        assert_eq!(a.plugin_manager_cursor, 0);
+        assert_eq!(a.plugin_manager_cursor(), 0);
         assert!(
-            a.pending_plugin_manager,
+            a.is_plugin_manager_open(),
             "list paging never closes the dialog"
         );
     }
@@ -5849,7 +5896,7 @@ mod tests {
     fn arrow_keys_cycle_interactive_buttons_when_button_focused() {
         use crate::ui::file_browser::{BrowseMode, FileBrowser};
         let mut a = make_app();
-        a.file_browser = Some(FileBrowser::open(
+        a.modal = Modal::FileBrowser(FileBrowser::open(
             std::path::PathBuf::from("."),
             BrowseMode::Save,
         ));
@@ -5875,7 +5922,7 @@ mod tests {
         a.dialog_focus = 2;
         a.dialog_focus_init = false;
         // Open the Save browser.
-        a.file_browser = Some(FileBrowser::open(
+        a.modal = Modal::FileBrowser(FileBrowser::open(
             std::path::PathBuf::from("."),
             BrowseMode::Save,
         ));
@@ -6394,56 +6441,56 @@ mod tests {
     fn test_save_as_encoding_action_opens_dialog() {
         let mut app = make_app(); // UTF-8 buffer (index 0 in ENCODING_OPTIONS)
         app.handle_action(Action::SaveAsEncoding).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(0));
+        assert_eq!(app.encoding_select_row(), Some(0));
     }
 
     #[test]
     fn test_dialog_preselects_current_encoding() {
         let mut app = make_app_with_encoding(EncodingId::Utf16Le); // index 1
         app.handle_action(Action::SaveAsEncoding).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(1));
+        assert_eq!(app.encoding_select_row(), Some(1));
     }
 
     #[test]
     fn test_dialog_move_down_increments_idx() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(1);
+        app.set_encoding_select(1);
         app.handle_action(Action::MoveDown).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(2));
+        assert_eq!(app.encoding_select_row(), Some(2));
     }
 
     #[test]
     fn test_dialog_move_down_wraps_at_end() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(6); // last item
+        app.set_encoding_select(6); // last item
         app.handle_action(Action::MoveDown).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(0));
+        assert_eq!(app.encoding_select_row(), Some(0));
     }
 
     #[test]
     fn test_dialog_move_up_wraps_at_start() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(0);
+        app.set_encoding_select(0);
         app.handle_action(Action::MoveUp).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(6));
+        assert_eq!(app.encoding_select_row(), Some(6));
     }
 
     #[test]
     fn test_dialog_escape_closes() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(3);
+        app.set_encoding_select(3);
         app.handle_action(Action::MenuClose).unwrap();
-        assert_eq!(app.pending_encoding_select, None);
+        assert_eq!(app.encoding_select_row(), None);
     }
 
     #[test]
     fn test_dialog_other_action_consumed() {
         let mut app = make_app();
-        app.pending_encoding_select = Some(2);
+        app.set_encoding_select(2);
         let gcol_before = app.buffers[0].cursor.grapheme_col;
         app.handle_action(Action::MoveLeft).unwrap();
         // Dialog state must be preserved (action consumed, not passed to editor).
-        assert_eq!(app.pending_encoding_select, Some(2));
+        assert_eq!(app.encoding_select_row(), Some(2));
         // Cursor must not have moved.
         assert_eq!(app.buffers[0].cursor.grapheme_col, gcol_before);
     }
@@ -6453,9 +6500,9 @@ mod tests {
     #[test]
     fn test_open_action_opens_browser() {
         let mut app = make_app();
-        assert!(app.file_browser.is_none());
+        assert!(app.file_browser().is_none());
         app.handle_action(Action::Open).unwrap();
-        let fb = app.file_browser.as_ref().expect("browser open");
+        let fb = app.file_browser().expect("browser open");
         assert_eq!(fb.mode, BrowseMode::Open);
     }
 
@@ -6466,9 +6513,9 @@ mod tests {
         for c in "ab".chars() {
             app.handle_action(Action::InsertChar(c)).unwrap();
         }
-        assert_eq!(app.file_browser.as_ref().unwrap().filename, "ab");
+        assert_eq!(app.file_browser().unwrap().filename, "ab");
         app.handle_action(Action::Backspace).unwrap();
-        assert_eq!(app.file_browser.as_ref().unwrap().filename, "a");
+        assert_eq!(app.file_browser().unwrap().filename, "a");
     }
 
     #[test]
@@ -6477,7 +6524,7 @@ mod tests {
         let n_before = app.buffers.len();
         app.handle_action(Action::Open).unwrap();
         app.handle_action(Action::MenuClose).unwrap();
-        assert!(app.file_browser.is_none());
+        assert!(app.file_browser().is_none());
         assert_eq!(app.buffers.len(), n_before, "cancel must not open a buffer");
     }
 
@@ -6488,7 +6535,7 @@ mod tests {
         let gcol_before = app.buffers[0].cursor.grapheme_col;
         // ToggleHighlight is consumed by the browser intercept (no effect).
         app.handle_action(Action::ToggleHighlight).unwrap();
-        assert!(app.file_browser.is_some());
+        assert!(app.file_browser().is_some());
         assert_eq!(app.buffers[0].cursor.grapheme_col, gcol_before);
     }
 
@@ -6507,7 +6554,7 @@ mod tests {
         }
         app.handle_action(Action::InsertNewline).unwrap();
 
-        assert!(app.file_browser.is_none(), "browser closes after opening");
+        assert!(app.file_browser().is_none(), "browser closes after opening");
         assert_eq!(app.buffers.len(), n_before + 1, "a new buffer is added");
         assert!(app
             .active_buffer()
@@ -6600,15 +6647,15 @@ mod tests {
         app.insert_char('h');
         app.insert_char('i');
         app.handle_action(Action::SaveAs).unwrap();
-        assert_eq!(app.file_browser.as_ref().unwrap().mode, BrowseMode::Save);
+        assert_eq!(app.file_browser().unwrap().mode, BrowseMode::Save);
         // Point the browser at the temp dir, type a filename, confirm.
-        app.file_browser = Some(FileBrowser::open(dir.clone(), BrowseMode::Save));
+        app.modal = Modal::FileBrowser(FileBrowser::open(dir.clone(), BrowseMode::Save));
         for c in "saved.txt".chars() {
             app.handle_action(Action::InsertChar(c)).unwrap();
         }
         app.handle_action(Action::InsertNewline).unwrap();
 
-        assert!(app.file_browser.is_none(), "browser closes after save");
+        assert!(app.file_browser().is_none(), "browser closes after save");
         let written = std::fs::read_to_string(&path).expect("file written");
         assert!(written.contains("hi"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -6619,7 +6666,7 @@ mod tests {
         let mut app = make_app(); // make_app starts with an unnamed buffer
         assert!(app.active_buffer().path.is_none());
         app.handle_action(Action::Save).unwrap();
-        let fb = app.file_browser.as_ref().expect("save browser opened");
+        let fb = app.file_browser().expect("save browser opened");
         assert_eq!(fb.mode, BrowseMode::Save);
     }
 
@@ -6732,7 +6779,7 @@ mod tests {
 
         // Find ▸ first item fired: the Find dialog is open and the menu closed.
         assert!(
-            app.pending_find_replace.is_some(),
+            app.find_replace().is_some(),
             "first Search item should invoke Find, not switch tabs"
         );
         assert!(!app.menu_bar.is_active());
@@ -6747,7 +6794,7 @@ mod tests {
         app.handle_mouse_event(mouse_press(1, 0)).unwrap();
         app.handle_mouse_event(mouse_press(3, 2)).unwrap();
         // "Open" → Action::Open → opens the file browser and closes the menu.
-        assert!(app.file_browser.is_some());
+        assert!(app.file_browser().is_some());
         assert!(!app.menu_bar.is_active());
     }
 
@@ -6768,11 +6815,11 @@ mod tests {
         let mut app = make_app();
         // Start with UTF-8 encoding.
         assert_eq!(app.buffers[0].encoding, EncodingId::Utf8);
-        app.pending_encoding_select = Some(3); // e.g. CP437 selected
-                                               // Cancel via MenuClose.
+        app.set_encoding_select(3); // e.g. CP437 selected
+                                    // Cancel via MenuClose.
         app.handle_action(Action::MenuClose).unwrap();
         // Dialog closed.
-        assert_eq!(app.pending_encoding_select, None);
+        assert_eq!(app.encoding_select_row(), None);
         // Encoding unchanged.
         assert_eq!(app.buffers[0].encoding, EncodingId::Utf8);
         // No status message about encoding change.
@@ -6829,7 +6876,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         // Re-open dialog — must pre-select UTF-16 BE (index 2).
         app.handle_action(Action::SaveAsEncoding).unwrap();
-        assert_eq!(app.pending_encoding_select, Some(2));
+        assert_eq!(app.encoding_select_row(), Some(2));
     }
 
     // ── T022 — Pending encoding cleared on filename-prompt cancel ────────────

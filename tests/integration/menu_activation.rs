@@ -276,7 +276,7 @@ fn test_left_right_ring_includes_plugin_menu() {
 fn test_modal_precedence_over_menu() {
     // When a modal dialog is active, its guard runs before the menu guard.
     let mut app = plain_app();
-    app.pending_plugin_manager = true;
+    app.open_plugin_manager();
     app.menu_bar.activate_bar(); // pretend the menu is also active
     app.handle_action(Action::MoveDown).unwrap();
     // The plugin-manager guard consumed the key; menu state is untouched.

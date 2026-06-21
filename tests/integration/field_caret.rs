@@ -31,26 +31,23 @@ fn left_click(a: &mut App, col: u16, row: u16) {
 #[test]
 fn click_in_find_field_positions_caret() {
     let mut a = app();
-    a.pending_find_replace = Some(FindReplaceDialog::new(
+    a.open_find_replace(FindReplaceDialog::new(
         DialogMode::Find,
         "hello world".into(),
     ));
     let full = ratatui::layout::Rect::new(0, 0, 80, 24);
-    let d = a.pending_find_replace.as_ref().unwrap();
+    let d = a.find_replace().unwrap();
     let rects = edit::ui::find_replace_field_rects(d, full);
     let (field, fr) = rects[0];
     assert_eq!(field, DialogField::Query);
     // Click 6 columns into the query text ("hello |world") → caret at grapheme 6.
     left_click(&mut a, fr.x + 6, fr.y);
-    let d = a.pending_find_replace.as_ref().unwrap();
+    let d = a.find_replace().unwrap();
     assert_eq!(d.caret, 6);
     assert_eq!(d.focus, DialogField::Query);
     // Click past the end clamps to the value length.
     left_click(&mut a, fr.x + 50, fr.y);
-    assert_eq!(
-        a.pending_find_replace.as_ref().unwrap().caret,
-        "hello world".len()
-    );
+    assert_eq!(a.find_replace().unwrap().caret, "hello world".len());
 }
 
 // ── US2: file-browser Name field caret + click ──────────────────────────────
@@ -62,18 +59,18 @@ fn click_and_arrows_edit_name_field() {
     for c in "report.txt".chars() {
         fb.push_char(c);
     }
-    a.file_browser = Some(fb);
+    a.open_file_browser(fb);
     // Arrow + insert mid-string via the app's key path.
     a.handle_action(Action::MoveLineStart).unwrap(); // caret to 0
     a.handle_action(Action::MoveRight).unwrap(); // caret 1 (editing, not activate)
     a.handle_action(Action::InsertChar('Z')).unwrap();
-    assert_eq!(a.file_browser.as_ref().unwrap().filename, "rZeport.txt");
+    assert_eq!(a.file_browser().unwrap().filename, "rZeport.txt");
 
     // Click into the field box → caret moves to the clicked grapheme.
     let area = ratatui::layout::Rect::new(0, 0, 80, 24);
-    let fr = a.file_browser.as_ref().unwrap().field_text_rect(area);
+    let fr = a.file_browser().unwrap().field_text_rect(area);
     left_click(&mut a, fr.x + 4, fr.y);
-    assert_eq!(a.file_browser.as_ref().unwrap().caret, 4);
+    assert_eq!(a.file_browser().unwrap().caret, 4);
 }
 
 // ── US3: Go-to-Line caret + click ───────────────────────────────────────────

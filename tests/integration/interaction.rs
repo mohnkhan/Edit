@@ -57,13 +57,13 @@ fn single_click_after_multiclick_clears_selection() {
 fn clicking_encoding_row_selects_it() {
     use edit::ui::dialog::encoding_dialog_rect;
     let mut a = app();
-    a.pending_encoding_select = Some(0);
+    a.set_encoding_select(0);
     let rect = encoding_dialog_rect(ratatui::layout::Rect::new(0, 0, 80, 24));
     // Click the third option row (index 2) inside the dialog interior.
     let row = rect.y + 1 + 2;
     let col = rect.x + 3;
     press(&mut a, MouseButton::Left, col, row);
-    assert_eq!(a.pending_encoding_select, Some(2));
+    assert_eq!(a.encoding_select_row(), Some(2));
     // Focus moved to the list (primary control), not a button.
     assert!(a.interactive_focus_is_button().is_none());
 }
@@ -84,10 +84,7 @@ fn right_click_opens_menu_and_copy_runs_and_esc_dismisses() {
     // Navigate to Copy (index 1) and activate via keyboard.
     key(&mut a, Action::MoveDown); // focus 1 = Copy
     key(&mut a, Action::InsertNewline); // activate
-    assert!(
-        a.context_menu().is_none(),
-        "menu closes after activation"
-    );
+    assert!(a.context_menu().is_none(), "menu closes after activation");
 
     // Re-open and dismiss with Esc.
     press(&mut a, MouseButton::Right, 5, 5);
@@ -107,8 +104,5 @@ fn right_click_does_not_open_over_a_modal() {
     let mut a = app();
     a.pending_help = Some(edit::app::HelpScreen::Help);
     press(&mut a, MouseButton::Right, 5, 5);
-    assert!(
-        a.context_menu().is_none(),
-        "no context menu over a modal"
-    );
+    assert!(a.context_menu().is_none(), "no context menu over a modal");
 }

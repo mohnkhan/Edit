@@ -24,7 +24,7 @@ fn save_browser_typing_accumulates_in_filename() {
     // Simulate stale focus left on a button by a previously-used dialog.
     a.dialog_focus = 2;
     a.dialog_focus_init = false;
-    a.file_browser = Some(FileBrowser::open(
+    a.open_file_browser(FileBrowser::open(
         std::path::PathBuf::from("."),
         BrowseMode::Save,
     ));
@@ -34,7 +34,7 @@ fn save_browser_typing_accumulates_in_filename() {
     }
 
     assert_eq!(
-        a.file_browser.as_ref().unwrap().filename,
+        a.file_browser().unwrap().filename,
         "report.txt",
         "typed characters must reach the filename field"
     );
