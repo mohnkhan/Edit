@@ -31,6 +31,7 @@ fn sample_session() -> SessionData {
             path: "/tmp/hello.txt".to_string(),
             cursor_line: 3,
             cursor_col: 7,
+            soft_wrap: false,
         }],
     }
 }
@@ -166,11 +167,13 @@ fn test_partial_restore_skips_missing() {
                     path: real_file.to_string_lossy().into_owned(),
                     cursor_line: 1,
                     cursor_col: 1,
+                    soft_wrap: false,
                 },
                 BufferEntry {
                     path: "/nonexistent/ghost/file_xyz_abc.txt".to_string(),
                     cursor_line: 1,
                     cursor_col: 1,
+                    soft_wrap: false,
                 },
             ],
         };
@@ -197,6 +200,57 @@ fn test_partial_restore_skips_missing() {
             msg.contains("not found") || msg.contains("ghost"),
             "status message should mention the missing file; got: {:?}",
             msg
+        );
+    });
+}
+
+// Feature 045 — restore applies each tab's persisted soft-wrap setting.
+#[test]
+fn test_restore_applies_per_tab_soft_wrap() {
+    use edit::config::Config;
+    use edit::encoding::encoding_from_str;
+
+    with_temp_state(|tmp| {
+        let wrapped = tmp.join("wrapped.txt");
+        let plain = tmp.join("plain.txt");
+        std::fs::write(&wrapped, b"long line content").unwrap();
+        std::fs::write(&plain, b"short").unwrap();
+
+        let data = SessionData {
+            version: 2,
+            active_buffer: 0,
+            split_layout: SplitLayoutKind::None,
+            active_pane: 0,
+            buffers: vec![
+                BufferEntry {
+                    path: wrapped.to_string_lossy().into_owned(),
+                    cursor_line: 1,
+                    cursor_col: 1,
+                    soft_wrap: true,
+                },
+                BufferEntry {
+                    path: plain.to_string_lossy().into_owned(),
+                    cursor_line: 1,
+                    cursor_col: 1,
+                    soft_wrap: false,
+                },
+            ],
+        };
+        save_session(&data).unwrap();
+
+        let enc = encoding_from_str("utf-8");
+        let session = load_session().unwrap().expect("session should exist");
+        let mut app = edit::app::App::new(Config::default(), vec![], enc, Some(session), None);
+        app.do_restore_session();
+
+        assert_eq!(app.buffers.len(), 2, "both files restored");
+        assert!(
+            app.buffers[0].soft_wrap,
+            "tab 0 restored to its saved wrapped state"
+        );
+        assert!(
+            !app.buffers[1].soft_wrap,
+            "tab 1 restored to its saved unwrapped state"
         );
     });
 }

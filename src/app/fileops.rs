@@ -81,6 +81,8 @@ impl App {
                     path: path.to_string_lossy().into_owned(),
                     cursor_line: (buf.cursor.line + 1) as u32,
                     cursor_col: (buf.cursor.grapheme_col + 1) as u32,
+                    // Feature 045: persist this tab's wrap setting.
+                    soft_wrap: buf.soft_wrap,
                 })
             })
             .collect();
@@ -107,7 +109,8 @@ impl App {
         };
 
         Some(SessionData {
-            version: 1,
+            // Feature 045: schema v2 adds per-tab `soft_wrap` (v1 files still load).
+            version: 2,
             active_buffer: self.active_idx,
             split_layout,
             active_pane,
@@ -174,6 +177,9 @@ impl App {
                         grapheme_col: clamped_gcol,
                         visual_col: vcol,
                     };
+                    // Feature 045: restore this tab's saved soft-wrap setting
+                    // (v1 sessions have no value → `false` → the configured default).
+                    buf.soft_wrap = entry.soft_wrap;
                     // Apply syntax highlighting if configured (plugin highlighter wins).
                     if self.config.highlight {
                         if let Some(ref path) = buf.path.clone() {
